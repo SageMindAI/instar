@@ -1,7 +1,7 @@
 {
   "name": "claude-agent-kit",
   "version": "0.1.0",
-  "description": "Bootstrap persistent agent infrastructure into any Claude Code project",
+  "description": "Give any Claude Code agent a persistent body",
   "type": "module",
   "main": "dist/index.js",
   "bin": {

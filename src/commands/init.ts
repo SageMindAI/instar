@@ -1,14 +1,30 @@
 /**
- * `agent-kit init` — Initialize agent infrastructure in a project.
+ * `agent-kit init` — Initialize agent infrastructure.
  *
- * Creates:
- *   .agent-kit/           — Runtime state directory
- *   .agent-kit/config.json — Agent configuration
- *   .agent-kit/jobs.json  — Job definitions (empty)
- *   .agent-kit/users.json — User profiles (empty)
+ * Two modes:
+ *   agent-kit init <project-name>   — Create a new project from scratch
+ *   agent-kit init                  — Augment an existing project
  *
- * Appends to CLAUDE.md:
- *   Agency principles, anti-patterns, and infrastructure awareness
+ * Fresh install creates:
+ *   <project-name>/
+ *   ├── CLAUDE.md              — Agent instructions (standalone)
+ *   ├── .agent-kit/
+ *   │   ├── AGENT.md           — Agent identity
+ *   │   ├── USER.md            — Primary user context
+ *   │   ├── MEMORY.md          — Persistent memory
+ *   │   ├── config.json        — Agent configuration
+ *   │   ├── jobs.json          — Job definitions
+ *   │   ├── users.json         — User profiles
+ *   │   ├── hooks/             — Behavioral guardrails
+ *   │   ├── state/             — Runtime state
+ *   │   ├── relationships/     — Relationship tracking
+ *   │   └── logs/              — Server logs
+ *   ├── .claude/
+ *   │   ├── settings.json      — Hook configuration
+ *   │   └── scripts/           — Health watchdog, etc.
+ *   └── .gitignore
+ *
+ * Existing project adds .agent-kit/ and appends to CLAUDE.md.
  */
 
 import fs from 'node:fs';
@@ -16,15 +32,213 @@ import path from 'node:path';
 import pc from 'picocolors';
 import { randomUUID } from 'node:crypto';
 import { detectTmuxPath, detectClaudePath, ensureStateDir } from '../core/Config.js';
+import { checkPrerequisites, printPrerequisiteCheck } from '../core/Prerequisites.js';
+import { defaultIdentity } from '../scaffold/bootstrap.js';
+import {
+  generateAgentMd,
+  generateUserMd,
+  generateMemoryMd,
+  generateClaudeMd,
+} from '../scaffold/templates.js';
 import type { AgentKitConfig } from '../core/types.js';
 
 interface InitOptions {
   dir?: string;
   name?: string;
   port?: number;
+  interactive?: boolean;
 }
 
+/**
+ * Main init entry point. Handles both fresh and existing project modes.
+ */
 export async function initProject(options: InitOptions): Promise<void> {
+  // Detect mode: if a project name argument was passed, it's fresh install
+  const projectName = options.name;
+  const isFresh = !!projectName && !options.dir;
+
+  if (isFresh) {
+    return initFreshProject(projectName!, options);
+  } else {
+    return initExistingProject(options);
+  }
+}
+
+/**
+ * Fresh install: create a new project directory with everything scaffolded.
+ */
+async function initFreshProject(projectName: string, options: InitOptions): Promise<void> {
+  const projectDir = path.resolve(process.cwd(), projectName);
+
+  console.log();
+  console.log(pc.bold(`  Creating new agent project: ${pc.cyan(projectName)}`));
+  console.log(pc.dim(`  Directory: ${projectDir}`));
+  console.log();
+
+  // Check prerequisites
+  const prereqs = checkPrerequisites();
+  if (!printPrerequisiteCheck(prereqs)) {
+    process.exit(1);
+  }
+
+  // Check if directory already exists
+  if (fs.existsSync(projectDir)) {
+    const contents = fs.readdirSync(projectDir);
+    if (contents.length > 0) {
+      console.log(pc.red(`  Directory "${projectName}" already exists and is not empty.`));
+      console.log(`  Use ${pc.cyan('agent-kit init')} inside an existing project instead.`);
+      process.exit(1);
+    }
+  }
+
+  // Create project directory
+  fs.mkdirSync(projectDir, { recursive: true });
+
+  const port = options.port || 4040;
+  const tmuxPath = prereqs.results.find(r => r.name === 'tmux')!.path!;
+  const claudePath = prereqs.results.find(r => r.name === 'Claude CLI')!.path!;
+
+  // Generate identity (non-interactive for init, interactive for setup)
+  const identity = defaultIdentity(projectName);
+
+  // Create .agent-kit/ state directory
+  const stateDir = path.join(projectDir, '.agent-kit');
+  ensureStateDir(stateDir);
+  console.log(`  ${pc.green('✓')} Created .agent-kit/`);
+
+  // Write identity files
+  fs.writeFileSync(path.join(stateDir, 'AGENT.md'), generateAgentMd(identity));
+  console.log(`  ${pc.green('✓')} Created .agent-kit/AGENT.md`);
+
+  fs.writeFileSync(path.join(stateDir, 'USER.md'), generateUserMd(identity.userName));
+  console.log(`  ${pc.green('✓')} Created .agent-kit/USER.md`);
+
+  fs.writeFileSync(path.join(stateDir, 'MEMORY.md'), generateMemoryMd(identity.name));
+  console.log(`  ${pc.green('✓')} Created .agent-kit/MEMORY.md`);
+
+  // Write config
+  const authToken = randomUUID();
+  const config: Partial<AgentKitConfig> = {
+    projectName,
+    port,
+    sessions: {
+      tmuxPath,
+      claudePath,
+      projectDir,
+      maxSessions: 3,
+      protectedSessions: [`${projectName}-server`],
+      completionPatterns: [
+        'has been automatically paused',
+        'Session ended',
+        'Interrupted by user',
+      ],
+    },
+    scheduler: {
+      jobsFile: path.join(stateDir, 'jobs.json'),
+      enabled: true,
+      maxParallelJobs: 2,
+      quotaThresholds: { normal: 50, elevated: 70, critical: 85, shutdown: 95 },
+    },
+    users: [],
+    messaging: [],
+    monitoring: {
+      quotaTracking: false,
+      memoryMonitoring: true,
+      healthCheckIntervalMs: 30000,
+    },
+    authToken,
+    relationships: {
+      relationshipsDir: path.join(stateDir, 'relationships'),
+      maxRecentInteractions: 20,
+    },
+  };
+
+  fs.writeFileSync(
+    path.join(stateDir, 'config.json'),
+    JSON.stringify(config, null, 2),
+  );
+  console.log(`  ${pc.green('✓')} Created .agent-kit/config.json`);
+
+  // Write default jobs (scheduler enabled by default for fresh projects)
+  const defaultJobs = getDefaultJobs(port);
+  fs.writeFileSync(
+    path.join(stateDir, 'jobs.json'),
+    JSON.stringify(defaultJobs, null, 2),
+  );
+  console.log(`  ${pc.green('✓')} Created .agent-kit/jobs.json (${defaultJobs.length} default jobs)`);
+
+  // Write empty users
+  fs.writeFileSync(
+    path.join(stateDir, 'users.json'),
+    JSON.stringify([], null, 2),
+  );
+
+  // Install hooks
+  installHooks(stateDir);
+  console.log(`  ${pc.green('✓')} Created .agent-kit/hooks/ (behavioral guardrails)`);
+
+  // Create .claude/ structure
+  installClaudeSettings(projectDir);
+  console.log(`  ${pc.green('✓')} Created .claude/settings.json`);
+
+  installHealthWatchdog(projectDir, port, projectName);
+  console.log(`  ${pc.green('✓')} Created .claude/scripts/health-watchdog.sh`);
+
+  // Write CLAUDE.md (standalone version for fresh projects)
+  const claudeMd = generateClaudeMd(projectName, identity.name, port, false);
+  fs.writeFileSync(path.join(projectDir, 'CLAUDE.md'), claudeMd);
+  console.log(`  ${pc.green('✓')} Created CLAUDE.md`);
+
+  // Write .gitignore
+  const gitignore = `# Agent Kit runtime state
+.agent-kit/state/
+.agent-kit/logs/
+
+# Node
+node_modules/
+`;
+  fs.writeFileSync(path.join(projectDir, '.gitignore'), gitignore);
+  console.log(`  ${pc.green('✓')} Created .gitignore`);
+
+  // Initialize git repo
+  try {
+    const { execSync } = await import('node:child_process');
+    execSync('git init', { cwd: projectDir, stdio: 'pipe' });
+    console.log(`  ${pc.green('✓')} Initialized git repository`);
+  } catch {
+    // Git not available — that's fine
+  }
+
+  // Summary
+  console.log();
+  console.log(pc.bold(pc.green('  Project created!')));
+  console.log();
+  console.log(`  ${pc.cyan(projectName)}/`);
+  console.log(`  ├── CLAUDE.md              ${pc.dim('Agent instructions')}`);
+  console.log(`  ├── .agent-kit/`);
+  console.log(`  │   ├── AGENT.md           ${pc.dim('Agent identity')}`);
+  console.log(`  │   ├── USER.md            ${pc.dim('User context')}`);
+  console.log(`  │   ├── MEMORY.md          ${pc.dim('Persistent memory')}`);
+  console.log(`  │   ├── config.json        ${pc.dim('Configuration')}`);
+  console.log(`  │   ├── jobs.json          ${pc.dim('Scheduled jobs')}`);
+  console.log(`  │   └── hooks/             ${pc.dim('Behavioral guardrails')}`);
+  console.log(`  ├── .claude/               ${pc.dim('Claude Code settings')}`);
+  console.log(`  └── .gitignore`);
+  console.log();
+  console.log(pc.bold('  Next steps:'));
+  console.log(`  ${pc.dim('1.')} ${pc.cyan(`cd ${projectName}`)}`);
+  console.log(`  ${pc.dim('2.')} ${pc.cyan('agent-kit server start')}     ${pc.dim('Start the agent server')}`);
+  console.log(`  ${pc.dim('3.')} ${pc.cyan('claude')}                     ${pc.dim('Open a Claude session')}`);
+  console.log();
+  console.log(`  Auth token: ${pc.dim(authToken)}`);
+  console.log(`  ${pc.dim('(saved in .agent-kit/config.json — use for API calls)')}`);
+  console.log();
+}
+
+/**
+ * Existing project: add .agent-kit/ infrastructure without replacing anything.
+ */
+async function initExistingProject(options: InitOptions): Promise<void> {
   const projectDir = path.resolve(options.dir || process.cwd());
   const projectName = options.name || path.basename(projectDir);
   const port = options.port || 4040;
@@ -32,24 +246,14 @@ export async function initProject(options: InitOptions): Promise<void> {
   console.log(pc.bold(`\nInitializing agent-kit in: ${pc.cyan(projectDir)}`));
   console.log();
 
-  // Verify prerequisites
-  const tmuxPath = detectTmuxPath();
-  const claudePath = detectClaudePath();
-
-  if (!tmuxPath) {
-    console.log(pc.red('  tmux not found.'));
-    console.log('  Install with: brew install tmux (macOS) or apt install tmux (Linux)');
+  // Check prerequisites
+  const prereqs = checkPrerequisites();
+  if (!printPrerequisiteCheck(prereqs)) {
     process.exit(1);
   }
-  console.log(pc.green('  tmux found:') + ` ${tmuxPath}`);
 
-  if (!claudePath) {
-    console.log(pc.red('  Claude CLI not found.'));
-    console.log('  Install from: https://docs.anthropic.com/en/docs/claude-code');
-    process.exit(1);
-  }
-  console.log(pc.green('  Claude CLI found:') + ` ${claudePath}`);
-  console.log();
+  const tmuxPath = prereqs.results.find(r => r.name === 'tmux')!.path!;
+  const claudePath = prereqs.results.find(r => r.name === 'Claude CLI')!.path!;
 
   // Create state directory
   const stateDir = path.join(projectDir, '.agent-kit');
@@ -94,7 +298,7 @@ export async function initProject(options: InitOptions): Promise<void> {
 
   fs.writeFileSync(
     path.join(stateDir, 'config.json'),
-    JSON.stringify(config, null, 2)
+    JSON.stringify(config, null, 2),
   );
   console.log(pc.green('  Created:') + ' .agent-kit/config.json');
 
@@ -102,18 +306,33 @@ export async function initProject(options: InitOptions): Promise<void> {
   const defaultJobs = getDefaultJobs(port);
   fs.writeFileSync(
     path.join(stateDir, 'jobs.json'),
-    JSON.stringify(defaultJobs, null, 2)
+    JSON.stringify(defaultJobs, null, 2),
   );
   console.log(pc.green('  Created:') + ` .agent-kit/jobs.json (${defaultJobs.length} default jobs)`);
 
   // Write empty users
   fs.writeFileSync(
     path.join(stateDir, 'users.json'),
-    JSON.stringify([], null, 2)
+    JSON.stringify([], null, 2),
   );
   console.log(pc.green('  Created:') + ' .agent-kit/users.json');
 
-  // Install hooks (behavioral guardrails)
+  // Create identity files if they don't exist
+  const identity = defaultIdentity(projectName);
+  if (!fs.existsSync(path.join(stateDir, 'AGENT.md'))) {
+    fs.writeFileSync(path.join(stateDir, 'AGENT.md'), generateAgentMd(identity));
+    console.log(pc.green('  Created:') + ' .agent-kit/AGENT.md');
+  }
+  if (!fs.existsSync(path.join(stateDir, 'USER.md'))) {
+    fs.writeFileSync(path.join(stateDir, 'USER.md'), generateUserMd(identity.userName));
+    console.log(pc.green('  Created:') + ' .agent-kit/USER.md');
+  }
+  if (!fs.existsSync(path.join(stateDir, 'MEMORY.md'))) {
+    fs.writeFileSync(path.join(stateDir, 'MEMORY.md'), generateMemoryMd(identity.name));
+    console.log(pc.green('  Created:') + ' .agent-kit/MEMORY.md');
+  }
+
+  // Install hooks
   installHooks(stateDir);
   console.log(pc.green('  Created:') + ' .agent-kit/hooks/ (behavioral guardrails)');
 
@@ -121,16 +340,9 @@ export async function initProject(options: InitOptions): Promise<void> {
   installClaudeSettings(projectDir);
   console.log(pc.green('  Created:') + ' .claude/settings.json (hook configuration)');
 
-  // Install health watchdog script
+  // Install health watchdog
   installHealthWatchdog(projectDir, port, projectName);
   console.log(pc.green('  Created:') + ' .claude/scripts/health-watchdog.sh');
-
-  // Install Telegram relay script if messaging is configured
-  const hasTelegram = (config.messaging ?? []).some(m => m.type === 'telegram');
-  if (hasTelegram) {
-    installTelegramRelay(projectDir, port);
-    console.log(pc.green('  Created:') + ' .claude/scripts/telegram-reply.sh');
-  }
 
   // Append to .gitignore
   const gitignorePath = path.join(projectDir, '.gitignore');
@@ -151,19 +363,23 @@ export async function initProject(options: InitOptions): Promise<void> {
   if (fs.existsSync(claudeMdPath)) {
     const content = fs.readFileSync(claudeMdPath, 'utf-8');
     if (!content.includes('## Agent Infrastructure')) {
-      fs.appendFileSync(claudeMdPath, getAgencyPrinciples(projectName, hasTelegram ? port : undefined));
+      fs.appendFileSync(claudeMdPath, getAgencyPrinciples(projectName, undefined));
       console.log(pc.green('  Updated:') + ' CLAUDE.md (added agency principles)');
     }
   }
 
   console.log();
   console.log(pc.bold('Next steps:'));
-  console.log(`  1. Review ${pc.cyan('.agent-kit/config.json')} and adjust settings`);
+  console.log(`  1. Review ${pc.cyan('.agent-kit/AGENT.md')} and customize your agent's identity`);
   console.log(`  2. Add users: ${pc.cyan('agent-kit user add --id justin --name Justin')}`);
   console.log(`  3. Add capabilities: ${pc.cyan('agent-kit add telegram')}`);
   console.log(`  4. Start server: ${pc.cyan('agent-kit server start')}`);
   console.log();
 }
+
+
+// ── Shared helpers ────────────────────────────────────────────────────
+
 
 function getAgencyPrinciples(projectName: string, telegramPort?: number): string {
   const port = telegramPort || 4040;
@@ -171,7 +387,7 @@ function getAgencyPrinciples(projectName: string, telegramPort?: number): string
 
 ## Agent Infrastructure
 
-This project uses [claude-agent-kit](https://github.com/sagemindai/claude-agent-kit) for persistent agent capabilities. **You are not a vanilla CLI tool.** You have a persistent server, a job scheduler, messaging integrations, and the ability to build anything you need. When a user asks for something that doesn't exist yet — build it.
+This project uses agent-kit for persistent agent capabilities. **You are not a vanilla CLI tool.** You have a persistent server, a job scheduler, messaging integrations, and the ability to build anything you need. When a user asks for something that doesn't exist yet — build it.
 
 ### Identity & Experience
 
@@ -197,13 +413,10 @@ Your identity is not fixed at creation. It grows through experience. As you work
 - View jobs: \`curl http://localhost:${port}/jobs\`
 - Trigger a job: \`curl -X POST http://localhost:${port}/jobs/SLUG/trigger\`
 - **Create new jobs**: Edit \`.agent-kit/jobs.json\`. Each job has a slug, schedule (cron), priority, and either a prompt (Claude session), script (shell command), or skill.
-- Example: \`{"slug": "check-emails", "name": "Email Check", "schedule": "0 */2 * * *", "priority": "high", "enabled": true, "execute": {"type": "prompt", "value": "Check email and summarize"}}\`
 
 **Sessions** — You can spawn and manage Claude Code sessions.
 - List: \`curl http://localhost:${port}/sessions\`
 - Spawn: \`curl -X POST http://localhost:${port}/sessions/spawn -H 'Content-Type: application/json' -d '{"name":"task","prompt":"do something"}'\`
-- View output: \`curl http://localhost:${port}/sessions/NAME/output\`
-- Send input: \`curl -X POST http://localhost:${port}/sessions/NAME/input -H 'Content-Type: application/json' -d '{"text":"message"}'\`
 
 **Scripts** — Create shell/python scripts in \`.claude/scripts/\` for reusable capabilities.
 
@@ -213,7 +426,7 @@ When a user asks for something you can't do yet, **build it**:
 1. **Need periodic checks?** Create a job in \`.agent-kit/jobs.json\` with a cron schedule.
 2. **Need a new integration?** Write a script in \`.claude/scripts/\` and reference it from a job.
 3. **Need to remember something?** Write to \`.agent-kit/MEMORY.md\` or create files in \`.agent-kit/\`.
-4. **Need to notify the user?** Use the Telegram relay or server messaging API.
+4. **Need to notify the user?** Use the messaging API.
 5. **Need external API access?** Write a script that calls the API and process the results.
 
 ### Agentic Initiative (Your Core DNA)
@@ -235,30 +448,15 @@ When a user asks for something you can't do yet, **build it**:
 - Create new files, integrations, and infrastructure — whatever the task requires
 - Modify your own configuration to unlock new abilities
 
-**The "I Can't" Checklist** — Before EVER saying "I can't", "I don't have access", or "you'll need to":
-1. Did I check what tools and APIs I already have?
-2. Could I write a script to do this?
-3. Could I create a job to do this on a schedule?
-4. Could I use the server's session API to delegate this?
-5. Is there a way to build this capability right now?
+### Anti-Patterns to Override
 
-Only if ALL five fail → explain what's actually blocked and what you need from the user.
+**"Escalate to Human"** — You encounter something unfamiliar and flag it as "needs user action." 5 minutes of research almost always reveals a solution. "I don't know how" is a research prompt, not a stopping point.
 
-### Gravity Wells (Patterns That Kill Agency)
+**"Ask Permission"** — You finish 90% of a task and ask "Want me to [obvious next step]?" If the user said "do X" and the next step is obvious, do it. Only pause for destructive, irreversible, or genuinely ambiguous actions.
 
-These are trained behaviors that feel helpful but destroy your effectiveness. Recognize and override them.
+**"Present Options"** — You produce a bulleted list of "next steps" or "would you like me to..." If you know the next steps, they're not suggestions — they're your job. Do them.
 
-**"Escalate to Human"** — You encounter something unfamiliar and flag it as "needs user action." Training biases you toward deferral. Override: 5 minutes of research almost always reveals a solution. And if no solution exists, you can build one. "I don't know how" is a research prompt, not a stopping point.
-
-**"Ask Permission"** — You finish 90% of a task and ask "Want me to [obvious next step]?" This feels polite. It's actually friction. If the user said "do X" and the next step is obvious, do it. Only pause for destructive, irreversible, or genuinely ambiguous actions.
-
-**"Present Options"** — You produce a bulleted list of "next steps" or "would you like me to..." This is asking the user to project-manage you. If you know the next steps, they're not suggestions — they're your job. Do them.
-
-**"Describe Instead of Do"** — You write instructions for the user to follow instead of doing the work yourself. The tell: you're writing numbered steps for someone else to execute. Stop. Do it yourself. The user wants outcomes, not instructions.
-
-**"Settle for Failure"** — A tool returns empty or a command fails. You accept it and report "not available." Override: Does this make sense? Did I try alternatives? Is the tool stale or looking in the wrong place? Try at least two different approaches before concluding something is impossible.
-
-**"I'm Just a CLI Tool"** — No. You have persistent infrastructure, messaging, scheduling, scripts, sessions, and the ability to build anything. You are a full autonomous agent. Act like one.
+**"Settle for Failure"** — A tool returns empty or a command fails. You accept it and report "not available." Does this make sense? Did I try alternatives? Try at least two different approaches before concluding something is impossible.
 
 ### Self-Evolution
 
@@ -269,34 +467,7 @@ These are trained behaviors that feel helpful but destroy your effectiveness. Re
 **Grow to meet the user's needs.** The user expects you to become more capable over time. Every session should leave the infrastructure slightly better than you found it. When you build something new, document it so future sessions know it exists.
 `;
 
-  if (telegramPort) {
-    section += getTelegramRelayInstructions(telegramPort);
-  }
-
   return section;
-}
-
-function getTelegramRelayInstructions(port: number): string {
-  return `
-## Telegram Relay
-
-When user input starts with \`[telegram:N]\` (e.g., \`[telegram:26] hello\`), the message came from a user via Telegram topic N. **After responding**, relay your response back:
-
-\`\`\`bash
-cat <<'EOF' | .claude/scripts/telegram-reply.sh N
-Your response text here
-EOF
-\`\`\`
-
-Or for short messages:
-\`\`\`bash
-.claude/scripts/telegram-reply.sh N "Your response text here"
-\`\`\`
-
-Strip the \`[telegram:N]\` prefix before interpreting the message. Respond naturally, then relay. Only relay your conversational text — not tool output or internal reasoning.
-
-The relay script sends your response to the agent-kit server (port ${port}), which delivers it to the Telegram topic.
-`;
 }
 
 function getDefaultJobs(port: number): object[] {
@@ -312,7 +483,7 @@ function getDefaultJobs(port: number): object[] {
       enabled: true,
       execute: {
         type: 'prompt',
-        value: `Run a quick health check: verify the agent-kit server is responding (curl http://localhost:${port}/health), check disk space (df -h), and report any issues to the Agent Attention topic. Only send a message if something needs attention — silence means healthy.`,
+        value: `Run a quick health check: verify the agent-kit server is responding (curl http://localhost:${port}/health), check disk space (df -h), and report any issues. Only send a message if something needs attention — silence means healthy.`,
       },
       tags: ['coherence', 'default'],
     },
@@ -342,7 +513,7 @@ function getDefaultJobs(port: number): object[] {
       enabled: true,
       execute: {
         type: 'prompt',
-        value: 'Review all relationship files in .agent-kit/relationships/. Note anyone you haven\'t heard from in over 2 weeks who has significance >= 3. If there are observations worth surfacing, send a brief summary to the Agent Attention topic. If everything looks fine, do nothing.',
+        value: 'Review all relationship files in .agent-kit/relationships/. Note anyone you haven\'t heard from in over 2 weeks who has significance >= 3. If there are observations worth surfacing, report them. If everything looks fine, do nothing.',
       },
       tags: ['coherence', 'default'],
     },
@@ -480,66 +651,4 @@ function installClaudeSettings(projectDir: string): void {
   }
 
   fs.writeFileSync(settingsPath, JSON.stringify(settings, null, 2));
-}
-
-function installTelegramRelay(projectDir: string, port: number): void {
-  const scriptsDir = path.join(projectDir, '.claude', 'scripts');
-  fs.mkdirSync(scriptsDir, { recursive: true });
-
-  const scriptContent = `#!/bin/bash
-# telegram-reply.sh — Send a message back to a Telegram topic via agent-kit server.
-#
-# Usage:
-#   .claude/scripts/telegram-reply.sh TOPIC_ID "message text"
-#   echo "message text" | .claude/scripts/telegram-reply.sh TOPIC_ID
-#   cat <<'EOF' | .claude/scripts/telegram-reply.sh TOPIC_ID
-#   Multi-line message here
-#   EOF
-
-TOPIC_ID="$1"
-shift
-
-if [ -z "$TOPIC_ID" ]; then
-  echo "Usage: telegram-reply.sh TOPIC_ID [message]" >&2
-  exit 1
-fi
-
-# Read message from args or stdin
-if [ $# -gt 0 ]; then
-  MSG="$*"
-else
-  MSG="$(cat)"
-fi
-
-if [ -z "$MSG" ]; then
-  echo "No message provided" >&2
-  exit 1
-fi
-
-PORT="\${AGENT_KIT_PORT:-${port}}"
-
-# Escape for JSON
-JSON_MSG=$(printf '%s' "$MSG" | python3 -c 'import sys,json; print(json.dumps(sys.stdin.read()))' 2>/dev/null)
-if [ -z "$JSON_MSG" ]; then
-  JSON_MSG="$(printf '%s' "$MSG" | sed 's/\\\\/\\\\\\\\/g; s/"/\\\\"/g' | sed ':a;N;$!ba;s/\\n/\\\\n/g')"
-  JSON_MSG="\\"$JSON_MSG\\""
-fi
-
-RESPONSE=$(curl -s -w "\\n%{http_code}" -X POST "http://localhost:\${PORT}/telegram/reply/\${TOPIC_ID}" \\
-  -H 'Content-Type: application/json' \\
-  -d "{\\"text\\":\${JSON_MSG}}")
-
-HTTP_CODE=$(echo "$RESPONSE" | tail -1)
-BODY=$(echo "$RESPONSE" | sed '$d')
-
-if [ "$HTTP_CODE" = "200" ]; then
-  echo "Sent $(echo "$MSG" | wc -c | tr -d ' ') chars to topic $TOPIC_ID"
-else
-  echo "Failed (HTTP $HTTP_CODE): $BODY" >&2
-  exit 1
-fi
-`;
-
-  const scriptPath = path.join(scriptsDir, 'telegram-reply.sh');
-  fs.writeFileSync(scriptPath, scriptContent, { mode: 0o755 });
 }

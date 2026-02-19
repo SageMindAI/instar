@@ -1,21 +1,19 @@
 #!/usr/bin/env node
 
 /**
- * agent-kit CLI — Bootstrap persistent agent infrastructure into any Claude Code project.
+ * agent-kit CLI — Give any Claude Code project a persistent body.
  *
  * Usage:
- *   agent-kit init                    # Initialize agent infrastructure in current project
- *   agent-kit init --dir /path/to/repo
- *   agent-kit add telegram            # Add Telegram messaging adapter
- *   agent-kit add email               # Add email integration
- *   agent-kit add sentry              # Add Sentry error monitoring
- *   agent-kit add quota               # Add quota tracking
+ *   agent-kit init my-project         # Create a new agent project from scratch
+ *   agent-kit init                    # Add agent infrastructure to existing project
+ *   agent-kit setup                   # Interactive setup wizard
  *   agent-kit server start            # Start the persistent agent server
  *   agent-kit server stop             # Stop the server
  *   agent-kit status                  # Show agent infrastructure status
  *   agent-kit user add                # Add a user profile
  *   agent-kit job add                 # Add a job definition
  *   agent-kit job list                # List all jobs
+ *   agent-kit add telegram            # Add Telegram messaging adapter
  */
 
 import { Command } from 'commander';
@@ -30,7 +28,7 @@ const program = new Command();
 
 program
   .name('agent-kit')
-  .description('Bootstrap persistent agent infrastructure into any Claude Code project')
+  .description('Give any Claude Code project a persistent body')
   .version('0.1.0')
   .option('--classic', 'Use the classic inquirer-based setup wizard instead of Claude')
   .action((opts) => runSetup(opts)); // Default: run interactive setup when no subcommand given
@@ -43,15 +41,18 @@ program
   .option('--classic', 'Use the classic inquirer-based setup wizard instead of Claude')
   .action((opts) => runSetup(opts));
 
-// ── Init (non-interactive) ────────────────────────────────────────
+// ── Init ─────────────────────────────────────────────────────────
 
 program
-  .command('init')
-  .description('Initialize with defaults (non-interactive, use flags to configure)')
+  .command('init [project-name]')
+  .description('Initialize agent infrastructure (fresh project or existing)')
   .option('-d, --dir <path>', 'Project directory (default: current directory)')
-  .option('-n, --name <name>', 'Project name (default: directory name)')
   .option('--port <port>', 'Server port (default: 4040)', parseInt)
-  .action(initProject);
+  .action((projectName, opts) => {
+    // If a project name is given, it's a fresh install
+    // Otherwise, augment the current directory
+    initProject({ ...opts, name: projectName });
+  });
 
 // ── Add ───────────────────────────────────────────────────────────
 
