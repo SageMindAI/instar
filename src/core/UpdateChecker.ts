@@ -122,6 +122,9 @@ export class UpdateChecker {
   private saveState(info: UpdateInfo): void {
     const dir = path.dirname(this.stateFile);
     fs.mkdirSync(dir, { recursive: true });
-    fs.writeFileSync(this.stateFile, JSON.stringify(info, null, 2));
+    // Atomic write: write to .tmp then rename
+    const tmpPath = this.stateFile + '.tmp';
+    fs.writeFileSync(tmpPath, JSON.stringify(info, null, 2));
+    fs.renameSync(tmpPath, this.stateFile);
   }
 }

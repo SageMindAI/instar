@@ -328,11 +328,11 @@ export class JobScheduler {
   /**
    * Called when a job's session completes. Captures output and notifies via messenger.
    */
-  async notifyJobComplete(sessionName: string, tmuxSession: string): Promise<void> {
-    if (!this.messenger) return;
+  async notifyJobComplete(sessionId: string, tmuxSession: string): Promise<void> {
+    if (!this.messenger && !this.telegram) return;
 
     // Find which job this session belongs to by looking up session state
-    const session = this.state.getSession(sessionName);
+    const session = this.state.getSession(sessionId);
     if (!session?.jobSlug) return;
 
     const job = this.jobs.find(j => j.slug === session.jobSlug);

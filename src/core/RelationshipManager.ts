@@ -12,7 +12,7 @@
  * - Context injection before any interaction with a known person
  */
 
-import { existsSync, mkdirSync, readFileSync, writeFileSync, readdirSync, unlinkSync } from 'fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync, renameSync, readdirSync, unlinkSync } from 'fs';
 import { join } from 'path';
 import { randomUUID } from 'crypto';
 import type {
@@ -49,7 +49,10 @@ export class RelationshipManager {
     // Try to resolve by channel first
     const existingId = this.channelIndex.get(channelKey);
     if (existingId) {
-      return this.relationships.get(existingId)!;
+      const existing = this.relationships.get(existingId);
+      if (existing) return existing;
+      // Channel index is stale — clean it up and fall through to create
+      this.channelIndex.delete(channelKey);
     }
 
     // Create new relationship
@@ -319,7 +322,10 @@ export class RelationshipManager {
 
   private save(record: RelationshipRecord): void {
     const filePath = join(this.config.relationshipsDir, `${record.id}.json`);
-    writeFileSync(filePath, JSON.stringify(record, null, 2));
+    // Atomic write: write to .tmp then rename
+    const tmpPath = filePath + '.tmp';
+    writeFileSync(tmpPath, JSON.stringify(record, null, 2));
+    renameSync(tmpPath, filePath);
   }
 
   private deleteFile(id: string): void {
