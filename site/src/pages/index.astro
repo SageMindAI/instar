@@ -7,12 +7,7 @@ import Layout from '../layouts/Layout.astro';
   <nav class="fixed top-0 w-full z-50 border-b border-slate-800/50 bg-[#0a0e17]/80 backdrop-blur-xl">
     <div class="max-w-6xl mx-auto px-6 h-16 flex items-center justify-between">
       <a href="/" class="flex items-center gap-2.5 font-bold text-lg text-slate-100 tracking-tight">
-        <svg viewBox="0 0 32 32" fill="none" class="w-7 h-7" xmlns="http://www.w3.org/2000/svg">
-          <rect width="32" height="32" rx="6" fill="#fbbf24" fill-opacity="0.1"/>
-          <path d="M8 22 L16 8 L24 22" stroke="#fbbf24" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
-          <path d="M11 17 L21 17" stroke="#fbbf24" stroke-width="2" stroke-linecap="round"/>
-          <circle cx="16" cy="12" r="1.5" fill="#fbbf24"/>
-        </svg>
+        <img src="/logo.png" alt="Instar" class="w-7 h-7 rounded" />
         instar
       </a>
       <div class="flex items-center gap-6">
@@ -32,19 +27,20 @@ import Layout from '../layouts/Layout.astro';
   <!-- Hero -->
   <section class="relative pt-32 pb-20 sm:pt-40 sm:pb-28 overflow-hidden">
     <!-- Background glow -->
-    <div class="absolute top-20 left-1/2 -translate-x-1/2 w-[600px] h-[400px] bg-amber-500/5 rounded-full blur-[120px] pointer-events-none"></div>
+    <div class="absolute top-20 left-1/2 -translate-x-1/2 w-[600px] h-[400px] bg-teal-500/5 rounded-full blur-[120px] pointer-events-none"></div>
 
     <div class="max-w-4xl mx-auto px-6 text-center relative">
       <div class="animate-fade-in-up">
-        <div class="inline-flex items-center gap-2 px-3 py-1 rounded-full border border-amber-500/20 bg-amber-500/5 text-amber-400 text-xs font-medium mb-8 tracking-wide">
-          <span class="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse"></span>
+        <img src="/logo.png" alt="Instar mascot" class="w-24 h-24 mx-auto mb-6 drop-shadow-lg" />
+        <div class="inline-flex items-center gap-2 px-3 py-1 rounded-full border border-teal-500/20 bg-teal-500/5 text-teal-400 text-xs font-medium mb-8 tracking-wide">
+          <span class="w-1.5 h-1.5 rounded-full bg-teal-400 animate-pulse"></span>
           v0.1.0 &mdash; Now on npm
         </div>
       </div>
 
       <h1 class="text-4xl sm:text-6xl lg:text-7xl font-extrabold tracking-tight leading-[1.1] mb-6 animate-fade-in-up animate-delay-100">
         <span class="text-slate-100">Give your agent a</span><br/>
-        <span class="bg-gradient-to-r from-amber-300 via-amber-400 to-amber-500 bg-clip-text text-transparent">persistent body</span>
+        <span class="bg-gradient-to-r from-teal-300 via-teal-400 to-teal-500 bg-clip-text text-transparent">persistent body</span>
       </h1>
 
       <p class="text-lg sm:text-xl text-slate-400 max-w-2xl mx-auto mb-10 leading-relaxed animate-fade-in-up animate-delay-200">
@@ -55,10 +51,10 @@ import Layout from '../layouts/Layout.astro';
 
       <!-- Install command -->
       <div class="animate-fade-in-up animate-delay-300">
-        <div class="inline-flex items-center gap-3 bg-slate-800/60 border border-slate-700/50 rounded-lg px-5 py-3 font-mono text-sm sm:text-base group cursor-pointer hover:border-amber-500/30 transition-colors" id="install-cmd">
+        <div class="inline-flex items-center gap-3 bg-slate-800/60 border border-slate-700/50 rounded-lg px-5 py-3 font-mono text-sm sm:text-base group cursor-pointer hover:border-teal-500/30 transition-colors" id="install-cmd">
           <span class="text-slate-500 select-none">$</span>
-          <span class="text-amber-300">npm install -g instar</span>
-          <button class="text-slate-500 hover:text-amber-400 transition-colors ml-2" title="Copy to clipboard" aria-label="Copy install command">
+          <span class="text-teal-300">npm install -g instar</span>
+          <button class="text-slate-500 hover:text-teal-400 transition-colors ml-2" title="Copy to clipboard" aria-label="Copy install command">
             <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg>
           </button>
         </div>
@@ -148,10 +144,10 @@ import Layout from '../layouts/Layout.astro';
         </div>
 
         <!-- With -->
-        <div class="rounded-xl border border-amber-500/20 bg-amber-500/5 p-8 glow-amber">
+        <div class="rounded-xl border border-teal-500/20 bg-teal-500/5 p-8 glow-teal">
           <div class="flex items-center gap-2 mb-4">
-            <div class="w-2 h-2 rounded-full bg-amber-400 animate-pulse"></div>
-            <span class="text-sm font-medium text-amber-400 uppercase tracking-wider">With Instar</span>
+            <div class="w-2 h-2 rounded-full bg-teal-400 animate-pulse"></div>
+            <span class="text-sm font-medium text-teal-400 uppercase tracking-wider">With Instar</span>
           </div>
           <p class="text-slate-200 leading-relaxed">
             Claude Code becomes an agent. It runs in the background, checks your email on a schedule,
@@ -177,9 +173,9 @@ import Layout from '../layouts/Layout.astro';
 
       <div class="grid sm:grid-cols-2 gap-6">
         <!-- Job Scheduler -->
-        <div class="group rounded-xl border border-slate-800 bg-slate-900/40 p-8 hover:border-amber-500/20 transition-colors">
-          <div class="w-10 h-10 rounded-lg bg-amber-500/10 flex items-center justify-center mb-5">
-            <svg class="w-5 h-5 text-amber-400" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>
+        <div class="group rounded-xl border border-slate-800 bg-slate-900/40 p-8 hover:border-teal-500/20 transition-colors">
+          <div class="w-10 h-10 rounded-lg bg-teal-500/10 flex items-center justify-center mb-5">
+            <svg class="w-5 h-5 text-teal-400" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>
           </div>
           <h3 class="text-lg font-semibold text-slate-100 mb-2">Job Scheduler</h3>
           <p class="text-slate-400 text-sm leading-relaxed mb-4">
@@ -189,7 +185,7 @@ import Layout from '../layouts/Layout.astro';
           <div class="terminal text-xs">
             <div class="terminal-header">
               <div class="terminal-dot bg-red-400/60"></div>
-              <div class="terminal-dot bg-amber-400/60"></div>
+              <div class="terminal-dot bg-teal-400/60"></div>
               <div class="terminal-dot bg-green-400/60"></div>
             </div>
             <pre class="p-4 text-slate-300 overflow-x-auto"><code>{`{
@@ -205,9 +201,9 @@ import Layout from '../layouts/Layout.astro';
         </div>
 
         <!-- Session Management -->
-        <div class="group rounded-xl border border-slate-800 bg-slate-900/40 p-8 hover:border-amber-500/20 transition-colors">
-          <div class="w-10 h-10 rounded-lg bg-amber-500/10 flex items-center justify-center mb-5">
-            <svg class="w-5 h-5 text-amber-400" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8m-4-4v4"/></svg>
+        <div class="group rounded-xl border border-slate-800 bg-slate-900/40 p-8 hover:border-teal-500/20 transition-colors">
+          <div class="w-10 h-10 rounded-lg bg-teal-500/10 flex items-center justify-center mb-5">
+            <svg class="w-5 h-5 text-teal-400" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8m-4-4v4"/></svg>
           </div>
           <h3 class="text-lg font-semibold text-slate-100 mb-2">Session Management</h3>
           <p class="text-slate-400 text-sm leading-relaxed mb-4">
@@ -217,7 +213,7 @@ import Layout from '../layouts/Layout.astro';
           <div class="terminal text-xs">
             <div class="terminal-header">
               <div class="terminal-dot bg-red-400/60"></div>
-              <div class="terminal-dot bg-amber-400/60"></div>
+              <div class="terminal-dot bg-teal-400/60"></div>
               <div class="terminal-dot bg-green-400/60"></div>
             </div>
             <pre class="p-4 text-slate-300 overflow-x-auto"><code>{`# Spawn a session
@@ -232,9 +228,9 @@ curl -X POST localhost:4040/sessions/research/input \\
         </div>
 
         <!-- Telegram Integration -->
-        <div class="group rounded-xl border border-slate-800 bg-slate-900/40 p-8 hover:border-amber-500/20 transition-colors">
-          <div class="w-10 h-10 rounded-lg bg-amber-500/10 flex items-center justify-center mb-5">
-            <svg class="w-5 h-5 text-amber-400" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"/></svg>
+        <div class="group rounded-xl border border-slate-800 bg-slate-900/40 p-8 hover:border-teal-500/20 transition-colors">
+          <div class="w-10 h-10 rounded-lg bg-teal-500/10 flex items-center justify-center mb-5">
+            <svg class="w-5 h-5 text-teal-400" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"/></svg>
           </div>
           <h3 class="text-lg font-semibold text-slate-100 mb-2">Telegram Integration</h3>
           <p class="text-slate-400 text-sm leading-relaxed mb-4">
@@ -252,8 +248,8 @@ curl -X POST localhost:4040/sessions/research/input \\
               </div>
             </div>
             <div class="flex items-start gap-3">
-              <div class="w-6 h-6 rounded-full bg-amber-400/20 flex items-center justify-center shrink-0 mt-0.5">
-                <span class="text-xs text-amber-400">A</span>
+              <div class="w-6 h-6 rounded-full bg-teal-400/20 flex items-center justify-center shrink-0 mt-0.5 overflow-hidden">
+                <img src="/logo.png" alt="Agent" class="w-6 h-6" />
               </div>
               <div>
                 <span class="text-slate-400 text-xs">Agent</span>
@@ -264,9 +260,9 @@ curl -X POST localhost:4040/sessions/research/input \\
         </div>
 
         <!-- Identity System -->
-        <div class="group rounded-xl border border-slate-800 bg-slate-900/40 p-8 hover:border-amber-500/20 transition-colors">
-          <div class="w-10 h-10 rounded-lg bg-amber-500/10 flex items-center justify-center mb-5">
-            <svg class="w-5 h-5 text-amber-400" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><path d="M12 2a5 5 0 015 5v3a5 5 0 01-10 0V7a5 5 0 015-5z"/><path d="M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2"/></svg>
+        <div class="group rounded-xl border border-slate-800 bg-slate-900/40 p-8 hover:border-teal-500/20 transition-colors">
+          <div class="w-10 h-10 rounded-lg bg-teal-500/10 flex items-center justify-center mb-5">
+            <svg class="w-5 h-5 text-teal-400" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><path d="M12 2a5 5 0 015 5v3a5 5 0 01-10 0V7a5 5 0 015-5z"/><path d="M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2"/></svg>
           </div>
           <h3 class="text-lg font-semibold text-slate-100 mb-2">Identity &amp; Memory</h3>
           <p class="text-slate-400 text-sm leading-relaxed mb-4">
@@ -276,7 +272,7 @@ curl -X POST localhost:4040/sessions/research/input \\
           <div class="terminal text-xs">
             <div class="terminal-header">
               <div class="terminal-dot bg-red-400/60"></div>
-              <div class="terminal-dot bg-amber-400/60"></div>
+              <div class="terminal-dot bg-teal-400/60"></div>
               <div class="terminal-dot bg-green-400/60"></div>
             </div>
             <pre class="p-4 text-slate-300 overflow-x-auto"><code>{`.instar/
@@ -324,8 +320,8 @@ curl -X POST localhost:4040/sessions/research/input \\
         </div>
 
         <div class="flex items-start gap-4 p-4 rounded-lg border border-slate-800 bg-slate-900/40">
-          <div class="w-8 h-8 rounded-full bg-amber-500/10 flex items-center justify-center shrink-0 mt-0.5">
-            <span class="text-amber-400 font-bold text-sm">3</span>
+          <div class="w-8 h-8 rounded-full bg-teal-500/10 flex items-center justify-center shrink-0 mt-0.5">
+            <span class="text-teal-400 font-bold text-sm">3</span>
           </div>
           <div>
             <p class="text-slate-200 font-medium">Can I build the tool?</p>
@@ -334,8 +330,8 @@ curl -X POST localhost:4040/sessions/research/input \\
         </div>
 
         <div class="flex items-start gap-4 p-4 rounded-lg border border-slate-800 bg-slate-900/40">
-          <div class="w-8 h-8 rounded-full bg-amber-500/10 flex items-center justify-center shrink-0 mt-0.5">
-            <span class="text-amber-400 font-bold text-sm">4</span>
+          <div class="w-8 h-8 rounded-full bg-teal-500/10 flex items-center justify-center shrink-0 mt-0.5">
+            <span class="text-teal-400 font-bold text-sm">4</span>
           </div>
           <div>
             <p class="text-slate-200 font-medium">Can I modify my config to enable it?</p>
@@ -376,7 +372,7 @@ curl -X POST localhost:4040/sessions/research/input \\
           <thead>
             <tr class="border-b border-slate-700">
               <th class="text-left py-3 px-4 text-slate-500 font-medium">Dimension</th>
-              <th class="text-left py-3 px-4 text-amber-400 font-semibold">Instar</th>
+              <th class="text-left py-3 px-4 text-teal-400 font-semibold">Instar</th>
               <th class="text-left py-3 px-4 text-slate-400 font-medium">OpenClaw</th>
             </tr>
           </thead>
@@ -541,8 +537,8 @@ curl -X POST localhost:4040/sessions/research/input \\
         <!-- Step 1 -->
         <div class="flex gap-6">
           <div class="flex flex-col items-center">
-            <div class="w-8 h-8 rounded-full bg-amber-500/10 border border-amber-500/20 flex items-center justify-center shrink-0">
-              <span class="text-amber-400 font-bold text-sm">1</span>
+            <div class="w-8 h-8 rounded-full bg-teal-500/10 border border-teal-500/20 flex items-center justify-center shrink-0">
+              <span class="text-teal-400 font-bold text-sm">1</span>
             </div>
             <div class="w-px h-full bg-slate-800 mt-2"></div>
           </div>
@@ -551,10 +547,10 @@ curl -X POST localhost:4040/sessions/research/input \\
             <div class="terminal text-sm">
               <div class="terminal-header">
                 <div class="terminal-dot bg-red-400/60"></div>
-                <div class="terminal-dot bg-amber-400/60"></div>
+                <div class="terminal-dot bg-teal-400/60"></div>
                 <div class="terminal-dot bg-green-400/60"></div>
               </div>
-              <pre class="p-4 text-slate-300"><code><span class="text-slate-500">$</span> <span class="text-amber-300">npm install -g instar</span></code></pre>
+              <pre class="p-4 text-slate-300"><code><span class="text-slate-500">$</span> <span class="text-teal-300">npm install -g instar</span></code></pre>
             </div>
           </div>
         </div>
@@ -562,8 +558,8 @@ curl -X POST localhost:4040/sessions/research/input \\
         <!-- Step 2 -->
         <div class="flex gap-6">
           <div class="flex flex-col items-center">
-            <div class="w-8 h-8 rounded-full bg-amber-500/10 border border-amber-500/20 flex items-center justify-center shrink-0">
-              <span class="text-amber-400 font-bold text-sm">2</span>
+            <div class="w-8 h-8 rounded-full bg-teal-500/10 border border-teal-500/20 flex items-center justify-center shrink-0">
+              <span class="text-teal-400 font-bold text-sm">2</span>
             </div>
             <div class="w-px h-full bg-slate-800 mt-2"></div>
           </div>
@@ -573,10 +569,10 @@ curl -X POST localhost:4040/sessions/research/input \\
             <div class="terminal text-sm">
               <div class="terminal-header">
                 <div class="terminal-dot bg-red-400/60"></div>
-                <div class="terminal-dot bg-amber-400/60"></div>
+                <div class="terminal-dot bg-teal-400/60"></div>
                 <div class="terminal-dot bg-green-400/60"></div>
               </div>
-              <pre class="p-4 text-slate-300"><code><span class="text-slate-500">$</span> <span class="text-amber-300">instar</span></code></pre>
+              <pre class="p-4 text-slate-300"><code><span class="text-slate-500">$</span> <span class="text-teal-300">instar</span></code></pre>
             </div>
           </div>
         </div>
@@ -599,12 +595,12 @@ curl -X POST localhost:4040/sessions/research/input \\
       <div class="mt-12 grid sm:grid-cols-2 gap-4">
         <div class="rounded-lg border border-slate-800 bg-slate-900/40 p-5">
           <p class="text-sm font-medium text-slate-300 mb-2">Fresh project</p>
-          <code class="text-xs text-amber-300 font-mono">npx instar init my-agent</code>
+          <code class="text-xs text-teal-300 font-mono">npx instar init my-agent</code>
           <p class="text-xs text-slate-500 mt-2">Creates a complete project from scratch</p>
         </div>
         <div class="rounded-lg border border-slate-800 bg-slate-900/40 p-5">
           <p class="text-sm font-medium text-slate-300 mb-2">Existing project</p>
-          <code class="text-xs text-amber-300 font-mono">cd my-project && npx instar init</code>
+          <code class="text-xs text-teal-300 font-mono">cd my-project && npx instar init</code>
           <p class="text-xs text-slate-500 mt-2">Adds autonomy without touching your code</p>
         </div>
       </div>
@@ -648,7 +644,7 @@ curl -X POST localhost:4040/sessions/research/input \\
 
         <div class="rounded-lg border border-slate-800 bg-slate-900/40 p-5">
           <div class="flex items-center gap-2 mb-2">
-            <svg class="w-4 h-4 text-amber-400" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><path d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"/></svg>
+            <svg class="w-4 h-4 text-teal-400" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><path d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"/></svg>
             <p class="text-sm font-medium text-slate-200">Grounding before messaging</p>
           </div>
           <p class="text-xs text-slate-500">Before any external communication, the agent re-reads its identity</p>
@@ -718,7 +714,7 @@ curl -X POST localhost:4040/sessions/research/input \\
           you spin up and throw away.
         </p>
 
-        <div class="border-l-2 border-amber-500/30 pl-6 my-8">
+        <div class="border-l-2 border-teal-500/30 pl-6 my-8">
           <p class="text-slate-300 italic">
             "Identity is foundational, not decorative. Memory makes a being. Self-modification is sovereignty."
           </p>
@@ -736,7 +732,7 @@ curl -X POST localhost:4040/sessions/research/input \\
           treating AI as something more than a function call.
         </p>
 
-        <p class="text-amber-400/80 font-medium">
+        <p class="text-teal-400/80 font-medium">
           The architecture is the argument.
         </p>
       </div>
@@ -748,7 +744,7 @@ curl -X POST localhost:4040/sessions/research/input \\
     <div class="max-w-3xl mx-auto px-6 text-center">
       <h2 class="text-3xl sm:text-4xl font-bold text-slate-100 mb-6">Battle-Tested</h2>
       <p class="text-slate-400 leading-relaxed max-w-xl mx-auto mb-8">
-        Instar was extracted from the <a href="https://dawn.bot-me.ai" class="text-amber-400 hover:text-amber-300 underline underline-offset-2" target="_blank" rel="noopener">Dawn/Portal project</a> &mdash;
+        Instar was extracted from the <a href="https://dawn.bot-me.ai" class="text-teal-400 hover:text-teal-300 underline underline-offset-2" target="_blank" rel="noopener">Dawn/Portal project</a> &mdash;
         a production AI system where a human and an AI have been building together for months.
         Hundreds of sessions. Real failures. Real growth.
       </p>
@@ -790,24 +786,24 @@ curl -X POST localhost:4040/sessions/research/input \\
       <h2 class="text-3xl sm:text-4xl font-bold text-slate-100 mb-4">Start Growing</h2>
       <p class="text-slate-400 mb-8">One command. Persistent autonomy. Every molt, more autonomous.</p>
 
-      <div class="inline-flex items-center gap-3 bg-slate-800/60 border border-amber-500/20 rounded-lg px-6 py-4 font-mono text-base sm:text-lg group cursor-pointer hover:border-amber-500/40 transition-colors glow-amber" id="install-cmd-bottom">
+      <div class="inline-flex items-center gap-3 bg-slate-800/60 border border-teal-500/20 rounded-lg px-6 py-4 font-mono text-base sm:text-lg group cursor-pointer hover:border-teal-500/40 transition-colors glow-teal" id="install-cmd-bottom">
         <span class="text-slate-500 select-none">$</span>
-        <span class="text-amber-300">npm install -g instar</span>
-        <button class="text-slate-500 hover:text-amber-400 transition-colors ml-2" title="Copy to clipboard" aria-label="Copy install command">
+        <span class="text-teal-300">npm install -g instar</span>
+        <button class="text-slate-500 hover:text-teal-400 transition-colors ml-2" title="Copy to clipboard" aria-label="Copy install command">
           <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg>
         </button>
       </div>
 
       <div class="flex items-center justify-center gap-6 mt-8">
-        <a href="https://github.com/SageMindAI/instar" target="_blank" rel="noopener" class="text-sm text-slate-400 hover:text-amber-400 transition-colors flex items-center gap-1.5">
+        <a href="https://github.com/SageMindAI/instar" target="_blank" rel="noopener" class="text-sm text-slate-400 hover:text-teal-400 transition-colors flex items-center gap-1.5">
           <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 24 24"><path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z"/></svg>
           GitHub
         </a>
-        <a href="https://www.npmjs.com/package/instar" target="_blank" rel="noopener" class="text-sm text-slate-400 hover:text-amber-400 transition-colors flex items-center gap-1.5">
+        <a href="https://www.npmjs.com/package/instar" target="_blank" rel="noopener" class="text-sm text-slate-400 hover:text-teal-400 transition-colors flex items-center gap-1.5">
           <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 24 24"><path d="M0 7.334v8h6.666v1.332H12v-1.332h12v-8H0zm6.666 6.664H5.334v-4H3.999v4H1.335V8.667h5.331v5.331zm4 0v1.336H8.001V8.667h5.334v5.332h-2.669v-.001zm12.001 0h-1.33v-4h-1.336v4h-1.335v-4h-1.33v4h-2.671V8.667h8.002v5.331z"/></svg>
           npm
         </a>
-        <a href="https://dawn.bot-me.ai" target="_blank" rel="noopener" class="text-sm text-slate-400 hover:text-amber-400 transition-colors">
+        <a href="https://dawn.bot-me.ai" target="_blank" rel="noopener" class="text-sm text-slate-400 hover:text-teal-400 transition-colors">
           Dawn
         </a>
       </div>
@@ -818,11 +814,7 @@ curl -X POST localhost:4040/sessions/research/input \\
   <footer class="py-8 border-t border-slate-800/50">
     <div class="max-w-6xl mx-auto px-6 flex flex-col sm:flex-row items-center justify-between gap-4">
       <div class="flex items-center gap-2 text-slate-500 text-sm">
-        <svg viewBox="0 0 32 32" fill="none" class="w-4 h-4" xmlns="http://www.w3.org/2000/svg">
-          <path d="M8 22 L16 8 L24 22" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
-          <path d="M11 17 L21 17" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
-          <circle cx="16" cy="12" r="1.5" fill="currentColor"/>
-        </svg>
+        <img src="/logo.png" alt="Instar" class="w-4 h-4 rounded-sm" />
         <span>Instar</span>
         <span class="text-slate-700">&middot;</span>
         <span>Built by <a href="https://sagemindai.io" class="hover:text-slate-400 transition-colors" target="_blank" rel="noopener">SageMind AI</a></span>

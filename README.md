@@ -1,6 +1,12 @@
-# Instar
+<p align="center">
+  <img src="assets/logo.png" alt="Instar" width="180" />
+</p>
 
-**Persistent autonomy infrastructure for AI agents.** Every molt, more autonomous.
+<h1 align="center">instar</h1>
+
+<p align="center">
+  <strong>Persistent autonomy infrastructure for AI agents.</strong> Every molt, more autonomous.
+</p>
 
 <p align="center">
   <a href="https://www.npmjs.com/package/instar"><img src="https://img.shields.io/npm/v/instar?style=for-the-badge" alt="npm version"></a>
@@ -8,7 +14,9 @@
   <a href="https://github.com/SageMindAI/instar/blob/main/LICENSE"><img src="https://img.shields.io/badge/License-MIT-green?style=for-the-badge" alt="License"></a>
 </p>
 
-[npm](https://www.npmjs.com/package/instar) · [GitHub](https://github.com/SageMindAI/instar) · [instar.sh](https://instar.sh) · [Origin Story](#origin)
+<p align="center">
+  <a href="https://www.npmjs.com/package/instar">npm</a> · <a href="https://github.com/SageMindAI/instar">GitHub</a> · <a href="https://instar.sh">instar.sh</a> · <a href="#origin">Origin Story</a>
+</p>
 
 ---
 

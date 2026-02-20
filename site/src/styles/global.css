@@ -1,11 +1,11 @@
 @import "tailwindcss";
 
 @theme {
-  --color-amber-400: #fbbf24;
-  --color-amber-500: #f59e0b;
-  --color-amber-600: #d97706;
-  --color-amber-300: #fcd34d;
-  --color-amber-200: #fde68a;
+  --color-teal-400: #6ec6c8;
+  --color-teal-500: #4ba8aa;
+  --color-teal-600: #3a8b8d;
+  --color-teal-300: #8dd6d8;
+  --color-teal-200: #a7e0e1;
   --color-slate-900: #0f172a;
   --color-slate-800: #1e293b;
   --color-slate-700: #334155;
@@ -38,8 +38,8 @@ body {
 }
 
 ::selection {
-  background-color: rgba(251, 191, 36, 0.3);
-  color: #fde68a;
+  background-color: rgba(110, 198, 200, 0.3);
+  color: #a7e0e1;
 }
 
 /* Code block styling */
@@ -50,14 +50,14 @@ code {
 /* Subtle grid background */
 .bg-grid {
   background-image:
-    linear-gradient(rgba(251, 191, 36, 0.03) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(251, 191, 36, 0.03) 1px, transparent 1px);
+    linear-gradient(rgba(110, 198, 200, 0.03) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(110, 198, 200, 0.03) 1px, transparent 1px);
   background-size: 60px 60px;
 }
 
 /* Glow effect for hero */
-.glow-amber {
-  box-shadow: 0 0 60px rgba(251, 191, 36, 0.15), 0 0 120px rgba(251, 191, 36, 0.05);
+.glow-teal {
+  box-shadow: 0 0 60px rgba(110, 198, 200, 0.15), 0 0 120px rgba(110, 198, 200, 0.05);
 }
 
 /* Terminal styling */
