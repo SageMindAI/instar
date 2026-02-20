@@ -16,6 +16,8 @@
  *   instar add telegram            # Add Telegram messaging adapter
  */
 
+import fs from 'node:fs';
+import path from 'node:path';
 import { Command } from 'commander';
 import { initProject } from './commands/init.js';
 import { runSetup } from './commands/setup.js';
@@ -23,6 +25,61 @@ import { startServer, stopServer } from './commands/server.js';
 import { showStatus } from './commands/status.js';
 import { addUser, listUsers } from './commands/user.js';
 import { addJob, listJobs } from './commands/job.js';
+import pc from 'picocolors';
+
+/**
+ * Add or update Telegram configuration in the project config.
+ */
+async function addTelegram(opts: { token?: string; chatId?: string }): Promise<void> {
+  const configPath = path.join(process.cwd(), '.instar', 'config.json');
+  if (!fs.existsSync(configPath)) {
+    console.log(pc.red('No .instar/config.json found. Run `instar init` first.'));
+    process.exit(1);
+  }
+
+  let token = opts.token;
+  let chatId = opts.chatId;
+
+  // If not provided via flags, show usage
+  if (!token || !chatId) {
+    console.log(pc.yellow('Both --token and --chat-id are required.'));
+    console.log();
+    console.log('Usage:');
+    console.log(`  instar add telegram --token YOUR_BOT_TOKEN --chat-id -100YOUR_GROUP_ID`);
+    console.log();
+    console.log('Get a bot token from @BotFather on Telegram.');
+    console.log('Get the chat ID by adding @RawDataBot to your forum group.');
+    process.exit(1);
+  }
+
+  // Read, update, write config
+  const config = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
+
+  if (!config.messaging) config.messaging = [];
+
+  // Remove existing Telegram config if any
+  config.messaging = config.messaging.filter((m: { type: string }) => m.type !== 'telegram');
+
+  config.messaging.push({
+    type: 'telegram',
+    enabled: true,
+    config: {
+      token,
+      chatId,
+      pollIntervalMs: 2000,
+    },
+  });
+
+  const tmpPath = configPath + '.tmp';
+  fs.writeFileSync(tmpPath, JSON.stringify(config, null, 2));
+  fs.renameSync(tmpPath, configPath);
+
+  console.log(pc.green('Telegram adapter configured successfully!'));
+  console.log(`  Bot token: ${token!.slice(0, 8)}...`);
+  console.log(`  Chat ID: ${chatId}`);
+  console.log();
+  console.log(`Restart the server to apply: ${pc.cyan('instar server stop && instar server start')}`);
+}
 
 const program = new Command();
 
@@ -63,11 +120,9 @@ const addCmd = program
 addCmd
   .command('telegram')
   .description('Add Telegram messaging adapter')
-  .option('--token <token>', 'Telegram bot token')
-  .option('--chat-id <id>', 'Telegram forum chat ID')
-  .action((_opts) => {
-    console.log('TODO: Add Telegram adapter (scaffolding only — use programmatic API for now)');
-  });
+  .option('--token <token>', 'Telegram bot token (from @BotFather)')
+  .option('--chat-id <id>', 'Telegram forum supergroup chat ID')
+  .action((opts) => addTelegram(opts));
 
 addCmd
   .command('email')
