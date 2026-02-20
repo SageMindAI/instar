@@ -12,6 +12,77 @@ Instar gives Claude Code agents a persistent body -- a server that runs 24/7, a 
 
 The difference isn't just features. It's a shift in what Claude Code *is* -- from a tool you use to an agent that works alongside you.
 
+## Why Instar (and How It's Different from OpenClaw)
+
+If you're coming from OpenClaw, NanoClaw, or similar projects that were recently broken by Anthropic's OAuth policy change -- Instar is architecturally different in ways that matter.
+
+### It's ToS-compliant by design
+
+Anthropic's policy is clear: OAuth tokens from Free, Pro, and Max plans are for Claude Code and claude.ai only. Projects that extracted OAuth tokens to power their own agent runtimes violated this.
+
+**Instar spawns the actual Claude Code CLI.** Every session is a real Claude Code process. We never extract, proxy, or spoof OAuth tokens. When your agent runs a job, it's Claude Code running -- exactly the way Anthropic intended.
+
+We also support API keys for production and commercial use. Your auth, your choice.
+
+### It augments your project instead of replacing it
+
+OpenClaw IS the product -- you deploy it and it becomes your AI assistant across 20+ messaging channels.
+
+Instar works differently. Two paths:
+- **Fresh install**: `npx instar init my-agent` creates a complete project from scratch -- identity, config, jobs, server. Running in under a minute.
+- **Existing project**: `cd my-project && npx instar init` adds autonomy infrastructure without touching your code. Your CLAUDE.md, skills, hooks, and tools all keep working.
+
+### Your agent gets the full Claude Code environment
+
+OpenClaw wraps the Claude API (via Pi SDK) to create a message-response loop. Instar runs on Claude Code itself -- each session is a complete Claude Code instance with extended thinking, the full native tool ecosystem, sub-agent spawning with model-tier selection (Opus/Sonnet/Haiku), hooks, skills, MCP server integration, and automatic context management.
+
+OpenClaw's agent executes tools through an API. Instar's agent IS a development environment.
+
+### Multi-session orchestration
+
+OpenClaw runs a single gateway process -- one WebSocket server, one embedded agent handling all conversations.
+
+Instar manages multiple independent Claude Code sessions running in parallel, each in its own tmux process. The server orchestrates which sessions run, monitors health, respawns on failure, and coordinates through Telegram topics. Your agent can run 5 jobs simultaneously -- health check, email processing, social media engagement, reflection, and a live conversation -- each as an independent Claude Code instance with full capabilities.
+
+### Identity that survives context death
+
+OpenClaw has SOUL.md -- a co-created identity file the agent can modify. It's elegant.
+
+Instar's identity system goes deeper. It's not just the files (AGENT.md, USER.md, MEMORY.md) -- it's the infrastructure that keeps identity alive when Claude's context window compresses, sessions restart, or the agent runs autonomously for hours:
+
+- **Session-start hooks** re-inject identity before the agent does anything
+- **Compaction recovery** restores identity when context compresses
+- **Grounding before messaging** forces the agent to re-read its identity before any external communication
+- **Dangerous command guards** block destructive operations structurally
+
+These aren't suggestions the agent tries to remember. They're guarantees the infrastructure enforces. Structure over willpower.
+
+### Relationships as fundamental infrastructure
+
+Every person the agent interacts with -- across any channel or platform -- gets a relationship record that grows over time:
+
+- Cross-platform identity resolution (same person on Telegram and email? Merged automatically)
+- Interaction history with topic extraction
+- Significance scoring derived from frequency, recency, and depth
+- Context injection before interactions -- the agent *knows* who it's talking to
+- Stale relationship detection -- who hasn't been contacted in a while?
+
+Relationships aren't a plugin. They're how the agent understands its world.
+
+### Self-evolution
+
+The agent can edit its own job definitions, write new scripts, update its identity files, create new hooks, and modify its own configuration. When you ask it to do something it can't do yet, the expected behavior isn't "I can't do that" -- it's "let me build that capability."
+
+Instar also ships with default coherence jobs that run out of the box -- health checks, reflection triggers, relationship maintenance. These give the agent a circadian rhythm: regular self-maintenance without user intervention.
+
+### What OpenClaw does that Instar doesn't (yet)
+
+To be fair: OpenClaw has 20+ messaging adapters, native device apps (macOS/iOS/Android), voice wake, Docker sandboxing, and a skill marketplace. Instar currently supports Telegram only, with Slack and Discord planned.
+
+These are different categories. OpenClaw asks: *"How can I be your AI assistant everywhere?"* Instar asks: *"How can your Claude Code agent get a persistent body?"* If you want an AI assistant across every messaging platform with voice support, that's OpenClaw's vision. If you want your Claude Code agent to keep running when you close your laptop -- with scheduled jobs, persistent memory, genuine relationships, and the infrastructure to grow autonomously -- that's Instar.
+
+Different tools for different needs. But only one of them works today.
+
 ## Quick Start
 
 ```bash

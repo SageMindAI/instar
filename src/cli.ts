@@ -29,7 +29,7 @@ const program = new Command();
 program
   .name('instar')
   .description('Persistent autonomy infrastructure for AI agents')
-  .version('0.1.4')
+  .version('0.1.5')
   .option('--classic', 'Use the classic inquirer-based setup wizard instead of Claude')
   .action((opts) => runSetup(opts)); // Default: run interactive setup when no subcommand given
 
