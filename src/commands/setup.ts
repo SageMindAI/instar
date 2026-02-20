@@ -200,6 +200,10 @@ async function runClassicSetup(): Promise<void> {
   // ── Step 3: Telegram (BEFORE users, so we know context) ────────
 
   console.log();
+  console.log(pc.bold('  Telegram (Recommended)'));
+  console.log(pc.dim('  Telegram is the most powerful way to interact with your agent.'));
+  console.log(pc.dim('  You get organized topic threads, message history, and mobile access.'));
+  console.log();
   const telegramConfig = await promptForTelegram();
 
   // ── Step 4: User setup ─────────────────────────────────────────
@@ -434,8 +438,8 @@ function isInstarGlobal(): boolean {
  */
 async function promptForTelegram(): Promise<{ token: string; chatId: string } | null> {
   const enableTelegram = await confirm({
-    message: 'Set up Telegram? (lets your agent send you messages and receive commands)',
-    default: false,
+    message: 'Set up Telegram? (recommended — gives you mobile access, organized threads, and message history)',
+    default: true,
   });
 
   if (!enableTelegram) return null;

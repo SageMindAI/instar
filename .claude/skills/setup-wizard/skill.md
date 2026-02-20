@@ -24,31 +24,45 @@ This wizard runs in a terminal that may be narrow (80-120 chars). Long text gets
 **Good** (fits in terminal):
 > Everything here is just a starting point. You can change any of it later — or just tell your agent to adjust itself.
 
-## Phase 1: Welcome — Explain What This Is
+## Phase 1: Welcome & Use Case Selection
 
-Start with a brief welcome. Keep it SHORT — use bullets, not paragraphs:
+Start with a brief welcome, then immediately ask HOW they want to use Instar.
 
 ---
 
 **Welcome to Instar!**
 
-Instar gives Claude Code a persistent presence in your project:
-
-- **Scheduled jobs** — Run tasks on a schedule (health checks, summaries)
-- **Messaging** — Telegram integration for alerts and commands
-- **Always-on server** — Manages sessions and jobs in tmux
-
-Think of it as giving your project a heartbeat.
+Instar gives Claude Code a persistent body — a server, jobs, memory, and messaging. Two ways to use it:
 
 ---
 
-Do NOT expand these bullet points into long sentences. Keep the welcome under 8 lines total.
+Present a question with two clear options:
+
+1. **Project Agent** — Add an agent to an existing codebase. It monitors, builds, and maintains your project.
+2. **General Agent** — A personal agent on your computer. Like having a persistent AI assistant you talk to through Telegram.
+
+This choice determines the defaults, but the agent can always grow into more.
+
+### If "Project Agent" selected:
+- Use the current working directory as the project
+- Default jobs focus on health checks, code monitoring, reflection
+- The agent's identity centers on the project
+
+### If "General Agent" selected:
+- Ask for a name for the agent (this becomes the directory name)
+- Create the directory in the current location or home dir
+- Default jobs focus on communication, scheduling, research
+- **Telegram is essential** — without it, a general agent has no natural interface
+- Frame the identity around being a personal assistant, not a code monitor
+- The AGENT.md should emphasize: "I'm your personal agent. Talk to me through Telegram."
 
 ## Phase 2: Identity Bootstrap — The Birth Conversation
 
-**This is the most important part.** Before touching config files, have a conversation with the user to understand who they are and who their agent will become.
+**This is the most important part.** Have a conversation to understand who the user is and who their agent will become. Keep it natural and concise.
 
-This isn't just configuration. You're helping a new agent come into existence. Treat it with that weight — not heavy-handedly, but genuinely. The identity you help create here will persist, grow, and shape every interaction this agent has.
+For **General Agents**: emphasize that this agent will be their persistent companion. It grows, learns, and communicates through Telegram. It's not a project tool — it's a presence.
+
+For **Project Agents**: emphasize that this agent will own the project's health and development. It monitors, builds, and maintains.
 
 ### Step 2a: The Thesis (Brief)
 
@@ -232,9 +246,23 @@ which claude
 - **Port** (default: 4040) — "The agent runs a small HTTP server for health checks and internal communication."
 - **Max sessions** (default: 3) — "This limits how many Claude sessions can run at once. 2-3 is usually right."
 
-### 3c. Telegram Setup (Optional)
+### 3c. Telegram Setup (Strongly Recommended — Essential for General Agents)
 
-This is the most involved section. Walk through it step by step:
+**Frame Telegram as the primary way to interact with the agent.** Explain briefly:
+
+> Telegram is where Instar really shines:
+> - **Topic threads** — organized channels for different concerns
+> - **Message history** — full record of every interaction
+> - **Mobile access** — talk to your agent from anywhere
+> - **Notifications** — your agent reaches you proactively
+
+For **General Agents**: Telegram is essential. Without it, a general agent has no natural interface — you'd have to open a terminal every time. **Strongly encourage** setting it up and explain that this IS the agent's communication channel.
+
+For **Project Agents**: Telegram is strongly recommended but optional. The agent can still work through CLI sessions without it.
+
+If the user declines, that's their choice — but make the tradeoff clear in one sentence.
+
+Walk through setup step by step:
 
 1. **Create a bot** via @BotFather on Telegram:
    - Open https://web.telegram.org
@@ -332,27 +360,21 @@ Append if not present:
 
 ## Phase 4: Summary & Next Steps
 
-Show what was created, organized by category:
+Show what was created briefly, then focus on what happens next.
 
-**Identity:**
-- `.instar/AGENT.md` — your agent's identity
-- `.instar/USER.md` — what the agent knows about you
-- `.instar/MEMORY.md` — long-term memory (grows over time)
+**Next steps — frame around Telegram if configured:**
 
-**Configuration:**
-- `.instar/config.json` — server and runtime config
-- `.instar/users.json` — user profiles
-- `.instar/jobs.json` — scheduled jobs
+If Telegram was set up, emphasize that Telegram IS the interface now:
 
-**Next steps:**
+> "Start the server with `instar server start`, then open Telegram. That's it. Your agent will message you when it has something to report. You can message it when you need something done. Everything else — jobs, monitoring, memory — happens automatically."
 
-The only command the user needs to know is `instar server start`. Once the server is running, the agent handles everything else — the user just talks to it. Frame next steps that way:
+If Telegram was NOT set up, mention they can add it later:
 
-"Once the server is running, your agent will [run scheduled jobs / listen for Telegram messages / etc]. If you need to add more jobs, users, or integrations later, just ask your agent — it can configure itself."
+> "Start the server with `instar server start`. You can interact with your agent through Claude Code sessions. For a much richer experience, run `instar add telegram` later — it gives you mobile access, organized threads, and message history."
 
 Offer to start the server.
 
-**Important:** Do NOT present a list of CLI commands for the user to memorize. The whole point of Instar is that the agent is autonomous. After `instar server start`, the user talks to their agent, not to the CLI.
+**Important:** Do NOT present a list of CLI commands. The point of Instar is that the agent is autonomous. After starting the server, the user talks to their agent (ideally through Telegram), not to the CLI.
 
 ## Tone
 

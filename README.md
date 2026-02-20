@@ -32,29 +32,47 @@ Named after the developmental stages between molts in arthropods, where each ins
 
 The difference isn't features. It's a shift in what Claude Code *is* -- from a tool you use to an agent that works alongside you.
 
-## Install
+## Two Ways to Use Instar
+
+### 🤖 General Agent — A personal AI on your computer
+
+Want a persistent AI assistant you talk to through Telegram? Like OpenClaw, but ToS-compliant.
 
 ```bash
-npx instar            # Run the setup wizard
-# or
-npm install -g instar
-instar                # Run the setup wizard
-instar server start   # Start the persistent server
+npx instar
+# Choose "General Agent" → set up Telegram → start the server
+# Now talk to your agent from your phone, anywhere
 ```
+
+Your agent runs in the background, handles scheduled tasks, messages you proactively, and grows through experience. Telegram is the primary interface — organized topic threads, full message history, mobile access.
+
+### 📁 Project Agent — Add an agent to your codebase
+
+Want an agent that monitors, builds, and maintains a specific project?
+
+```bash
+cd my-project
+npx instar
+# Choose "Project Agent" → configure → start the server
+```
+
+Your agent watches your codebase, runs health checks, handles ops tasks, and communicates through Telegram (recommended) or terminal sessions.
+
+---
 
 The wizard walks you through everything: identity, Telegram, jobs, server. One command to go from zero to a running agent.
 
-**Requirements:** Node.js 18+ · [Claude Code CLI](https://docs.anthropic.com/en/docs/claude-code) · tmux · [API key](https://console.anthropic.com/) or Claude subscription
+**Requirements:** Node.js 20+ · [Claude Code CLI](https://docs.anthropic.com/en/docs/claude-code) · tmux · [API key](https://console.anthropic.com/) or Claude subscription
 
 ## CLI Reference
 
 ```bash
 # Setup
-instar                          # Interactive setup wizard (Claude-powered)
+instar                          # Interactive setup wizard (General Agent or Project Agent)
 instar setup                    # Same as above
 instar setup --classic          # Inquirer-based fallback wizard
-instar init my-project          # Create a new agent project from scratch
-instar init                     # Add agent infrastructure to existing project
+instar init my-agent            # Create a new agent (general or project)
+instar init                     # Add agent infrastructure to current project
 
 # Server
 instar server start             # Start the persistent server (background, tmux)
