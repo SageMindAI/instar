@@ -73,7 +73,7 @@ async function respawnSessionForTopic(
     const historyContent = historyLines.join('\n');
     const tmpDir = '/tmp/instar-telegram';
     fs.mkdirSync(tmpDir, { recursive: true });
-    const filepath = path.join(tmpDir, `history-${topicId}-${Date.now()}.txt`);
+    const filepath = path.join(tmpDir, `history-${topicId}-${Date.now()}-${process.pid}.txt`);
     fs.writeFileSync(filepath, historyContent);
 
     bootstrapMessage = [

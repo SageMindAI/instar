@@ -641,13 +641,17 @@ function installHealthWatchdog(projectDir: string, port: number, projectName: st
   const scriptsDir = path.join(projectDir, '.claude', 'scripts');
   fs.mkdirSync(scriptsDir, { recursive: true });
 
+  // Quote projectDir for shell safety — paths with spaces, parens, etc.
+  const escapedProjectDir = projectDir.replace(/'/g, "'\\''");
+  const escapedCronPath = path.join(projectDir, '.claude/scripts/health-watchdog.sh').replace(/'/g, "'\\''");
+
   const scriptContent = `#!/bin/bash
 # health-watchdog.sh — Monitor instar server and auto-recover.
-# Install as cron: */5 * * * * ${path.join(projectDir, '.claude/scripts/health-watchdog.sh')}
+# Install as cron: */5 * * * * '${escapedCronPath}'
 
 PORT="${port}"
 SERVER_SESSION="${projectName}-server"
-PROJECT_DIR="${projectDir}"
+PROJECT_DIR='${escapedProjectDir}'
 TMUX_PATH=$(which tmux 2>/dev/null || echo "/opt/homebrew/bin/tmux")
 
 HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" "http://localhost:\${PORT}/health" 2>/dev/null)

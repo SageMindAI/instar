@@ -71,9 +71,14 @@ async function addTelegram(opts: { token?: string; chatId?: string }): Promise<v
     },
   });
 
-  const tmpPath = configPath + '.tmp';
-  fs.writeFileSync(tmpPath, JSON.stringify(config, null, 2));
-  fs.renameSync(tmpPath, configPath);
+  const tmpPath = configPath + `.${process.pid}.${Math.random().toString(36).slice(2)}.tmp`;
+  try {
+    fs.writeFileSync(tmpPath, JSON.stringify(config, null, 2));
+    fs.renameSync(tmpPath, configPath);
+  } catch (err) {
+    try { fs.unlinkSync(tmpPath); } catch { /* ignore */ }
+    throw err;
+  }
 
   console.log(pc.green('Telegram adapter configured successfully!'));
   console.log(`  Bot token: ${token!.slice(0, 8)}...`);
@@ -113,9 +118,14 @@ async function addSentry(opts: { dsn?: string }): Promise<void> {
     dsn: opts.dsn,
   };
 
-  const tmpPath = configPath + '.tmp';
-  fs.writeFileSync(tmpPath, JSON.stringify(config, null, 2));
-  fs.renameSync(tmpPath, configPath);
+  const tmpPath = configPath + `.${process.pid}.${Math.random().toString(36).slice(2)}.tmp`;
+  try {
+    fs.writeFileSync(tmpPath, JSON.stringify(config, null, 2));
+    fs.renameSync(tmpPath, configPath);
+  } catch (err) {
+    try { fs.unlinkSync(tmpPath); } catch { /* ignore */ }
+    throw err;
+  }
 
   console.log(pc.green('Sentry error monitoring configured!'));
   console.log(`  DSN: ${opts.dsn.slice(0, 30)}...`);
@@ -163,9 +173,14 @@ async function addEmail(opts: { credentialsFile?: string; tokenFile?: string }):
     },
   });
 
-  const tmpPath = configPath + '.tmp';
-  fs.writeFileSync(tmpPath, JSON.stringify(config, null, 2));
-  fs.renameSync(tmpPath, configPath);
+  const tmpPath = configPath + `.${process.pid}.${Math.random().toString(36).slice(2)}.tmp`;
+  try {
+    fs.writeFileSync(tmpPath, JSON.stringify(config, null, 2));
+    fs.renameSync(tmpPath, configPath);
+  } catch (err) {
+    try { fs.unlinkSync(tmpPath); } catch { /* ignore */ }
+    throw err;
+  }
 
   console.log(pc.green('Email (Gmail) integration configured!'));
   console.log(`  Credentials: ${opts.credentialsFile}`);
@@ -196,9 +211,14 @@ async function addQuota(opts: { stateFile?: string }): Promise<void> {
     config.monitoring.quotaStateFile = opts.stateFile;
   }
 
-  const tmpPath = configPath + '.tmp';
-  fs.writeFileSync(tmpPath, JSON.stringify(config, null, 2));
-  fs.renameSync(tmpPath, configPath);
+  const tmpPath = configPath + `.${process.pid}.${Math.random().toString(36).slice(2)}.tmp`;
+  try {
+    fs.writeFileSync(tmpPath, JSON.stringify(config, null, 2));
+    fs.renameSync(tmpPath, configPath);
+  } catch (err) {
+    try { fs.unlinkSync(tmpPath); } catch { /* ignore */ }
+    throw err;
+  }
 
   console.log(pc.green('Quota tracking enabled!'));
   console.log();

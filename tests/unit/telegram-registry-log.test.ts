@@ -71,8 +71,8 @@ describe('TelegramAdapter registry and message log', () => {
         path.join(process.cwd(), 'src/messaging/TelegramAdapter.ts'),
         'utf-8'
       );
-      // Verify saveRegistry uses atomic write pattern
-      expect(source).toContain("registryPath + '.tmp'");
+      // Verify saveRegistry uses atomic write pattern (unique temp filenames)
+      expect(source).toContain('this.registryPath + `.${process.pid}');
       expect(source).toContain('fs.renameSync(tmpPath, this.registryPath)');
     });
   });

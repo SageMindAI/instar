@@ -49,8 +49,8 @@ describe('TelegramAdapter — log rotation', () => {
       path.join(process.cwd(), 'src/messaging/TelegramAdapter.ts'),
       'utf-8',
     );
-    // Rotation should use atomic write pattern (template literal format)
-    expect(source).toContain('messageLogPath}.tmp');
+    // Rotation should use atomic write pattern (unique temp filenames)
+    expect(source).toContain('this.messageLogPath}.${process.pid}');
     // The pattern: write to tmp, rename to actual
     const rotationSection = source.slice(source.indexOf('maybeRotateLog'));
     expect(rotationSection).toContain('writeFileSync(tmpPath');

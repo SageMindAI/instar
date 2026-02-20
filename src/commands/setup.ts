@@ -74,7 +74,13 @@ export async function runSetup(opts?: { classic?: boolean }): Promise<void> {
   console.log();
 
   // Launch Claude Code from the instar package root (where .claude/skills/ lives)
-  // and pass the target project directory in the prompt
+  // and pass the target project directory in the prompt.
+  //
+  // --dangerously-skip-permissions is required here because the setup wizard
+  // runs in instar's OWN package directory (agentKitRoot), not the user's
+  // project. Without it, Claude would prompt for permissions to modify the
+  // user's project directory, which breaks the interactive flow. The wizard
+  // only writes to well-defined locations (.instar/, .claude/, CLAUDE.md).
   const agentKitRoot = findAgentKitRoot();
   const projectDir = process.cwd();
   const child = spawn(claudePath, [
@@ -462,7 +468,13 @@ async function promptForTelegram(): Promise<{ token: string; chatId: string } | 
 
   const token = await input({
     message: 'Paste your bot token here',
-    validate: (v) => v.includes(':') ? true : 'Doesn\'t look right — token should have a colon, like 123456:ABCdef...',
+    validate: (v) => {
+      // Telegram bot tokens are: <bot_id>:<secret> where bot_id is numeric
+      if (!/^\d{5,}:[A-Za-z0-9_-]{30,}$/.test(v.trim())) {
+        return 'Doesn\'t look right — token should be like 123456789:ABCdef... (numeric ID, colon, alphanumeric secret)';
+      }
+      return true;
+    },
   });
 
   console.log(`  ${pc.green('✓')} Bot token saved`);

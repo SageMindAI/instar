@@ -260,9 +260,14 @@ export class TelegramAdapter implements MessagingAdapter {
       const lines = content.split('\n').filter(Boolean);
       if (lines.length > 10_000) {
         const kept = lines.slice(-5_000);
-        const tmpPath = `${this.messageLogPath}.tmp`;
-        fs.writeFileSync(tmpPath, kept.join('\n') + '\n');
-        fs.renameSync(tmpPath, this.messageLogPath);
+        const tmpPath = `${this.messageLogPath}.${process.pid}.${Math.random().toString(36).slice(2)}.tmp`;
+        try {
+          fs.writeFileSync(tmpPath, kept.join('\n') + '\n');
+          fs.renameSync(tmpPath, this.messageLogPath);
+        } catch (rotateErr) {
+          try { fs.unlinkSync(tmpPath); } catch { /* ignore */ }
+          throw rotateErr;
+        }
         console.log(`[telegram] Rotated message log: ${lines.length} → ${kept.length} lines`);
       }
     } catch {
@@ -298,10 +303,15 @@ export class TelegramAdapter implements MessagingAdapter {
         topicToSession: Object.fromEntries(this.topicToSession),
         topicToName: Object.fromEntries(this.topicToName),
       };
-      // Atomic write: write to .tmp then rename
-      const tmpPath = this.registryPath + '.tmp';
-      fs.writeFileSync(tmpPath, JSON.stringify(data, null, 2));
-      fs.renameSync(tmpPath, this.registryPath);
+      // Atomic write: unique temp filename to prevent concurrent corruption
+      const tmpPath = this.registryPath + `.${process.pid}.${Math.random().toString(36).slice(2)}.tmp`;
+      try {
+        fs.writeFileSync(tmpPath, JSON.stringify(data, null, 2));
+        fs.renameSync(tmpPath, this.registryPath);
+      } catch (writeErr) {
+        try { fs.unlinkSync(tmpPath); } catch { /* ignore */ }
+        throw writeErr;
+      }
     } catch (err) {
       console.error(`[telegram] Failed to save registry: ${err}`);
     }
@@ -416,6 +426,19 @@ export class TelegramAdapter implements MessagingAdapter {
     }
 
     if (!response.ok) {
+      // Handle 429 Too Many Requests — respect Telegram's retry_after
+      if (response.status === 429) {
+        try {
+          const errorData = await response.json() as { parameters?: { retry_after?: number } };
+          const retryAfter = errorData?.parameters?.retry_after ?? 5;
+          console.warn(`[telegram] Rate limited on ${method}, waiting ${retryAfter}s...`);
+          await new Promise(resolve => setTimeout(resolve, retryAfter * 1000));
+          // Retry once after backoff
+          return this.apiCall(method, params);
+        } catch {
+          throw new Error(`Telegram API rate limited ${safeUrl} (429)`);
+        }
+      }
       const text = await response.text();
       throw new Error(`Telegram API error ${safeUrl} (${response.status}): ${text}`);
     }
