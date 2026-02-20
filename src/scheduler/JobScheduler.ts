@@ -187,7 +187,11 @@ export class JobScheduler {
     const job = this.jobs.find(j => j.slug === next.slug);
     if (!job) return;
 
-    if (!this.canRunJob(job.priority)) return;
+    if (!this.canRunJob(job.priority)) {
+      // Re-add to front of queue — don't silently drop
+      this.queue.unshift(next);
+      return;
+    }
 
     this.spawnJobSession(job, `queued:${next.reason}`);
   }
@@ -364,6 +368,9 @@ export class JobScheduler {
     } else {
       summary += '\n_No output captured (session already closed)_';
     }
+
+    // Try to drain the queue now that a slot is available
+    this.processQueue();
 
     // Send to the job's dedicated topic if available, otherwise fall back to generic messenger
     if (this.telegram && job.topicId) {

@@ -37,6 +37,11 @@ describe('Input Validation', () => {
     expect(routesSrc).toContain('execFileSync(');
   });
 
+  it('validates topicId is a number on telegram reply', () => {
+    expect(routesSrc).toContain('isNaN(topicId)');
+    expect(routesSrc).toContain('topicId must be a number');
+  });
+
   it('has quota endpoint', () => {
     expect(routesSrc).toContain("router.get('/quota'");
   });

@@ -181,6 +181,40 @@ describe('JobScheduler edge cases', () => {
     });
   });
 
+  describe('queue re-add on quota failure', () => {
+    it('re-adds job to queue when quota check fails during processQueue', () => {
+      createScheduler([
+        makeJob('queued-job'),
+      ], { maxParallelJobs: 1 });
+      scheduler.start();
+
+      // Fill the slot with a dummy session
+      mockSM._sessions.push({
+        id: 's-0', name: 'dummy', status: 'running',
+        tmuxSession: 'tmux-dummy', startedAt: new Date().toISOString(),
+        jobSlug: 'other',
+      } as any);
+      mockSM._aliveSet.add('tmux-dummy');
+
+      // Queue a job (slot is full)
+      const result = scheduler.triggerJob('queued-job', 'test');
+      expect(result).toBe('queued');
+      expect(scheduler.getQueue()).toHaveLength(1);
+
+      // Clear the slot
+      mockSM._sessions[0].status = 'completed';
+      mockSM._aliveSet.delete('tmux-dummy');
+
+      // But block on quota
+      scheduler.canRunJob = () => false;
+      scheduler.processQueue();
+
+      // Job should still be in queue (not silently dropped)
+      expect(scheduler.getQueue()).toHaveLength(1);
+      expect(scheduler.getQueue()[0].slug).toBe('queued-job');
+    });
+  });
+
   describe('consecutive failure tracking', () => {
     it('tracks multiple consecutive failures', async () => {
       createScheduler([makeJob('fail-job')]);

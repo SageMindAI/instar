@@ -188,6 +188,10 @@ export function createRoutes(ctx: RouteContext): Router {
     }
 
     const topicId = parseInt(req.params.topicId);
+    if (isNaN(topicId)) {
+      res.status(400).json({ error: 'topicId must be a number' });
+      return;
+    }
     const { text } = req.body;
     if (!text || typeof text !== 'string') {
       res.status(400).json({ error: '"text" field required' });
