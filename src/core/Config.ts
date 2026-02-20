@@ -129,7 +129,7 @@ export function loadConfig(projectDir?: string): AgentKitConfig {
     tmuxPath,
     claudePath,
     projectDir: resolvedProjectDir,
-    maxSessions: fileConfig.sessions?.maxSessions || DEFAULT_MAX_SESSIONS,
+    maxSessions: fileConfig.sessions?.maxSessions ?? DEFAULT_MAX_SESSIONS,
     protectedSessions: fileConfig.sessions?.protectedSessions || [`${projectName}-server`],
     completionPatterns: fileConfig.sessions?.completionPatterns || [
       'has been automatically paused',
