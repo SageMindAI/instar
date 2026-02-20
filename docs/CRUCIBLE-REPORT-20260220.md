@@ -4,9 +4,9 @@
 **Duration**: 8-hour autonomous session (AUT-1655-wo)
 **Starting Version**: 0.1.10
 **Ending Version**: 0.1.11
-**Commits**: 58+
-**Files Changed**: 107+ (9,100+ lines added, 560+ removed)
-**Tests**: 350 -> 721 (unit) + 38 (integration) + 9 (e2e) = 768 total
+**Commits**: 60+
+**Files Changed**: 112+ (9,400+ lines added, 560+ removed)
+**Tests**: 350 -> 736 (unit) + 38 (integration) + 9 (e2e) = 783 total
 **TypeScript**: Compiles cleanly with `--strict`
 **Package Size**: 98.2 kB (60 files)
 
@@ -78,7 +78,7 @@ Comprehensive production-readiness review of Instar v0.1.10 across 53 iterations
 ### 4. Test Coverage (HIGH)
 
 **Before**: 350 tests across ~40 test files
-**After**: 721 tests across 78 test files + 38 integration + 9 e2e
+**After**: 736 tests across 80 test files + 38 integration + 9 e2e
 
 New test areas added:
 - Route validation edge cases (26 tests)
@@ -104,6 +104,8 @@ New test areas added:
 - Config error handling: corrupted/truncated JSON, permissions (3 tests)
 - QuotaTracker invalid input handling: NaN, Infinity, negative, >100 clamping, updateState rejection (13 tests)
 - HealthChecker edge cases: invalid intervals, multiple stops, timestamp format, session errors (9 tests)
+- Telegram offset persistence: save/load, validation, atomicity (8 tests)
+- Server temp file cleanup: function existence, age threshold, directory handling (7 tests)
 - Plus integration tests for fresh-install (17), server-full (14), scheduler (1), session-lifecycle (6), and e2e lifecycle (9)
 
 ### 5. Error Handling
@@ -204,10 +206,10 @@ New test areas added:
 
 1. **Single-threaded session cap**: Race condition possible under extreme concurrent load (JavaScript is single-threaded so real-world risk is minimal)
 2. **No clock skew handling**: Cron scheduler trusts system clock; NTP adjustments could cause double-fires
-3. **Telegram temp files**: History files in `/tmp/instar-telegram/` not auto-cleaned (accumulate slowly)
-4. **Polling offset not persisted**: Telegram `lastUpdateId` resets on process restart (messages could re-process)
+3. ~~**Telegram temp files**: History files in `/tmp/instar-telegram/` not auto-cleaned~~ — **FIXED**: Auto-cleanup on server start (7-day retention)
+4. ~~**Polling offset not persisted**: Telegram `lastUpdateId` resets on process restart~~ — **FIXED**: Persisted to `telegram-poll-offset.json`
 5. **JSONL log reads full file**: Message history query loads all lines into memory before filtering
-6. **No CI/CD pipeline**: No GitHub Actions configured yet (`.github/` not present)
+6. ~~**No CI/CD pipeline**: No GitHub Actions configured yet~~ — **FIXED**: CI (`ci.yml`) and publish (`publish.yml`) workflows added
 
 ---
 
@@ -215,16 +217,16 @@ New test areas added:
 
 1. **Deploy landing page**: Astro site built in `site/`, needs Vercel deployment for instar.sh
 2. **Make GitHub repo public**: Currently private under SageMindAI org
-3. **Add GitHub Actions CI**: Run tests on PR, publish to npm on tag
-4. **Telegram polling offset persistence**: Save/restore `lastUpdateId` to survive restarts
-5. **Temp file cleanup**: Add a periodic cleanup for `/tmp/instar-telegram/` files older than 7 days
+3. ~~**Add GitHub Actions CI**: Run tests on PR, publish to npm on tag~~ — **DONE**: `ci.yml` (test/build on PR+push) + `publish.yml` (npm publish on tag)
+4. ~~**Telegram polling offset persistence**: Save/restore `lastUpdateId` to survive restarts~~ — **DONE**: Offset saved to `telegram-poll-offset.json` after each poll cycle
+5. ~~**Temp file cleanup**: Add a periodic cleanup for `/tmp/instar-telegram/` files older than 7 days~~ — **DONE**: `cleanupTelegramTempFiles()` runs on server start, removes files > 7 days old
 6. **Consider Slack adapter**: Follows TelegramAdapter pattern; most-requested missing feature
 
 ---
 
 ## Version Bump
 
-**0.1.10 -> 0.1.11**: Security hardening, data integrity improvements, naming consistency, documentation updates, 304+ new tests, production-readiness fixes across all 28 source files.
+**0.1.10 -> 0.1.11**: Security hardening, data integrity improvements, naming consistency, CI/CD pipeline, Telegram offset persistence, temp file cleanup, documentation updates, 386+ new tests, production-readiness fixes across all 28 source files.
 
 ---
 
@@ -298,11 +300,11 @@ The `instar feedback` CLI command used `fetch()` without a timeout. If the serve
 
 | Suite | Count | Status |
 |-------|-------|--------|
-| Unit | 721 | All passing |
+| Unit | 736 | All passing |
 | Integration | 38 | All passing |
 | E2E | 9 | All passing |
-| **Total** | **768** | **All passing** |
+| **Total** | **783** | **All passing** |
 
 ---
 
-*Report generated during AUT-1655-wo crucible session. 58+ commits, 107+ files changed. Every source file individually reviewed. All 768 tests passing.*
+*Report generated during AUT-1655-wo crucible session. 60+ commits, 112+ files changed. Every source file individually reviewed. All 783 tests passing.*

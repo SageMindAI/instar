@@ -61,6 +61,7 @@ export class TelegramAdapter implements MessagingAdapter {
   private topicToName: Map<number, string> = new Map();
   private registryPath: string;
   private messageLogPath: string;
+  private offsetPath: string;
 
   // Topic message callback — fires on every incoming topic message
   public onTopicMessage: ((message: Message) => void) | null = null;
@@ -69,7 +70,9 @@ export class TelegramAdapter implements MessagingAdapter {
     this.config = config;
     this.registryPath = path.join(stateDir, 'topic-session-registry.json');
     this.messageLogPath = path.join(stateDir, 'telegram-messages.jsonl');
+    this.offsetPath = path.join(stateDir, 'telegram-poll-offset.json');
     this.loadRegistry();
+    this.loadOffset();
   }
 
   async start(): Promise<void> {
@@ -317,6 +320,35 @@ export class TelegramAdapter implements MessagingAdapter {
     }
   }
 
+  // ── Polling Offset Persistence ────────────────────────────
+
+  private loadOffset(): void {
+    try {
+      const data = JSON.parse(fs.readFileSync(this.offsetPath, 'utf-8'));
+      if (typeof data.lastUpdateId === 'number' && Number.isFinite(data.lastUpdateId) && data.lastUpdateId > 0) {
+        this.lastUpdateId = data.lastUpdateId;
+        console.log(`[telegram] Restored poll offset: ${this.lastUpdateId}`);
+      }
+    } catch {
+      // File doesn't exist or is corrupted — start from 0
+    }
+  }
+
+  private saveOffset(): void {
+    try {
+      const tmpPath = `${this.offsetPath}.${process.pid}.${Math.random().toString(36).slice(2)}.tmp`;
+      try {
+        fs.writeFileSync(tmpPath, JSON.stringify({ lastUpdateId: this.lastUpdateId }));
+        fs.renameSync(tmpPath, this.offsetPath);
+      } catch (writeErr) {
+        try { fs.unlinkSync(tmpPath); } catch { /* ignore */ }
+        throw writeErr;
+      }
+    } catch (err) {
+      console.error(`[telegram] Failed to save poll offset: ${err}`);
+    }
+  }
+
   // ── Polling ────────────────────────────────────────────────
 
   private async poll(): Promise<void> {
@@ -384,6 +416,11 @@ export class TelegramAdapter implements MessagingAdapter {
         }
 
         this.lastUpdateId = Math.max(this.lastUpdateId, update.update_id);
+      }
+
+      // Persist offset so restarts don't re-process old messages
+      if (updates.length > 0) {
+        this.saveOffset();
       }
     } catch (err) {
       console.error(`[telegram] Poll error: ${err}`);

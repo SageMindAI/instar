@@ -25,7 +25,7 @@ Persistent autonomy infrastructure for AI agents. Gives Claude Code a persistent
 - Auth-respecting sessions (removed forced OAuth — supports both API keys and subscription)
 - Session management via tmux (spawn, monitor, kill, reap, timeout enforcement)
 - Job scheduler with cron, priority levels, model tiering, quota awareness config
-- Telegram integration (two-way messaging, topic-per-session, auto-detect chat ID, JSONL history, thread history for respawn, long message file indirection)
+- Telegram integration (two-way messaging, topic-per-session, auto-detect chat ID, JSONL history, thread history for respawn, long message file indirection, polling offset persistence)
 - Relationship tracking (per-person JSON files, cross-platform identity resolution, merge/delete)
 - Health monitoring with periodic checks
 - Feedback loop (FeedbackManager with webhook forwarding, retry, CLI command)
@@ -39,7 +39,9 @@ Persistent autonomy infrastructure for AI agents. Gives Claude Code a persistent
 - Quota tracking (file-based state reading, threshold-based load shedding for job scheduler)
 - Input validation on all API endpoints (name/prompt/text length limits, model enum validation)
 - Full project scaffolding (AGENT.md, USER.md, MEMORY.md, CLAUDE.md, hooks, scripts)
-- 768 tests passing (721 unit + 38 integration + 9 e2e across 78 test files)
+- Temp file cleanup on server start (removes `/tmp/instar-telegram/` files > 7 days old)
+- GitHub Actions CI pipeline (test on PR, publish to npm on tag)
+- 783 tests passing (736 unit + 38 integration + 9 e2e across 80 test files)
 - `.npmignore` configured to exclude tests, docs, source, dev files
 
 ### Architecture
@@ -131,6 +133,9 @@ src/
 - [x] Implement `instar add sentry` subcommand (writes DSN to monitoring config)
 - [x] Implement `instar add email` subcommand (Gmail credentials config)
 - [x] Quota tracking data source (QuotaTracker reads state file, threshold-based load shedding)
+- [x] GitHub Actions CI (tests on PR, npm publish on tag) — added in crucible review
+- [x] Telegram polling offset persistence — added in crucible review
+- [x] Temp file cleanup — added in crucible review
 
 ### Nice to Have
 - [ ] Slack adapter (TelegramAdapter pattern is extensible)

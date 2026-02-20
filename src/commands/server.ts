@@ -200,6 +200,35 @@ async function ensureAgentAttentionTopic(
   }
 }
 
+/**
+ * Clean up stale temp files from /tmp/instar-telegram/.
+ * Removes files older than 7 days to prevent unbounded accumulation.
+ */
+function cleanupTelegramTempFiles(): void {
+  const tmpDir = '/tmp/instar-telegram';
+  try {
+    if (!fs.existsSync(tmpDir)) return;
+    const maxAge = 7 * 24 * 60 * 60 * 1000; // 7 days
+    const now = Date.now();
+    let cleaned = 0;
+    for (const file of fs.readdirSync(tmpDir)) {
+      try {
+        const filepath = path.join(tmpDir, file);
+        const stat = fs.statSync(filepath);
+        if (stat.isFile() && now - stat.mtimeMs > maxAge) {
+          fs.unlinkSync(filepath);
+          cleaned++;
+        }
+      } catch { /* skip individual file errors */ }
+    }
+    if (cleaned > 0) {
+      console.log(`[cleanup] Removed ${cleaned} stale temp files from ${tmpDir}`);
+    }
+  } catch {
+    // Non-critical — don't fail startup on cleanup errors
+  }
+}
+
 export async function startServer(options: StartOptions): Promise<void> {
   const config = loadConfig(options.dir);
   ensureStateDir(config.stateDir);
@@ -212,6 +241,9 @@ export async function startServer(options: StartOptions): Promise<void> {
     console.log(`  Port: ${config.port}`);
     console.log(`  State: ${config.stateDir}`);
     console.log();
+
+    // Clean up stale Telegram temp files on startup
+    cleanupTelegramTempFiles();
 
     // Warn if no auth token configured — server allows unauthenticated access
     if (!config.authToken) {
