@@ -81,6 +81,42 @@ async function addTelegram(opts: { token?: string; chatId?: string }): Promise<v
   console.log(`Restart the server to apply: ${pc.cyan('instar server stop && instar server start')}`);
 }
 
+/**
+ * Enable quota tracking in the project config.
+ */
+async function addQuota(opts: { stateFile?: string }): Promise<void> {
+  const configPath = path.join(process.cwd(), '.instar', 'config.json');
+  if (!fs.existsSync(configPath)) {
+    console.log(pc.red('No .instar/config.json found. Run `instar init` first.'));
+    process.exit(1);
+  }
+
+  const config = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
+
+  if (!config.monitoring) {
+    config.monitoring = {};
+  }
+
+  config.monitoring.quotaTracking = true;
+
+  if (opts.stateFile) {
+    config.monitoring.quotaStateFile = opts.stateFile;
+  }
+
+  const tmpPath = configPath + '.tmp';
+  fs.writeFileSync(tmpPath, JSON.stringify(config, null, 2));
+  fs.renameSync(tmpPath, configPath);
+
+  console.log(pc.green('Quota tracking enabled!'));
+  console.log();
+  if (opts.stateFile) {
+    console.log(`  State file: ${opts.stateFile}`);
+  }
+  console.log('The agent will now track Claude API usage and throttle jobs when usage is high.');
+  console.log();
+  console.log(`Restart the server to apply: ${pc.cyan('instar server stop && instar server start')}`);
+}
+
 const program = new Command();
 
 program
@@ -142,9 +178,8 @@ addCmd
 addCmd
   .command('quota')
   .description('Add Claude API quota tracking')
-  .action((_opts) => {
-    console.log('TODO: Add quota tracking');
-  });
+  .option('--state-file <path>', 'Path to quota state file (default: .instar/state/quota.json)')
+  .action((opts) => addQuota(opts));
 
 // ── Feedback ─────────────────────────────────────────────────────
 

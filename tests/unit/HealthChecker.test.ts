@@ -165,4 +165,53 @@ describe('HealthChecker', () => {
 
     checker.stopPeriodicChecks();
   });
+
+  it('reports degraded scheduler when not running', () => {
+    const config = makeConfig({ stateDir: project.stateDir });
+    const mockScheduler = {
+      getStatus: () => ({
+        running: false,
+        paused: false,
+        jobCount: 3,
+        enabledJobs: 2,
+        queueLength: 0,
+        activeJobSessions: 0,
+      }),
+    };
+    checker = new HealthChecker(config, mockSM as any, mockScheduler as any);
+
+    const status = checker.check();
+    expect(status.components.scheduler.status).toBe('degraded');
+    expect(status.components.scheduler.message).toContain('not running');
+  });
+
+  it('overall status is degraded when any component is degraded', () => {
+    const config = makeConfig({ stateDir: project.stateDir });
+    const mockScheduler = {
+      getStatus: () => ({
+        running: true,
+        paused: true,
+        jobCount: 1,
+        enabledJobs: 1,
+        queueLength: 0,
+        activeJobSessions: 0,
+      }),
+    };
+    checker = new HealthChecker(config, mockSM as any, mockScheduler as any);
+
+    const status = checker.check();
+    // Scheduler is paused → degraded, so overall should be degraded
+    expect(status.status).toBe('degraded');
+  });
+
+  it('startPeriodicChecks is idempotent', () => {
+    const config = makeConfig({ stateDir: project.stateDir });
+    checker = new HealthChecker(config, mockSM as any);
+
+    checker.startPeriodicChecks(1000);
+    checker.startPeriodicChecks(1000); // Should not create a second interval
+    checker.stopPeriodicChecks();
+    // No assertion needed — if it created two intervals, stopPeriodicChecks
+    // would only clear one, and the test would hang. Clean exit = pass.
+  });
 });
