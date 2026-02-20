@@ -17,6 +17,7 @@ import Layout from '../layouts/Layout.astro';
       </a>
       <div class="flex items-center gap-6">
         <a href="#features" class="text-sm text-slate-400 hover:text-slate-200 transition-colors hidden sm:block">Features</a>
+        <a href="#comparison" class="text-sm text-slate-400 hover:text-slate-200 transition-colors hidden sm:block">vs OpenClaw</a>
         <a href="#quickstart" class="text-sm text-slate-400 hover:text-slate-200 transition-colors hidden sm:block">Quick Start</a>
         <a href="#philosophy" class="text-sm text-slate-400 hover:text-slate-200 transition-colors hidden sm:block">Philosophy</a>
         <a href="https://github.com/SageMindAI/instar" target="_blank" rel="noopener" class="text-sm text-slate-400 hover:text-slate-200 transition-colors flex items-center gap-1.5">
@@ -66,6 +67,67 @@ import Layout from '../layouts/Layout.astro';
       <p class="text-sm text-slate-500 mt-4 animate-fade-in-up animate-delay-400">
         Every molt, more autonomous.
       </p>
+    </div>
+  </section>
+
+  <!-- OpenClaw Migration Banner -->
+  <section id="openclaw" class="border-t border-slate-800/50">
+    <div class="max-w-5xl mx-auto px-6 py-12">
+      <div class="rounded-xl border border-blue-400/20 bg-blue-400/5 p-6 sm:p-8">
+        <div class="flex flex-col sm:flex-row items-start sm:items-center gap-4 sm:gap-6">
+          <div class="w-10 h-10 rounded-lg bg-blue-400/10 flex items-center justify-center shrink-0">
+            <svg class="w-5 h-5 text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><path d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+          </div>
+          <div class="flex-1">
+            <h3 class="text-lg font-semibold text-slate-100 mb-1">Coming from OpenClaw?</h3>
+            <p class="text-slate-400 text-sm leading-relaxed">
+              Anthropic recently banned OAuth token extraction &mdash; the technique OpenClaw relied on.
+              Instar is architecturally different: it spawns the real Claude Code CLI using your existing subscription.
+              No token extraction. No API wrappers. No workarounds that might break tomorrow.
+              <a href="#comparison" class="text-blue-400 hover:text-blue-300 underline underline-offset-2 ml-1">See the comparison &darr;</a>
+            </p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Anthropic Native -->
+  <section class="py-16 sm:py-20 border-t border-slate-800/50">
+    <div class="max-w-4xl mx-auto px-6">
+      <div class="text-center mb-10">
+        <h2 class="text-3xl sm:text-4xl font-bold text-slate-100 mb-4">Built on Claude Code, Not Around It</h2>
+        <p class="text-slate-400 max-w-2xl mx-auto">
+          Instar doesn't wrap an API or extract tokens. Every session is a real Claude Code instance &mdash;
+          the same environment you use in your terminal, with the full tool ecosystem Anthropic built.
+        </p>
+      </div>
+
+      <div class="grid sm:grid-cols-3 gap-4">
+        <div class="rounded-lg border border-green-500/20 bg-green-500/5 p-5 text-center">
+          <div class="w-8 h-8 rounded-full bg-green-500/10 flex items-center justify-center mx-auto mb-3">
+            <svg class="w-4 h-4 text-green-400" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2.5"><path d="M5 13l4 4L19 7"/></svg>
+          </div>
+          <p class="text-sm font-medium text-slate-200 mb-1">Anthropic-native</p>
+          <p class="text-xs text-slate-500">Spawns the real Claude Code CLI. Uses your existing Max or Pro subscription.</p>
+        </div>
+
+        <div class="rounded-lg border border-green-500/20 bg-green-500/5 p-5 text-center">
+          <div class="w-8 h-8 rounded-full bg-green-500/10 flex items-center justify-center mx-auto mb-3">
+            <svg class="w-4 h-4 text-green-400" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2.5"><path d="M5 13l4 4L19 7"/></svg>
+          </div>
+          <p class="text-sm font-medium text-slate-200 mb-1">No token extraction</p>
+          <p class="text-xs text-slate-500">No OAuth scraping, no API key juggling. Nothing that could break with a policy change.</p>
+        </div>
+
+        <div class="rounded-lg border border-green-500/20 bg-green-500/5 p-5 text-center">
+          <div class="w-8 h-8 rounded-full bg-green-500/10 flex items-center justify-center mx-auto mb-3">
+            <svg class="w-4 h-4 text-green-400" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2.5"><path d="M5 13l4 4L19 7"/></svg>
+          </div>
+          <p class="text-sm font-medium text-slate-200 mb-1">Full tool ecosystem</p>
+          <p class="text-xs text-slate-500">Extended thinking, MCP servers, sub-agents, hooks, skills &mdash; everything Claude Code offers.</p>
+        </div>
+      </div>
     </div>
   </section>
 
@@ -295,6 +357,174 @@ curl -X POST localhost:4040/sessions/research/input \\
       <p class="text-center text-slate-500 mt-10 text-sm max-w-lg mx-auto">
         When you say "check my emails regularly," the agent doesn't say "I can't do that."
         It creates a script, adds a job to the scheduler, and starts checking.
+      </p>
+    </div>
+  </section>
+
+  <!-- Comparison Table -->
+  <section id="comparison" class="py-20 sm:py-28 border-t border-slate-800/50">
+    <div class="max-w-4xl mx-auto px-6">
+      <div class="text-center mb-12">
+        <h2 class="text-3xl sm:text-4xl font-bold text-slate-100 mb-4">Instar vs OpenClaw</h2>
+        <p class="text-slate-400 max-w-xl mx-auto">
+          Different tools for different needs. Here's how they compare.
+        </p>
+      </div>
+
+      <div class="overflow-x-auto">
+        <table class="w-full text-sm">
+          <thead>
+            <tr class="border-b border-slate-700">
+              <th class="text-left py-3 px-4 text-slate-500 font-medium">Dimension</th>
+              <th class="text-left py-3 px-4 text-amber-400 font-semibold">Instar</th>
+              <th class="text-left py-3 px-4 text-slate-400 font-medium">OpenClaw</th>
+            </tr>
+          </thead>
+          <tbody class="text-slate-300">
+            <tr class="border-b border-slate-800/50">
+              <td class="py-3 px-4 text-slate-500">Runtime</td>
+              <td class="py-3 px-4">
+                <span class="inline-flex items-center gap-1.5">
+                  <svg class="w-3.5 h-3.5 text-green-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2.5"><path d="M5 13l4 4L19 7"/></svg>
+                  Claude Code CLI (native)
+                </span>
+              </td>
+              <td class="py-3 px-4 text-slate-500">Pi SDK (API wrapper)</td>
+            </tr>
+            <tr class="border-b border-slate-800/50">
+              <td class="py-3 px-4 text-slate-500">Auth method</td>
+              <td class="py-3 px-4">
+                <span class="inline-flex items-center gap-1.5">
+                  <svg class="w-3.5 h-3.5 text-green-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2.5"><path d="M5 13l4 4L19 7"/></svg>
+                  Your existing subscription
+                </span>
+              </td>
+              <td class="py-3 px-4 text-slate-500">
+                <span class="inline-flex items-center gap-1.5">
+                  <svg class="w-3.5 h-3.5 text-red-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><path d="M6 18L18 6M6 6l12 12"/></svg>
+                  OAuth token extraction (banned)
+                </span>
+              </td>
+            </tr>
+            <tr class="border-b border-slate-800/50">
+              <td class="py-3 px-4 text-slate-500">Anthropic-safe</td>
+              <td class="py-3 px-4">
+                <span class="inline-flex items-center gap-1.5">
+                  <svg class="w-3.5 h-3.5 text-green-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2.5"><path d="M5 13l4 4L19 7"/></svg>
+                  Works with their ecosystem
+                </span>
+              </td>
+              <td class="py-3 px-4 text-slate-500">
+                <span class="inline-flex items-center gap-1.5">
+                  <svg class="w-3.5 h-3.5 text-red-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><path d="M6 18L18 6M6 6l12 12"/></svg>
+                  Banned by Anthropic
+                </span>
+              </td>
+            </tr>
+            <tr class="border-b border-slate-800/50">
+              <td class="py-3 px-4 text-slate-500">Session model</td>
+              <td class="py-3 px-4">
+                <span class="inline-flex items-center gap-1.5">
+                  <svg class="w-3.5 h-3.5 text-green-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2.5"><path d="M5 13l4 4L19 7"/></svg>
+                  Multi-session orchestration
+                </span>
+              </td>
+              <td class="py-3 px-4 text-slate-500">Single gateway</td>
+            </tr>
+            <tr class="border-b border-slate-800/50">
+              <td class="py-3 px-4 text-slate-500">Tool access</td>
+              <td class="py-3 px-4">
+                <span class="inline-flex items-center gap-1.5">
+                  <svg class="w-3.5 h-3.5 text-green-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2.5"><path d="M5 13l4 4L19 7"/></svg>
+                  Full Claude Code ecosystem
+                </span>
+              </td>
+              <td class="py-3 px-4 text-slate-500">Custom tool implementations</td>
+            </tr>
+            <tr class="border-b border-slate-800/50">
+              <td class="py-3 px-4 text-slate-500">Extended thinking</td>
+              <td class="py-3 px-4">
+                <span class="inline-flex items-center gap-1.5">
+                  <svg class="w-3.5 h-3.5 text-green-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2.5"><path d="M5 13l4 4L19 7"/></svg>
+                  Native support
+                </span>
+              </td>
+              <td class="py-3 px-4 text-slate-500">
+                <svg class="w-3.5 h-3.5 text-slate-600 inline" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><path d="M20 12H4"/></svg>
+                Not available
+              </td>
+            </tr>
+            <tr class="border-b border-slate-800/50">
+              <td class="py-3 px-4 text-slate-500">Sub-agents</td>
+              <td class="py-3 px-4">
+                <span class="inline-flex items-center gap-1.5">
+                  <svg class="w-3.5 h-3.5 text-green-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2.5"><path d="M5 13l4 4L19 7"/></svg>
+                  Opus / Sonnet / Haiku tiers
+                </span>
+              </td>
+              <td class="py-3 px-4 text-slate-500">
+                <svg class="w-3.5 h-3.5 text-slate-600 inline" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><path d="M20 12H4"/></svg>
+                Not available
+              </td>
+            </tr>
+            <tr class="border-b border-slate-800/50">
+              <td class="py-3 px-4 text-slate-500">MCP servers</td>
+              <td class="py-3 px-4">
+                <span class="inline-flex items-center gap-1.5">
+                  <svg class="w-3.5 h-3.5 text-green-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2.5"><path d="M5 13l4 4L19 7"/></svg>
+                  Playwright, Chrome, custom
+                </span>
+              </td>
+              <td class="py-3 px-4 text-slate-500">
+                <svg class="w-3.5 h-3.5 text-slate-600 inline" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><path d="M20 12H4"/></svg>
+                Not available
+              </td>
+            </tr>
+            <tr class="border-b border-slate-800/50">
+              <td class="py-3 px-4 text-slate-500">Identity system</td>
+              <td class="py-3 px-4">Multi-file + hooks + compaction recovery</td>
+              <td class="py-3 px-4 text-slate-500">SOUL.md (co-created)</td>
+            </tr>
+            <tr class="border-b border-slate-800/50">
+              <td class="py-3 px-4 text-slate-500">Messaging</td>
+              <td class="py-3 px-4 text-slate-500">Telegram (more planned)</td>
+              <td class="py-3 px-4">
+                <span class="inline-flex items-center gap-1.5">
+                  <svg class="w-3.5 h-3.5 text-green-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2.5"><path d="M5 13l4 4L19 7"/></svg>
+                  20+ channels
+                </span>
+              </td>
+            </tr>
+            <tr class="border-b border-slate-800/50">
+              <td class="py-3 px-4 text-slate-500">Device apps</td>
+              <td class="py-3 px-4 text-slate-500">
+                <svg class="w-3.5 h-3.5 text-slate-600 inline" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><path d="M20 12H4"/></svg>
+                Not yet
+              </td>
+              <td class="py-3 px-4">
+                <span class="inline-flex items-center gap-1.5">
+                  <svg class="w-3.5 h-3.5 text-green-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2.5"><path d="M5 13l4 4L19 7"/></svg>
+                  macOS, iOS, Android
+                </span>
+              </td>
+            </tr>
+            <tr>
+              <td class="py-3 px-4 text-slate-500">Self-evolution</td>
+              <td class="py-3 px-4">
+                <span class="inline-flex items-center gap-1.5">
+                  <svg class="w-3.5 h-3.5 text-green-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2.5"><path d="M5 13l4 4L19 7"/></svg>
+                  Full infrastructure self-modification
+                </span>
+              </td>
+              <td class="py-3 px-4 text-slate-500">SOUL.md updates</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <p class="text-center text-slate-500 mt-8 text-sm max-w-lg mx-auto">
+        OpenClaw excels at multi-channel messaging with device apps. Instar excels at giving Claude Code agents
+        genuine autonomy with the full power of Anthropic's development environment &mdash; without risking a policy ban.
       </p>
     </div>
   </section>
