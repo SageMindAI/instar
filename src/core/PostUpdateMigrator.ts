@@ -59,6 +59,7 @@ export class PostUpdateMigrator {
     this.migrateHooks(result);
     this.migrateClaudeMd(result);
     this.migrateScripts(result);
+    this.migrateSettings(result);
 
     return result;
   }
@@ -215,6 +216,52 @@ Strip the \`[telegram:N]\` prefix before interpreting the message. Respond natur
       }
     } else {
       result.skipped.push('scripts/health-watchdog.sh (already exists)');
+    }
+  }
+
+  /**
+   * Ensure .claude/settings.json has required MCP servers.
+   * Only adds — never removes existing configuration.
+   */
+  private migrateSettings(result: MigrationResult): void {
+    const settingsPath = path.join(this.config.projectDir, '.claude', 'settings.json');
+    if (!fs.existsSync(settingsPath)) {
+      result.skipped.push('.claude/settings.json (not found — will be created on next init)');
+      return;
+    }
+
+    let settings: Record<string, unknown>;
+    try {
+      settings = JSON.parse(fs.readFileSync(settingsPath, 'utf-8'));
+    } catch (err) {
+      result.errors.push(`settings.json read: ${err instanceof Error ? err.message : String(err)}`);
+      return;
+    }
+
+    let patched = false;
+
+    // Playwright MCP server — required for browser automation (Telegram setup, etc.)
+    if (!settings.mcpServers) {
+      settings.mcpServers = {};
+    }
+    const mcpServers = settings.mcpServers as Record<string, unknown>;
+    if (!mcpServers.playwright) {
+      mcpServers.playwright = {
+        command: 'npx',
+        args: ['-y', '@playwright/mcp@latest'],
+      };
+      patched = true;
+      result.upgraded.push('.claude/settings.json: added Playwright MCP server');
+    } else {
+      result.skipped.push('.claude/settings.json: Playwright MCP already configured');
+    }
+
+    if (patched) {
+      try {
+        fs.writeFileSync(settingsPath, JSON.stringify(settings, null, 2));
+      } catch (err) {
+        result.errors.push(`settings.json write: ${err instanceof Error ? err.message : String(err)}`);
+      }
     }
   }
 

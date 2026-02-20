@@ -1248,5 +1248,17 @@ function installClaudeSettings(projectDir: string): void {
     ];
   }
 
+  // MCP Servers: Playwright for browser automation (used by setup wizard, Telegram setup, etc.)
+  if (!settings.mcpServers) {
+    settings.mcpServers = {};
+  }
+  const mcpServers = settings.mcpServers as Record<string, unknown>;
+  if (!mcpServers.playwright) {
+    mcpServers.playwright = {
+      command: 'npx',
+      args: ['-y', '@playwright/mcp@latest'],
+    };
+  }
+
   fs.writeFileSync(settingsPath, JSON.stringify(settings, null, 2));
 }
