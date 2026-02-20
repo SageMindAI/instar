@@ -7,6 +7,7 @@
 
 import { Router } from 'express';
 import { execFileSync } from 'node:child_process';
+import { createHash, timingSafeEqual } from 'node:crypto';
 import type { SessionManager } from '../core/SessionManager.js';
 import type { StateManager } from '../core/StateManager.js';
 import type { JobScheduler } from '../scheduler/JobScheduler.js';
@@ -49,8 +50,18 @@ export function createRoutes(ctx: RouteContext): Router {
       uptimeHuman: formatUptime(uptimeMs),
     };
 
-    // Include detailed info only for authenticated callers
-    const isAuthed = !ctx.config.authToken || !!req.headers.authorization;
+    // Include detailed info only for authenticated callers.
+    // Must actually validate the token here since authMiddleware skips /health.
+    let isAuthed = !ctx.config.authToken;
+    if (!isAuthed && ctx.config.authToken) {
+      const header = req.headers.authorization;
+      if (header?.startsWith('Bearer ')) {
+        const token = header.slice(7);
+        const ha = createHash('sha256').update(token).digest();
+        const hb = createHash('sha256').update(ctx.config.authToken).digest();
+        isAuthed = timingSafeEqual(ha, hb);
+      }
+    }
     if (isAuthed) {
       const mem = process.memoryUsage();
       base.version = ctx.config.version || '0.0.0';

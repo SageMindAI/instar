@@ -5,7 +5,7 @@
  * Adapted from dawn-server's config.ts — the battle-tested version.
  */
 
-import { execSync } from 'node:child_process';
+import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import type { InstarConfig, SessionManagerConfig, JobSchedulerConfig, FeedbackConfig } from './types.js';
@@ -43,7 +43,7 @@ export function detectTmuxPath(): string | null {
 
   // Fallback: check PATH
   try {
-    const result = execSync('which tmux', { encoding: 'utf-8' }).trim();
+    const result = execFileSync('which', ['tmux'], { encoding: 'utf-8', stdio: 'pipe' }).trim();
     if (result && fs.existsSync(result)) return result;
   } catch {
     // tmux not found
@@ -62,7 +62,7 @@ export function detectClaudePath(): string | null {
 
   // Also check npm global bin directory (where `npm install -g` puts things)
   try {
-    const npmPrefix = execSync('npm config get prefix', { encoding: 'utf-8', stdio: 'pipe' }).trim();
+    const npmPrefix = execFileSync('npm', ['config', 'get', 'prefix'], { encoding: 'utf-8', stdio: 'pipe' }).trim();
     if (npmPrefix) {
       candidates.push(path.join(npmPrefix, 'bin', 'claude'));
     }
@@ -79,7 +79,7 @@ export function detectClaudePath(): string | null {
 
   // Fallback: check PATH
   try {
-    const result = execSync('which claude', { encoding: 'utf-8', stdio: 'pipe' }).trim();
+    const result = execFileSync('which', ['claude'], { encoding: 'utf-8', stdio: 'pipe' }).trim();
     if (result && fs.existsSync(result)) return result;
   } catch {
     // claude not found

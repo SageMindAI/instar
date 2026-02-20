@@ -213,8 +213,8 @@ node_modules/
 
   // Initialize git repo
   try {
-    const { execSync } = await import('node:child_process');
-    execSync('git init', { cwd: projectDir, stdio: 'pipe' });
+    const { execFileSync } = await import('node:child_process');
+    execFileSync('git', ['init'], { cwd: projectDir, stdio: 'pipe' });
     console.log(`  ${pc.green('✓')} Initialized git repository`);
   } catch {
     // Git not available — that's fine

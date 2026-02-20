@@ -404,7 +404,7 @@ export class TelegramAdapter implements MessagingAdapter {
     return (result as TelegramUpdate[]) ?? [];
   }
 
-  private async apiCall(method: string, params: Record<string, unknown>): Promise<unknown> {
+  private async apiCall(method: string, params: Record<string, unknown>, retryCount: number = 0): Promise<unknown> {
     const url = `https://api.telegram.org/bot${this.config.token}/${method}`;
     const safeUrl = `https://api.telegram.org/bot[REDACTED]/${method}`;
 
@@ -428,14 +428,17 @@ export class TelegramAdapter implements MessagingAdapter {
     if (!response.ok) {
       // Handle 429 Too Many Requests — respect Telegram's retry_after
       if (response.status === 429) {
+        if (retryCount >= 3) {
+          throw new Error(`Telegram API rate limited ${safeUrl} (429) after ${retryCount} retries`);
+        }
         try {
           const errorData = await response.json() as { parameters?: { retry_after?: number } };
           const retryAfter = errorData?.parameters?.retry_after ?? 5;
-          console.warn(`[telegram] Rate limited on ${method}, waiting ${retryAfter}s...`);
+          console.warn(`[telegram] Rate limited on ${method}, waiting ${retryAfter}s (retry ${retryCount + 1}/3)...`);
           await new Promise(resolve => setTimeout(resolve, retryAfter * 1000));
-          // Retry once after backoff
-          return this.apiCall(method, params);
-        } catch {
+          return this.apiCall(method, params, retryCount + 1);
+        } catch (retryErr) {
+          if (retryErr instanceof Error && retryErr.message.includes('after')) throw retryErr;
           throw new Error(`Telegram API rate limited ${safeUrl} (429)`);
         }
       }

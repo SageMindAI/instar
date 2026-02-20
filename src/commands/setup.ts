@@ -15,7 +15,7 @@
  * No flags needed. No manual config editing. Just answers.
  */
 
-import { execSync, spawn } from 'node:child_process';
+import { execFileSync, spawn } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import pc from 'picocolors';
@@ -372,7 +372,7 @@ async function runClassicSetup(): Promise<void> {
     if (installGlobal) {
       try {
         console.log(pc.dim('  Running: npm install -g instar'));
-        execSync('npm install -g instar', { encoding: 'utf-8', stdio: 'inherit' });
+        execFileSync('npm', ['install', '-g', 'instar'], { encoding: 'utf-8', stdio: 'inherit' });
         console.log(`  ${pc.green('✓')} instar installed globally`);
       } catch {
         console.log(pc.yellow('  Could not install globally. You can run it later:'));
@@ -409,9 +409,9 @@ async function runClassicSetup(): Promise<void> {
  */
 function isInstarGlobal(): boolean {
   try {
-    const result = execSync('which instar 2>/dev/null || where instar 2>/dev/null', {
+    const result = execFileSync('which', ['instar'], {
       encoding: 'utf-8',
-      stdio: 'pipe',
+      stdio: ['pipe', 'pipe', 'pipe'],
     }).trim();
     // npx creates a temp binary — check if it's a real global install
     return !!result && !result.includes('.npm/_npx');

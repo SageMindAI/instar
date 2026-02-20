@@ -5,7 +5,7 @@
  * and offers to install missing dependencies automatically.
  */
 
-import { execSync, execFileSync } from 'node:child_process';
+import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import pc from 'picocolors';
 import { confirm } from '@inquirer/prompts';
@@ -47,7 +47,7 @@ function detectPlatform(): 'macos-arm' | 'macos-intel' | 'linux' | 'unknown' {
  */
 function hasHomebrew(): boolean {
   try {
-    execSync('which brew', { encoding: 'utf-8', stdio: 'pipe' });
+    execFileSync('which', ['brew'], { encoding: 'utf-8', stdio: 'pipe' });
     return true;
   } catch {
     return false;
@@ -197,7 +197,11 @@ function installPrerequisite(result: PrerequisiteResult): boolean {
 
   try {
     console.log(pc.dim(`  Running: ${result.installCommand}`));
-    execSync(result.installCommand, {
+    // Split command string into executable + args for execFileSync (no shell)
+    const parts = result.installCommand.split(/\s+/);
+    const cmd = parts[0];
+    const args = parts.slice(1);
+    execFileSync(cmd, args, {
       encoding: 'utf-8',
       stdio: 'inherit',
       timeout: 120000, // 2 min timeout
