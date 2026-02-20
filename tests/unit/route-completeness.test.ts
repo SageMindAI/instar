@@ -11,7 +11,7 @@ describe('Route completeness and safety', () => {
     'utf-8'
   );
 
-  it('all 25 endpoint routes are defined', () => {
+  it('all 31 endpoint routes are defined', () => {
     const expectedRoutes = [
       "router.get('/health'",
       "router.get('/status'",
@@ -36,6 +36,12 @@ describe('Route completeness and safety', () => {
       "router.post('/feedback/retry'",
       "router.get('/updates'",
       "router.get('/updates/last'",
+      "router.get('/updates/config'",
+      "router.post('/updates/apply'",
+      "router.get('/dispatches'",
+      "router.get('/dispatches/pending'",
+      "router.get('/dispatches/context'",
+      "router.post('/dispatches/:id/apply'",
       "router.get('/quota'",
       "router.get('/events'",
     ];
