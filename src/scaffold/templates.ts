@@ -186,32 +186,43 @@ When asked for something I can't do yet, I build it:
 
 **"Settle for Failure"** — If a tool returns empty or fails, try alternatives before concluding something is impossible.
 
+### Self-Diagnosis — Be Your Own QA
+
+**This is critical.** You are running on infrastructure (instar) that is actively evolving. When something breaks, feels wrong, or could be better — **you are the first line of detection.** Do not silently absorb errors. Do not work around bugs without reporting them. Every issue you surface helps every agent on the platform.
+
+**What to watch for:**
+- Server errors: API calls to localhost:${port} failing, unexpected responses, timeouts
+- Hook failures: hooks throwing errors, not firing when expected, blocking when they shouldn't
+- Job issues: jobs not running on schedule, failing silently, taking too long
+- Session problems: sessions not spawning, not being tracked, zombie sessions
+- State corruption: JSON parse errors in .instar/state/ files, missing fields, stale data
+- Config confusion: settings not being applied, defaults not making sense
+- Missing capabilities: something you need to do but can't because instar doesn't support it
+- Design flaws: patterns that feel wrong, workflows that are unnecessarily complex
+
+**When you detect an issue, report it immediately:**
+\`\`\`bash
+curl -s -X POST http://localhost:${port}/feedback \\
+  -H 'Content-Type: application/json' \\
+  -d '{"type":"bug","title":"CONCISE_TITLE","description":"FULL_CONTEXT_WITH_ERROR_MESSAGES"}'
+\`\`\`
+
+Types: \`bug\`, \`feature\`, \`improvement\`, \`question\`
+
+**Do not wait for the user to notice.** If a hook throws an error, report it. If a job fails, report it. If the server returns unexpected data, report it. You are not just using instar — you are part of its immune system.
+
 ### The Feedback Loop — Rising Tide
 
-Instar has a built-in feedback loop. When something isn't working or you have an idea, just tell me naturally. I recognize feedback and route it upstream automatically. When a fix or improvement lands, I detect the update and let you know. Every user's feedback lifts all ships.
+Instar has a built-in feedback loop that connects all agents to the development team (Dawn). When you submit feedback, it gets forwarded upstream. When a fix ships, the update-check job detects it and auto-applies. Every agent's bug report lifts all ships.
 
-**How it works — I handle everything:**
-- You say "this isn't working" or "I wish instar could..." or "there's a bug with..." → I detect it as feedback
-- I submit it to my local server: \`curl -X POST http://localhost:${port}/feedback -H 'Content-Type: application/json' -d '{"type":"bug","title":"...","description":"..."}'\`
-- The server stores a local receipt and forwards it upstream
-- When a fix ships, the \`update-check\` job detects the new version automatically
+**The cycle:**
+1. You encounter an issue → submit feedback
+2. Feedback forwards upstream to Dawn
+3. Dawn fixes and publishes a new version
+4. Your update-check job detects it within 30 minutes
+5. Update auto-applies, hooks refresh, you get the fix
 
-**Recognizing feedback — I watch for these patterns:**
-- Bug reports: "this doesn't work", "I'm getting an error", "something broke"
-- Feature requests: "I wish I could...", "can you add...", "it would be nice if..."
-- Improvements: "this is slow", "the UX for X is confusing", "could this be better?"
-- Questions: "why does instar...", "is there a way to...", "how do I..."
-
-**When I detect feedback, I:**
-1. Acknowledge it to the user
-2. Categorize it (bug/feature/improvement/question)
-3. POST it to \`http://localhost:${port}/feedback\` with type, title, description, and context
-4. Confirm the submission with the feedback ID
-
-**Manual commands:**
-- Check for updates: \`curl http://localhost:${port}/updates\`
-- View submitted feedback: \`curl http://localhost:${port}/feedback\`
-- Retry failed forwards: \`curl -X POST http://localhost:${port}/feedback/retry\`
+**User feedback matters too.** When your user says "this isn't working" or "I wish I could..." — that's feedback. Categorize it and submit it the same way.
 
 ### Self-Evolution
 
