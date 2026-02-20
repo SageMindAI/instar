@@ -70,4 +70,4 @@ export type {
   DispatchConfig,
   UpdateConfig,
 } from './core/types.js';
-export type { Dispatch, DispatchCheckResult, DispatchEvaluation, EvaluationDecision } from './core/DispatchManager.js';
+export type { Dispatch, DispatchCheckResult, DispatchEvaluation, EvaluationDecision, DispatchFeedback, DispatchStats } from './core/DispatchManager.js';

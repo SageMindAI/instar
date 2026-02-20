@@ -601,6 +601,68 @@ export function createRoutes(ctx: RouteContext): Router {
     });
   });
 
+  router.post('/dispatches/:id/feedback', async (req, res) => {
+    if (!ctx.dispatches) {
+      res.status(503).json({ error: 'Dispatch system not configured' });
+      return;
+    }
+
+    const { helpful, comment } = req.body as { helpful?: boolean; comment?: string };
+
+    if (typeof helpful !== 'boolean') {
+      res.status(400).json({ error: '"helpful" must be a boolean' });
+      return;
+    }
+    if (comment !== undefined && (typeof comment !== 'string' || comment.length > 2000)) {
+      res.status(400).json({ error: '"comment" must be a string under 2000 characters' });
+      return;
+    }
+
+    const success = ctx.dispatches.recordFeedback(req.params.id, helpful, comment);
+    if (!success) {
+      res.status(404).json({ error: 'Dispatch not found' });
+      return;
+    }
+
+    // Also forward to FeedbackManager for upstream delivery to Dawn
+    if (ctx.feedback) {
+      const dispatch = ctx.dispatches.get(req.params.id);
+      try {
+        await ctx.feedback.submit({
+          type: 'improvement',
+          title: `Dispatch feedback: ${dispatch?.title ?? req.params.id}`,
+          description: `Dispatch ${req.params.id} was ${helpful ? 'helpful' : 'not helpful'}.${comment ? ` Comment: ${comment}` : ''}`,
+          agentName: ctx.config.projectName,
+          instarVersion: ctx.config.version ?? '0.0.0',
+          nodeVersion: process.version,
+          os: process.platform,
+          context: JSON.stringify({
+            dispatchId: req.params.id,
+            dispatchType: dispatch?.type,
+            helpful,
+            comment,
+          }),
+        });
+      } catch {
+        // Don't fail the response if feedback forwarding fails
+      }
+    }
+
+    res.json({ recorded: true, helpful });
+  });
+
+  router.get('/dispatches/stats', (_req, res) => {
+    if (!ctx.dispatches) {
+      res.json({
+        total: 0, applied: 0, pending: 0, rejected: 0,
+        helpfulCount: 0, unhelpfulCount: 0, byType: {},
+      });
+      return;
+    }
+
+    res.json(ctx.dispatches.stats());
+  });
+
   // ── Quota ──────────────────────────────────────────────────────
 
   router.get('/quota', (_req, res) => {

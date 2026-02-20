@@ -33,6 +33,8 @@ export interface Dispatch {
   applied: boolean;
   /** Evaluation decision (Phase 2) */
   evaluation?: DispatchEvaluation;
+  /** Feedback on dispatch effectiveness (Phase 3) */
+  feedback?: DispatchFeedback;
 }
 
 export type EvaluationDecision = 'accepted' | 'rejected' | 'deferred';
@@ -46,6 +48,32 @@ export interface DispatchEvaluation {
   evaluatedAt: string;
   /** Whether this was auto-evaluated (vs manual agent evaluation) */
   auto: boolean;
+}
+
+export interface DispatchFeedback {
+  /** Whether the dispatch was helpful */
+  helpful: boolean;
+  /** Optional comment about the dispatch */
+  comment?: string;
+  /** When this feedback was recorded */
+  feedbackAt: string;
+}
+
+export interface DispatchStats {
+  /** Total dispatches received */
+  total: number;
+  /** Applied dispatches */
+  applied: number;
+  /** Pending (unapplied) dispatches */
+  pending: number;
+  /** Rejected dispatches */
+  rejected: number;
+  /** Dispatches marked helpful */
+  helpfulCount: number;
+  /** Dispatches marked unhelpful */
+  unhelpfulCount: number;
+  /** Breakdown by type */
+  byType: Record<string, { total: number; applied: number; helpful: number }>;
 }
 
 export interface DispatchCheckResult {
@@ -384,6 +412,83 @@ export class DispatchManager {
     } catch {
       return '';
     }
+  }
+
+  // ── Phase 3: Feedback Loop Closure ─────────────────────────────
+
+  /**
+   * Record feedback on a dispatch — was it helpful?
+   * This is the agent-side of the feedback loop. The route handler
+   * should also forward this to FeedbackManager for upstream delivery.
+   */
+  recordFeedback(dispatchId: string, helpful: boolean, comment?: string): boolean {
+    const dispatches = this.loadDispatches();
+    const dispatch = dispatches.find(d => d.dispatchId === dispatchId);
+    if (!dispatch) return false;
+
+    dispatch.feedback = {
+      helpful,
+      comment,
+      feedbackAt: new Date().toISOString(),
+    };
+
+    this.saveDispatches(dispatches);
+    return true;
+  }
+
+  /**
+   * Get aggregate stats about dispatch effectiveness.
+   */
+  stats(): DispatchStats {
+    const dispatches = this.loadDispatches();
+    const byType: Record<string, { total: number; applied: number; helpful: number }> = {};
+
+    let applied = 0;
+    let pending = 0;
+    let rejected = 0;
+    let helpfulCount = 0;
+    let unhelpfulCount = 0;
+
+    for (const d of dispatches) {
+      // Per-type tracking
+      if (!byType[d.type]) {
+        byType[d.type] = { total: 0, applied: 0, helpful: 0 };
+      }
+      byType[d.type].total++;
+
+      if (d.applied) {
+        applied++;
+        byType[d.type].applied++;
+      } else if (d.evaluation?.decision === 'rejected') {
+        rejected++;
+      } else {
+        pending++;
+      }
+
+      if (d.feedback?.helpful === true) {
+        helpfulCount++;
+        byType[d.type].helpful++;
+      } else if (d.feedback?.helpful === false) {
+        unhelpfulCount++;
+      }
+    }
+
+    return {
+      total: dispatches.length,
+      applied,
+      pending,
+      rejected,
+      helpfulCount,
+      unhelpfulCount,
+      byType,
+    };
+  }
+
+  /**
+   * Get dispatches that have feedback (for upstream aggregation).
+   */
+  withFeedback(): Dispatch[] {
+    return this.loadDispatches().filter(d => d.feedback != null);
   }
 
   /**

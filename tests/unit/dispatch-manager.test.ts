@@ -1001,3 +1001,289 @@ describe('DispatchManager auto-apply', () => {
     expect(manager.pending()).toHaveLength(1);
   });
 });
+
+// ── Phase 3: Feedback loop closure ──────────────────────────────
+
+describe('DispatchManager feedback', () => {
+  let tmpDir: string;
+  let dispatchFile: string;
+
+  beforeEach(() => {
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'instar-dispatch-fb-'));
+    dispatchFile = path.join(tmpDir, 'dispatches.json');
+  });
+
+  afterEach(() => {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  function seedDispatches(): Dispatch[] {
+    return [
+      {
+        dispatchId: 'dsp-fb1',
+        type: 'strategy',
+        title: 'Strategy One',
+        content: 'Try approach X.',
+        priority: 'normal',
+        createdAt: '2026-01-01T00:00:00Z',
+        receivedAt: '2026-01-01T01:00:00Z',
+        applied: true,
+      },
+      {
+        dispatchId: 'dsp-fb2',
+        type: 'lesson',
+        title: 'Lesson One',
+        content: 'Learned Y.',
+        priority: 'normal',
+        createdAt: '2026-01-02T00:00:00Z',
+        receivedAt: '2026-01-02T01:00:00Z',
+        applied: true,
+      },
+      {
+        dispatchId: 'dsp-fb3',
+        type: 'security',
+        title: 'Security Alert',
+        content: 'Watch for Z.',
+        priority: 'high',
+        createdAt: '2026-01-03T00:00:00Z',
+        receivedAt: '2026-01-03T01:00:00Z',
+        applied: false,
+        evaluation: { decision: 'rejected' as const, reason: 'Not relevant', evaluatedAt: '2026-01-03T02:00:00Z', auto: false },
+      },
+    ];
+  }
+
+  function createManager() {
+    return new DispatchManager({
+      enabled: false,
+      dispatchUrl: 'https://example.com/dispatches',
+      dispatchFile,
+    });
+  }
+
+  it('records helpful feedback', () => {
+    fs.writeFileSync(dispatchFile, JSON.stringify(seedDispatches()));
+    const manager = createManager();
+
+    const result = manager.recordFeedback('dsp-fb1', true, 'Very useful');
+    expect(result).toBe(true);
+
+    const dispatch = manager.get('dsp-fb1');
+    expect(dispatch?.feedback?.helpful).toBe(true);
+    expect(dispatch?.feedback?.comment).toBe('Very useful');
+    expect(dispatch?.feedback?.feedbackAt).toBeTruthy();
+  });
+
+  it('records unhelpful feedback', () => {
+    fs.writeFileSync(dispatchFile, JSON.stringify(seedDispatches()));
+    const manager = createManager();
+
+    manager.recordFeedback('dsp-fb2', false, 'Did not apply to my use case');
+
+    const dispatch = manager.get('dsp-fb2');
+    expect(dispatch?.feedback?.helpful).toBe(false);
+  });
+
+  it('records feedback without comment', () => {
+    fs.writeFileSync(dispatchFile, JSON.stringify(seedDispatches()));
+    const manager = createManager();
+
+    manager.recordFeedback('dsp-fb1', true);
+
+    const dispatch = manager.get('dsp-fb1');
+    expect(dispatch?.feedback?.helpful).toBe(true);
+    expect(dispatch?.feedback?.comment).toBeUndefined();
+  });
+
+  it('returns false for non-existent dispatch', () => {
+    const manager = createManager();
+    expect(manager.recordFeedback('dsp-nonexistent', true)).toBe(false);
+  });
+
+  it('persists feedback to disk', () => {
+    fs.writeFileSync(dispatchFile, JSON.stringify(seedDispatches()));
+
+    const manager1 = createManager();
+    manager1.recordFeedback('dsp-fb1', true, 'Helpful');
+
+    const manager2 = createManager();
+    expect(manager2.get('dsp-fb1')?.feedback?.helpful).toBe(true);
+  });
+
+  it('withFeedback returns only dispatches that have feedback', () => {
+    fs.writeFileSync(dispatchFile, JSON.stringify(seedDispatches()));
+    const manager = createManager();
+
+    manager.recordFeedback('dsp-fb1', true);
+    // dsp-fb2 and dsp-fb3 have no feedback
+
+    const withFb = manager.withFeedback();
+    expect(withFb).toHaveLength(1);
+    expect(withFb[0].dispatchId).toBe('dsp-fb1');
+  });
+});
+
+describe('DispatchManager stats', () => {
+  let tmpDir: string;
+  let dispatchFile: string;
+
+  beforeEach(() => {
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'instar-dispatch-stats-'));
+    dispatchFile = path.join(tmpDir, 'dispatches.json');
+  });
+
+  afterEach(() => {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  function createManager() {
+    return new DispatchManager({
+      enabled: false,
+      dispatchUrl: 'https://example.com/dispatches',
+      dispatchFile,
+    });
+  }
+
+  it('returns zero stats when no dispatches', () => {
+    const manager = createManager();
+    const stats = manager.stats();
+    expect(stats.total).toBe(0);
+    expect(stats.applied).toBe(0);
+    expect(stats.pending).toBe(0);
+    expect(stats.rejected).toBe(0);
+    expect(stats.helpfulCount).toBe(0);
+    expect(stats.unhelpfulCount).toBe(0);
+    expect(stats.byType).toEqual({});
+  });
+
+  it('counts applied, pending, and rejected correctly', () => {
+    const dispatches: Dispatch[] = [
+      {
+        dispatchId: 'dsp-s1',
+        type: 'strategy',
+        title: 'Applied',
+        content: '',
+        priority: 'normal',
+        createdAt: '2026-01-01T00:00:00Z',
+        receivedAt: '2026-01-01T01:00:00Z',
+        applied: true,
+      },
+      {
+        dispatchId: 'dsp-s2',
+        type: 'lesson',
+        title: 'Pending',
+        content: '',
+        priority: 'normal',
+        createdAt: '2026-01-02T00:00:00Z',
+        receivedAt: '2026-01-02T01:00:00Z',
+        applied: false,
+      },
+      {
+        dispatchId: 'dsp-s3',
+        type: 'security',
+        title: 'Rejected',
+        content: '',
+        priority: 'high',
+        createdAt: '2026-01-03T00:00:00Z',
+        receivedAt: '2026-01-03T01:00:00Z',
+        applied: false,
+        evaluation: { decision: 'rejected' as const, reason: 'test', evaluatedAt: '2026-01-03T02:00:00Z', auto: false },
+      },
+    ];
+    fs.writeFileSync(dispatchFile, JSON.stringify(dispatches));
+
+    const manager = createManager();
+    const stats = manager.stats();
+    expect(stats.total).toBe(3);
+    expect(stats.applied).toBe(1);
+    expect(stats.pending).toBe(1);
+    expect(stats.rejected).toBe(1);
+  });
+
+  it('counts helpful and unhelpful feedback', () => {
+    const dispatches: Dispatch[] = [
+      {
+        dispatchId: 'dsp-h1',
+        type: 'strategy',
+        title: 'Helpful',
+        content: '',
+        priority: 'normal',
+        createdAt: '2026-01-01T00:00:00Z',
+        receivedAt: '2026-01-01T01:00:00Z',
+        applied: true,
+        feedback: { helpful: true, feedbackAt: '2026-01-02T00:00:00Z' },
+      },
+      {
+        dispatchId: 'dsp-h2',
+        type: 'strategy',
+        title: 'Also Helpful',
+        content: '',
+        priority: 'normal',
+        createdAt: '2026-01-02T00:00:00Z',
+        receivedAt: '2026-01-02T01:00:00Z',
+        applied: true,
+        feedback: { helpful: true, feedbackAt: '2026-01-03T00:00:00Z' },
+      },
+      {
+        dispatchId: 'dsp-h3',
+        type: 'lesson',
+        title: 'Not Helpful',
+        content: '',
+        priority: 'normal',
+        createdAt: '2026-01-03T00:00:00Z',
+        receivedAt: '2026-01-03T01:00:00Z',
+        applied: true,
+        feedback: { helpful: false, comment: 'Did not work', feedbackAt: '2026-01-04T00:00:00Z' },
+      },
+    ];
+    fs.writeFileSync(dispatchFile, JSON.stringify(dispatches));
+
+    const manager = createManager();
+    const stats = manager.stats();
+    expect(stats.helpfulCount).toBe(2);
+    expect(stats.unhelpfulCount).toBe(1);
+  });
+
+  it('breaks down stats by type', () => {
+    const dispatches: Dispatch[] = [
+      {
+        dispatchId: 'dsp-t1',
+        type: 'strategy',
+        title: 'S1',
+        content: '',
+        priority: 'normal',
+        createdAt: '2026-01-01T00:00:00Z',
+        receivedAt: '2026-01-01T01:00:00Z',
+        applied: true,
+        feedback: { helpful: true, feedbackAt: '2026-01-02T00:00:00Z' },
+      },
+      {
+        dispatchId: 'dsp-t2',
+        type: 'strategy',
+        title: 'S2',
+        content: '',
+        priority: 'normal',
+        createdAt: '2026-01-02T00:00:00Z',
+        receivedAt: '2026-01-02T01:00:00Z',
+        applied: false,
+      },
+      {
+        dispatchId: 'dsp-t3',
+        type: 'lesson',
+        title: 'L1',
+        content: '',
+        priority: 'normal',
+        createdAt: '2026-01-03T00:00:00Z',
+        receivedAt: '2026-01-03T01:00:00Z',
+        applied: true,
+      },
+    ];
+    fs.writeFileSync(dispatchFile, JSON.stringify(dispatches));
+
+    const manager = createManager();
+    const stats = manager.stats();
+
+    expect(stats.byType['strategy']).toEqual({ total: 2, applied: 1, helpful: 1 });
+    expect(stats.byType['lesson']).toEqual({ total: 1, applied: 1, helpful: 0 });
+  });
+});
