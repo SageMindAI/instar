@@ -1,5 +1,5 @@
 /**
- * Tests for CLI `add` subcommands — addTelegram, addQuota, addSentry.
+ * Tests for CLI `add` subcommands — addTelegram, addEmail, addQuota, addSentry.
  *
  * Validates config file mutation, atomic writes, and error handling.
  */
@@ -195,6 +195,91 @@ describe('CLI add commands', () => {
       expect(saved.monitoring.quotaTracking).toBe(true);
       expect(saved.monitoring.memoryMonitoring).toBe(true);
       expect(saved.monitoring.healthCheckIntervalMs).toBe(15000);
+    });
+  });
+
+  describe('addEmail logic', () => {
+    it('adds email config to messaging array', () => {
+      const configPath = writeConfig();
+
+      const config = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
+      if (!config.messaging) config.messaging = [];
+      config.messaging = config.messaging.filter((m: { type: string }) => m.type !== 'email');
+      config.messaging.push({
+        type: 'email',
+        enabled: true,
+        config: {
+          credentialsFile: './credentials.json',
+          tokenFile: '/home/user/.instar/gmail-token.json',
+        },
+      });
+      const tmpPath = configPath + '.tmp';
+      fs.writeFileSync(tmpPath, JSON.stringify(config, null, 2));
+      fs.renameSync(tmpPath, configPath);
+
+      const saved = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
+      expect(saved.messaging).toHaveLength(1);
+      expect(saved.messaging[0].type).toBe('email');
+      expect(saved.messaging[0].config.credentialsFile).toBe('./credentials.json');
+      expect(saved.messaging[0].config.tokenFile).toBe('/home/user/.instar/gmail-token.json');
+      expect(saved.messaging[0].enabled).toBe(true);
+    });
+
+    it('replaces existing email config', () => {
+      const configPath = writeConfig({
+        messaging: [
+          { type: 'email', enabled: true, config: { credentialsFile: './old.json' } },
+        ],
+      });
+
+      const config = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
+      config.messaging = config.messaging.filter((m: { type: string }) => m.type !== 'email');
+      config.messaging.push({
+        type: 'email',
+        enabled: true,
+        config: { credentialsFile: './new.json', tokenFile: './token.json' },
+      });
+      const tmpPath = configPath + '.tmp';
+      fs.writeFileSync(tmpPath, JSON.stringify(config, null, 2));
+      fs.renameSync(tmpPath, configPath);
+
+      const saved = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
+      expect(saved.messaging).toHaveLength(1);
+      expect(saved.messaging[0].config.credentialsFile).toBe('./new.json');
+    });
+
+    it('preserves other messaging adapters when adding email', () => {
+      const configPath = writeConfig({
+        messaging: [
+          { type: 'telegram', enabled: true, config: { token: 'tg-token', chatId: '-100' } },
+        ],
+      });
+
+      const config = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
+      config.messaging = config.messaging.filter((m: { type: string }) => m.type !== 'email');
+      config.messaging.push({
+        type: 'email',
+        enabled: true,
+        config: { credentialsFile: './creds.json', tokenFile: './tok.json' },
+      });
+      fs.writeFileSync(configPath, JSON.stringify(config, null, 2));
+
+      const saved = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
+      expect(saved.messaging).toHaveLength(2);
+      const types = saved.messaging.map((m: { type: string }) => m.type).sort();
+      expect(types).toEqual(['email', 'telegram']);
+    });
+
+    it('uses atomic write (no .tmp file left after write)', () => {
+      const configPath = writeConfig();
+
+      const config = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
+      config.messaging = [{ type: 'email', enabled: true, config: { credentialsFile: './c.json' } }];
+      const tmpPath = configPath + '.tmp';
+      fs.writeFileSync(tmpPath, JSON.stringify(config, null, 2));
+      fs.renameSync(tmpPath, configPath);
+
+      expect(fs.existsSync(tmpPath)).toBe(false);
     });
   });
 

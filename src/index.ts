@@ -21,7 +21,7 @@ export { loadJobs, validateJob } from './scheduler/JobLoader.js';
 
 // Server
 export { AgentServer } from './server/AgentServer.js';
-export { createRoutes } from './server/routes.js';
+export { createRoutes, formatUptime } from './server/routes.js';
 export { corsMiddleware, authMiddleware, rateLimiter, requestTimeout, errorHandler } from './server/middleware.js';
 
 // Monitoring

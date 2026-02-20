@@ -447,7 +447,7 @@ export function createRoutes(ctx: RouteContext): Router {
   return router;
 }
 
-function formatUptime(ms: number): string {
+export function formatUptime(ms: number): string {
   const seconds = Math.floor(ms / 1000);
   const minutes = Math.floor(seconds / 60);
   const hours = Math.floor(minutes / 60);

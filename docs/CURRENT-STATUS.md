@@ -39,7 +39,7 @@ Persistent autonomy infrastructure for AI agents. Gives Claude Code a persistent
 - Quota tracking (file-based state reading, threshold-based load shedding for job scheduler)
 - Input validation on all API endpoints (name/prompt/text length limits, model enum validation)
 - Full project scaffolding (AGENT.md, USER.md, MEMORY.md, CLAUDE.md, hooks, scripts)
-- 575+ tests passing (unit + integration + e2e across 60+ test files)
+- 580+ tests passing (unit + integration + e2e across 56+ test files)
 - `.npmignore` configured to exclude tests, docs, source, dev files
 
 ### Architecture
@@ -125,7 +125,7 @@ src/
 - [x] Implement `instar add telegram` subcommand (reads/updates config.json)
 - [x] Implement `instar add quota` subcommand (enables quota tracking in config)
 - [x] Implement `instar add sentry` subcommand (writes DSN to monitoring config)
-- [ ] Implement `instar add email` subcommand (currently stub)
+- [x] Implement `instar add email` subcommand (Gmail credentials config)
 - [x] Quota tracking data source (QuotaTracker reads state file, threshold-based load shedding)
 
 ### Nice to Have

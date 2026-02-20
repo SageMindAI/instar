@@ -1,37 +1,38 @@
 import { describe, it, expect } from 'vitest';
-import fs from 'node:fs';
-import path from 'node:path';
+import { formatUptime } from '../../src/server/routes.js';
 
 /**
- * Tests for the formatUptime helper in routes.ts.
- * Since it's not exported, we verify via source-level inspection
- * and through the /health endpoint behavior in integration tests.
+ * Tests for the formatUptime helper — now exported and tested directly.
  */
-describe('formatUptime helper', () => {
-  const routesSource = fs.readFileSync(
-    path.join(process.cwd(), 'src/server/routes.ts'),
-    'utf-8'
-  );
-
-  it('formatUptime is defined in routes.ts', () => {
-    expect(routesSource).toContain('function formatUptime(ms: number): string');
+describe('formatUptime', () => {
+  it('formats seconds only', () => {
+    expect(formatUptime(5000)).toBe('5s');
+    expect(formatUptime(0)).toBe('0s');
+    expect(formatUptime(59_999)).toBe('59s');
   });
 
-  it('handles days, hours, minutes, and seconds', () => {
-    // Uses template literals: `${days}d ${hours % 24}h` etc.
-    expect(routesSource).toContain('d ${hours');
-    expect(routesSource).toContain('h ${minutes');
-    expect(routesSource).toContain('m ${seconds');
+  it('formats minutes and seconds', () => {
+    expect(formatUptime(60_000)).toBe('1m 0s');
+    expect(formatUptime(90_000)).toBe('1m 30s');
+    expect(formatUptime(3_599_999)).toBe('59m 59s');
   });
 
-  it('health endpoint includes uptimeHuman in response', () => {
-    expect(routesSource).toContain('uptimeHuman: formatUptime(uptimeMs)');
+  it('formats hours and minutes', () => {
+    expect(formatUptime(3_600_000)).toBe('1h 0m');
+    expect(formatUptime(7_200_000)).toBe('2h 0m');
+    expect(formatUptime(5_400_000)).toBe('1h 30m');
   });
 
-  it('health endpoint includes all expected fields', () => {
-    expect(routesSource).toContain("status: 'ok'");
-    expect(routesSource).toContain('uptime: uptimeMs');
-    expect(routesSource).toContain('version: ctx.config.version');
-    expect(routesSource).toContain('project: ctx.config.projectName');
+  it('formats days and hours', () => {
+    expect(formatUptime(86_400_000)).toBe('1d 0h');
+    expect(formatUptime(90_000_000)).toBe('1d 1h');
+    expect(formatUptime(172_800_000)).toBe('2d 0h');
+    expect(formatUptime(180_000_000)).toBe('2d 2h');
+  });
+
+  it('prioritizes largest unit (days > hours > minutes > seconds)', () => {
+    // 1 day, 2 hours, 3 minutes, 4 seconds → should show "1d 2h"
+    const ms = 86_400_000 + 7_200_000 + 180_000 + 4000;
+    expect(formatUptime(ms)).toBe('1d 2h');
   });
 });

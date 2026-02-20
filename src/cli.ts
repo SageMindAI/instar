@@ -123,6 +123,57 @@ async function addSentry(opts: { dsn?: string }): Promise<void> {
 }
 
 /**
+ * Add email (Gmail) integration configuration.
+ */
+async function addEmail(opts: { credentialsFile?: string; tokenFile?: string }): Promise<void> {
+  const configPath = path.join(process.cwd(), '.instar', 'config.json');
+  if (!fs.existsSync(configPath)) {
+    console.log(pc.red('No .instar/config.json found. Run `instar init` first.'));
+    process.exit(1);
+  }
+
+  if (!opts.credentialsFile) {
+    console.log(pc.yellow('The --credentials-file option is required.'));
+    console.log();
+    console.log('Usage:');
+    console.log(`  instar add email --credentials-file ./credentials.json`);
+    console.log();
+    console.log('To get credentials:');
+    console.log('  1. Go to https://console.cloud.google.com → APIs & Services → Credentials');
+    console.log('  2. Create OAuth 2.0 Client ID (Desktop app)');
+    console.log('  3. Download the credentials JSON file');
+    process.exit(1);
+  }
+
+  // Read, update, write config
+  const config = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
+
+  if (!config.messaging) config.messaging = [];
+
+  // Remove existing email config if any
+  config.messaging = config.messaging.filter((m: { type: string }) => m.type !== 'email');
+
+  config.messaging.push({
+    type: 'email',
+    enabled: true,
+    config: {
+      credentialsFile: opts.credentialsFile,
+      tokenFile: opts.tokenFile || path.join(process.cwd(), '.instar', 'gmail-token.json'),
+    },
+  });
+
+  const tmpPath = configPath + '.tmp';
+  fs.writeFileSync(tmpPath, JSON.stringify(config, null, 2));
+  fs.renameSync(tmpPath, configPath);
+
+  console.log(pc.green('Email (Gmail) integration configured!'));
+  console.log(`  Credentials: ${opts.credentialsFile}`);
+  console.log(`  Token file: ${opts.tokenFile || '.instar/gmail-token.json'}`);
+  console.log();
+  console.log(`Restart the server to apply: ${pc.cyan('instar server stop && instar server start')}`);
+}
+
+/**
  * Enable quota tracking in the project config.
  */
 async function addQuota(opts: { stateFile?: string }): Promise<void> {
@@ -204,9 +255,9 @@ addCmd
 addCmd
   .command('email')
   .description('Add email integration (Gmail)')
-  .action((_opts) => {
-    console.log('TODO: Add email integration');
-  });
+  .option('--credentials-file <path>', 'Path to Google OAuth credentials JSON file')
+  .option('--token-file <path>', 'Path to store Gmail auth token')
+  .action((opts) => addEmail(opts));
 
 addCmd
   .command('sentry')
