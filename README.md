@@ -46,6 +46,38 @@ The wizard walks you through everything: identity, Telegram, jobs, server. One c
 
 **Requirements:** Node.js 18+ · [Claude Code CLI](https://docs.anthropic.com/en/docs/claude-code) · tmux · [API key](https://console.anthropic.com/) or Claude subscription
 
+## CLI Reference
+
+```bash
+# Setup
+instar                          # Interactive setup wizard (Claude-powered)
+instar setup                    # Same as above
+instar setup --classic          # Inquirer-based fallback wizard
+instar init my-project          # Create a new agent project from scratch
+instar init                     # Add agent infrastructure to existing project
+
+# Server
+instar server start             # Start the persistent server (background, tmux)
+instar server start --foreground  # Start in foreground (for development)
+instar server stop              # Stop the server
+instar status                   # Show agent infrastructure status
+
+# Add capabilities
+instar add telegram --token BOT_TOKEN --chat-id CHAT_ID
+instar add email --credentials-file ./credentials.json [--token-file ./token.json]
+instar add quota [--state-file ./quota.json]
+instar add sentry --dsn https://key@o0.ingest.sentry.io/0
+
+# Users and jobs
+instar user add --id alice --name "Alice" [--telegram 123] [--email a@b.com]
+instar user list
+instar job add --slug check-email --name "Email Check" --schedule "0 */2 * * *"
+instar job list
+
+# Feedback
+instar feedback --type bug --title "Session timeout" --description "Details..."
+```
+
 ## Highlights
 
 - **[Persistent Server](#persistent-server)** -- Express server in tmux. Runs 24/7, survives disconnects, auto-recovers.

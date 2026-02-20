@@ -126,6 +126,49 @@ describe('RelationshipManager', () => {
       // Should have significance > 1 with 5 interactions + recent + some themes
       expect(updated.significance).toBeGreaterThan(1);
     });
+
+    it('significance floors at 1 for new relationships', () => {
+      const record = manager.findOrCreate('NewPerson', telegramChannel);
+      // 0 interactions, but significance should be at least 1 (minimum)
+      expect(record.significance).toBe(1);
+    });
+
+    it('significance grows with many interactions and diverse themes', () => {
+      const record = manager.findOrCreate('Power', telegramChannel);
+
+      // 50+ interactions with 10+ themes → should reach high significance
+      for (let i = 0; i < 55; i++) {
+        manager.recordInteraction(record.id, {
+          timestamp: new Date().toISOString(),
+          channel: 'telegram',
+          summary: `Deep conversation ${i}`,
+          topics: [`topic-${i % 12}`], // 12 unique themes
+        });
+      }
+
+      const updated = manager.get(record.id)!;
+      // Frequency(4) + Recency(3) + Themes(3) = 10 → capped at 10
+      expect(updated.significance).toBe(10);
+    });
+
+    it('significance decays when interactions are old', () => {
+      const record = manager.findOrCreate('Fading', telegramChannel);
+
+      // Record many old interactions
+      const oldDate = new Date(Date.now() - 60 * 24 * 60 * 60 * 1000); // 60 days ago
+      for (let i = 0; i < 25; i++) {
+        manager.recordInteraction(record.id, {
+          timestamp: oldDate.toISOString(),
+          channel: 'telegram',
+          summary: `Old chat ${i}`,
+          topics: [`old-${i % 6}`],
+        });
+      }
+
+      const updated = manager.get(record.id)!;
+      // Frequency(3) + Recency(0, >30 days) + Themes(2, 6 themes) = 5
+      expect(updated.significance).toBe(5);
+    });
   });
 
   describe('linkChannel', () => {

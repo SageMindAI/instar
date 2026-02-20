@@ -133,14 +133,76 @@ describe('TelegramAdapter registry and message log', () => {
   });
 
   describe('log rotation', () => {
-    it('source contains rotation logic', () => {
-      const source = fs.readFileSync(
-        path.join(process.cwd(), 'src/messaging/TelegramAdapter.ts'),
-        'utf-8'
-      );
-      expect(source).toContain('maybeRotateLog');
-      expect(source).toContain('10_000');
-      expect(source).toContain('5_000');
+    it('rotates log when exceeding 10,000 lines and 2MB', async () => {
+      const logPath = path.join(tmpDir, 'telegram-messages.jsonl');
+
+      // Generate 10,500 lines, each ~200 bytes to exceed 2MB threshold
+      const lines: string[] = [];
+      for (let i = 0; i < 10_500; i++) {
+        lines.push(JSON.stringify({
+          messageId: i,
+          topicId: 42,
+          text: `Test message with padding to reach size threshold ${i} ${'x'.repeat(80)}`,
+          fromUser: true,
+          timestamp: `2026-01-${String(Math.floor(i / 500) + 1).padStart(2, '0')}T00:00:00Z`,
+          sessionName: `sess-${i}`,
+        }));
+      }
+      fs.writeFileSync(logPath, lines.join('\n') + '\n');
+
+      // Verify file is large enough to trigger rotation
+      const sizeBefore = fs.statSync(logPath).size;
+      expect(sizeBefore).toBeGreaterThan(2 * 1024 * 1024);
+
+      // Trigger rotation by sending a message (calls logMessage → maybeRotateLog)
+      const mockFetch = vi.fn().mockResolvedValue({
+        ok: true,
+        json: async () => ({ ok: true, result: { message_id: 99999 } }),
+      });
+      vi.stubGlobal('fetch', mockFetch);
+
+      await adapter.sendToTopic(42, 'trigger rotation');
+
+      vi.unstubAllGlobals();
+
+      // After rotation, file should have ~5,001 lines (5,000 kept + 1 new outbound)
+      const content = fs.readFileSync(logPath, 'utf-8');
+      const remaining = content.split('\n').filter(Boolean);
+      expect(remaining.length).toBeLessThanOrEqual(5_010);
+      expect(remaining.length).toBeGreaterThanOrEqual(5_000);
+
+      // The kept lines should be the most recent (highest messageId values)
+      const firstKept = JSON.parse(remaining[0]);
+      expect(firstKept.messageId).toBeGreaterThan(5_000);
+    });
+
+    it('does not rotate when log is under 2MB', async () => {
+      const logPath = path.join(tmpDir, 'telegram-messages.jsonl');
+
+      // Write a small number of lines (well under 2MB)
+      const lines: string[] = [];
+      for (let i = 0; i < 100; i++) {
+        lines.push(JSON.stringify({
+          messageId: i, topicId: 42, text: `Message ${i}`,
+          fromUser: true, timestamp: '2026-01-01T00:00:00Z', sessionName: null,
+        }));
+      }
+      fs.writeFileSync(logPath, lines.join('\n') + '\n');
+
+      const mockFetch = vi.fn().mockResolvedValue({
+        ok: true,
+        json: async () => ({ ok: true, result: { message_id: 200 } }),
+      });
+      vi.stubGlobal('fetch', mockFetch);
+
+      await adapter.sendToTopic(42, 'no rotation needed');
+
+      vi.unstubAllGlobals();
+
+      // All original lines should still be present, plus the new outbound one
+      const content = fs.readFileSync(logPath, 'utf-8');
+      const remaining = content.split('\n').filter(Boolean);
+      expect(remaining.length).toBe(101); // 100 original + 1 new
     });
   });
 
