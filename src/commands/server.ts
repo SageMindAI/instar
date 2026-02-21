@@ -72,16 +72,17 @@ async function respawnSessionForTopic(
   fs.mkdirSync(tmpDir, { recursive: true });
 
   let bootstrapMessage: string;
+  const relayNote = `You MUST relay your response via: cat <<'EOF' | .claude/scripts/telegram-reply.sh ${topicId}\nYour response\nEOF`;
 
   if (historyLines.length > 0) {
     const historyContent = historyLines.join('\n');
     const filepath = path.join(tmpDir, `history-${topicId}-${Date.now()}-${process.pid}.txt`);
     fs.writeFileSync(filepath, historyContent);
 
-    // Single-line: user message + file reference for history
-    bootstrapMessage = `[telegram:${topicId}] ${msg} (Session respawned. Thread history at ${filepath} — read it for context before responding.)`;
+    // Single-line: user message + file reference for history + relay instructions
+    bootstrapMessage = `[telegram:${topicId}] ${msg} (Session respawned. Thread history at ${filepath} — read it for context before responding. ${relayNote})`;
   } else {
-    bootstrapMessage = `[telegram:${topicId}] ${msg}`;
+    bootstrapMessage = `[telegram:${topicId}] ${msg} (${relayNote})`;
   }
 
   const storedName = telegram.getTopicName(topicId);
@@ -189,7 +190,7 @@ function wireTelegramRouting(
         try {
           const topic = await telegram.createForumTopic(topicName, 9367192); // Green
           const newSession = await sessionManager.spawnInteractiveSession(
-            `[telegram:${topic.topicId}] New session started.`,
+            `[telegram:${topic.topicId}] New session started. (IMPORTANT: Relay all responses back via: cat <<'EOF' | .claude/scripts/telegram-reply.sh ${topic.topicId}\nYour response\nEOF)`,
             topicName,
           );
           telegram.registerTopicSession(topic.topicId, newSession);
@@ -225,20 +226,27 @@ function wireTelegramRouting(
       console.log(`[telegram→session] No session for topic ${topicId}, auto-spawning...`);
       const storedName = telegram.getTopicName(topicId) || `topic-${topicId}`;
 
-      // Single-line bootstrap to avoid tmux send-keys newline issues.
-      // Multi-line context is written to a temp file for Claude to read.
+      // Write relay instructions to a temp file and reference it in the bootstrap message.
+      // The session needs to know HOW to respond back to Telegram.
       const contextLines = [
         `This session was auto-created for Telegram topic ${topicId}.`,
-        `Respond to the user's message via Telegram relay: cat <<'EOF' | .claude/scripts/telegram-reply.sh ${topicId}`,
-        `Your response here`,
+        ``,
+        `CRITICAL: You MUST relay your response back to Telegram after responding.`,
+        `Use the relay script:`,
+        ``,
+        `cat <<'EOF' | .claude/scripts/telegram-reply.sh ${topicId}`,
+        `Your response text here`,
         `EOF`,
+        ``,
+        `Strip the [telegram:${topicId}] prefix before interpreting the message.`,
+        `Only relay conversational text — not tool output or internal reasoning.`,
       ];
       const tmpDir = '/tmp/instar-telegram';
       fs.mkdirSync(tmpDir, { recursive: true });
       const ctxPath = path.join(tmpDir, `ctx-${topicId}-${Date.now()}.txt`);
       fs.writeFileSync(ctxPath, contextLines.join('\n'));
 
-      const bootstrapMessage = `[telegram:${topicId}] ${text}`;
+      const bootstrapMessage = `[telegram:${topicId}] ${text} (IMPORTANT: Read ${ctxPath} for Telegram relay instructions — you MUST relay your response back.)`;
 
       sessionManager.spawnInteractiveSession(bootstrapMessage, storedName).then((newSessionName) => {
         telegram.registerTopicSession(topicId, newSessionName);
