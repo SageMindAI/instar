@@ -114,7 +114,7 @@ describe('TunnelManager', () => {
       expect(url).toBe('https://abc123.trycloudflare.com');
       expect(tm.url).toBe('https://abc123.trycloudflare.com');
       expect(tm.isRunning).toBe(true);
-      expect(lastQuickUrl).toBe('http://localhost:7777');
+      expect(lastQuickUrl).toBe('http://127.0.0.1:7777');
     });
 
     it('saves state to disk on url event', async () => {

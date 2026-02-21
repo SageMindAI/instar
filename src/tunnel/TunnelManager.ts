@@ -152,10 +152,19 @@ export class TunnelManager extends EventEmitter {
 
   private startQuickTunnel(): Promise<string> {
     return new Promise((resolve, reject) => {
-      const localUrl = `http://localhost:${this.config.port}`;
+      const localUrl = `http://127.0.0.1:${this.config.port}`;
 
       try {
-        this.tunnel = Tunnel.quick(localUrl);
+        // Write an empty config to prevent cloudflared from loading
+        // ~/.cloudflared/config.yml, which may contain named tunnel
+        // ingress rules that override the quick tunnel's --url proxy.
+        const emptyConfig = path.join(this.config.stateDir, 'cloudflared-quick.yml');
+        const dir = path.dirname(emptyConfig);
+        if (!fs.existsSync(dir)) {
+          fs.mkdirSync(dir, { recursive: true });
+        }
+        fs.writeFileSync(emptyConfig, '# Quick tunnel — no ingress rules\n');
+        this.tunnel = Tunnel.quick(localUrl, { '--config': emptyConfig });
       } catch (err) {
         reject(new Error(`Failed to start quick tunnel: ${err instanceof Error ? err.message : String(err)}`));
         return;
