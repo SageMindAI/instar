@@ -40,7 +40,9 @@ describe('SessionManager async monitoring', () => {
   it('still has sync isSessionAlive for immediate callers', () => {
     // listRunningSessions and other sync callers need the sync version
     expect(source).toContain('isSessionAlive(tmuxSession: string): boolean');
-    expect(source).toContain('return this.tmuxSessionExists(tmuxSession)');
+    // Checks tmux session exists AND verifies Claude process is running
+    expect(source).toContain('if (!this.tmuxSessionExists(tmuxSession)) return false');
+    expect(source).toContain('pane_current_command');
   });
 
   it('catches and logs monitor tick errors', () => {
