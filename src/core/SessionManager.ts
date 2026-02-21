@@ -18,6 +18,9 @@ const execFileAsync = promisify(execFile);
 import type { Session, SessionManagerConfig, SessionStatus, ModelTier } from './types.js';
 import { StateManager } from './StateManager.js';
 
+/** Absolute maximum session duration (4 hours) — safety net for sessions without explicit timeout */
+const DEFAULT_MAX_DURATION_MINUTES = 240;
+
 /** Sanitize a string for use as part of a tmux session name. */
 function sanitizeSessionName(name: string): string {
   const sanitized = name.replace(/[^a-zA-Z0-9_-]/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, '').slice(0, 60);
@@ -73,13 +76,31 @@ export class SessionManager extends EventEmitter {
           continue;
         }
 
-        // Enforce session timeout (prevents zombie sessions)
-        if (session.maxDurationMinutes && session.startedAt) {
+        // Check for completion patterns even while session appears alive
+        // (catches sessions where Claude finished but tmux is still open)
+        if (!this.config.protectedSessions.includes(session.tmuxSession) &&
+            this.detectCompletion(session.tmuxSession)) {
+          console.log(`[SessionManager] Session "${session.name}" completed (pattern detected). Cleaning up.`);
+          try {
+            await execFileAsync(this.config.tmuxPath, ['kill-session', '-t', `=${session.tmuxSession}`]);
+          } catch { /* ignore */ }
+          session.status = 'completed';
+          session.endedAt = new Date().toISOString();
+          this.state.saveSession(session);
+          this.emit('sessionComplete', session);
+          continue;
+        }
+
+        // Enforce session timeout (prevents zombie/stuck sessions)
+        // Uses explicit maxDurationMinutes if set, otherwise falls back to
+        // DEFAULT_MAX_DURATION_MINUTES as an absolute safety net.
+        if (session.startedAt) {
+          const maxMinutes = session.maxDurationMinutes || DEFAULT_MAX_DURATION_MINUTES;
           const elapsed = (Date.now() - new Date(session.startedAt).getTime()) / 60000;
-          const buffer = Math.min(session.maxDurationMinutes * 0.2, 60); // 20% buffer, max 60 min
-          const limit = session.maxDurationMinutes + buffer;
+          const buffer = Math.min(maxMinutes * 0.2, 60); // 20% buffer, max 60 min
+          const limit = maxMinutes + buffer;
           if (elapsed > limit && !this.config.protectedSessions.includes(session.tmuxSession)) {
-            console.warn(`[SessionManager] Session "${session.name}" exceeded timeout (${Math.round(elapsed)}m > ${session.maxDurationMinutes}m). Killing.`);
+            console.warn(`[SessionManager] Session "${session.name}" exceeded timeout (${Math.round(elapsed)}m > ${maxMinutes}m). Killing.`);
             try {
               await execFileAsync(this.config.tmuxPath, ['kill-session', '-t', `=${session.tmuxSession}`]);
             } catch { /* ignore */ }
@@ -210,17 +231,44 @@ export class SessionManager extends EventEmitter {
   }
 
   /**
-   * Check if a session is still running by checking tmux (async version).
+   * Check if a session is still running by checking tmux AND verifying
+   * that the Claude process is running inside (async version).
    * Used by the monitoring loop to avoid blocking the event loop.
+   *
+   * Previously only checked `tmux has-session` which missed zombie sessions
+   * where tmux was alive but Claude had exited — causing stuck sessions
+   * that blocked the scheduler for hours.
    */
   private async isSessionAliveAsync(tmuxSession: string): Promise<boolean> {
     try {
       await execFileAsync(this.config.tmuxPath, ['has-session', '-t', `=${tmuxSession}`], {
         timeout: 5000,
       });
-      return true;
     } catch {
       return false;
+    }
+
+    // Verify Claude process is alive inside (matches sync isSessionAlive logic)
+    try {
+      const { stdout } = await execFileAsync(
+        this.config.tmuxPath,
+        ['display-message', '-t', `=${tmuxSession}:`, '-p', '#{pane_current_command}||#{pane_start_command}'],
+        { timeout: 5000 }
+      );
+      const paneInfo = stdout.trim();
+      const [paneCmd, startCmd] = paneInfo.split('||');
+      if (paneCmd && (paneCmd.includes('claude') || paneCmd.includes('node'))) {
+        return true;
+      }
+      if (paneCmd === 'bash' || paneCmd === 'zsh' || paneCmd === 'sh') {
+        if (startCmd && startCmd !== paneCmd) {
+          return true;
+        }
+        return false;
+      }
+      return true;
+    } catch {
+      return true;
     }
   }
 
@@ -365,11 +413,14 @@ export class SessionManager extends EventEmitter {
       return tmuxSession;
     }
 
-    // Enforce session cap (same check as spawnSession)
+    // Interactive sessions get a reserved slot beyond maxSessions.
+    // Users should never be blocked from interacting with their agent because
+    // scheduled jobs filled all slots. Interactive gets maxSessions + 1.
     const runningSessions = this.listRunningSessions();
-    if (runningSessions.length >= this.config.maxSessions) {
+    const interactiveLimit = this.config.maxSessions + 1;
+    if (runningSessions.length >= interactiveLimit) {
       throw new Error(
-        `Max sessions (${this.config.maxSessions}) reached. ` +
+        `Max sessions (${interactiveLimit}, including interactive reserve) reached. ` +
         `Running: ${runningSessions.map(s => s.name).join(', ')}`
       );
     }
@@ -388,7 +439,7 @@ export class SessionManager extends EventEmitter {
       throw new Error(`Failed to create interactive tmux session: ${err}`);
     }
 
-    // Track it in state
+    // Track it in state (with default timeout — interactive sessions shouldn't hang forever)
     const session: Session = {
       id: this.generateId(),
       name: name || tmuxSession,
@@ -396,6 +447,7 @@ export class SessionManager extends EventEmitter {
       tmuxSession,
       startedAt: new Date().toISOString(),
       prompt: initialMessage,
+      maxDurationMinutes: DEFAULT_MAX_DURATION_MINUTES,
     };
     this.state.saveSession(session);
 

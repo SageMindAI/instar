@@ -66,12 +66,20 @@ export interface JobDefinition {
   enabled: boolean;
   /** The skill or prompt to execute */
   execute: JobExecution;
+  /** Pre-flight gate command — runs before spawning a session.
+   *  If the command exits non-zero, the job is skipped (nothing to do).
+   *  Zero-token pre-screening that prevents unnecessary Claude sessions.
+   *  Example: `curl -sf http://localhost:3000/updates | python3 -c "import sys,json; exit(0 if json.load(sys.stdin).get('updateAvailable') else 1)"`
+   */
+  gate?: string;
   /** Tags for filtering/grouping */
   tags?: string[];
   /** Telegram topic ID this job reports to (auto-created if not set) */
   topicId?: number;
   /** Grounding configuration — what context this job needs at session start */
   grounding?: JobGrounding;
+  /** LLM supervision tier — see docs/LLM-SUPERVISED-EXECUTION.md */
+  supervision?: SupervisionTier;
 }
 
 export interface JobGrounding {
@@ -84,6 +92,18 @@ export interface JobGrounding {
   /** Custom grounding questions the agent must answer before proceeding */
   questions?: string[];
 }
+
+/**
+ * LLM-Supervised Execution Standard — supervision tier for jobs.
+ *
+ * Every critical pipeline should have at minimum Tier 1 supervision.
+ * See docs/LLM-SUPERVISED-EXECUTION.md for the full standard.
+ *
+ * - tier0: Raw programmatic — no LLM validation. Fast, cheap, silent failures.
+ * - tier1: LLM-supervised — lightweight model (Haiku) validates each step. Observed failures.
+ * - tier2: Full intelligent — capable model (Sonnet/Opus) handles reasoning. Handled failures.
+ */
+export type SupervisionTier = 'tier0' | 'tier1' | 'tier2';
 
 export type JobPriority = 'critical' | 'high' | 'medium' | 'low';
 
@@ -100,6 +120,8 @@ export interface JobState {
   slug: string;
   lastRun?: string;
   lastResult?: 'success' | 'failure' | 'timeout';
+  /** Error message from the last failure (cleared on success) */
+  lastError?: string;
   nextScheduled?: string;
   consecutiveFailures: number;
 }
@@ -401,6 +423,39 @@ export interface InstarConfig {
   requestTimeoutMs?: number;
   /** Instar version (from package.json) */
   version?: string;
+  /** Safety configuration for autonomous operation */
+  safety?: SafetyConfig;
+}
+
+/**
+ * Safety configuration — controls the progression from supervised to autonomous operation.
+ *
+ * The PreToolUse hook system supports two safety levels:
+ *
+ * Level 1 (default): "Ask the user"
+ *   - Risky commands are blocked. Agent must ask the user for confirmation.
+ *   - Safe starting point. Human stays in the loop. Trust builds over time.
+ *
+ * Level 2: "Agent self-verifies"
+ *   - Risky commands inject a self-verification prompt instead of blocking.
+ *   - Agent reasons about whether the action is correct before proceeding.
+ *   - Enables fully hands-off autonomous operation with intelligent safety.
+ *   - Truly catastrophic commands (rm -rf /, fork bombs) are ALWAYS blocked.
+ *
+ * The progression from Level 1 → Level 2 is the path to full autonomy.
+ */
+export interface SafetyConfig {
+  /**
+   * Safety level:
+   * 1 = Ask user before risky actions (default, recommended to start)
+   * 2 = Agent self-verifies before risky actions (autonomous mode)
+   */
+  level: 1 | 2;
+  /**
+   * Commands that are ALWAYS blocked regardless of safety level.
+   * These are catastrophic, irreversible operations that no self-check can undo.
+   */
+  alwaysBlock?: string[];
 }
 
 export interface PublishingConfig {

@@ -9,6 +9,7 @@
  */
 
 import { Cron } from 'croner';
+import { execFileSync } from 'node:child_process';
 import { loadJobs } from './JobLoader.js';
 import type { SessionManager } from '../core/SessionManager.js';
 import type { StateManager } from '../core/StateManager.js';
@@ -163,6 +164,13 @@ export class JobScheduler {
       return 'skipped';
     }
 
+    // Run gate command if configured — zero-token pre-screening
+    if (job.gate) {
+      if (!this.runGate(job)) {
+        return 'skipped';
+      }
+    }
+
     // Check session capacity
     const runningSessions = this.sessionManager.listRunningSessions();
     const jobSessions = runningSessions.filter(s => s.jobSlug);
@@ -289,10 +297,11 @@ export class JobScheduler {
       triggeredBy: `scheduler:${reason}`,
       maxDurationMinutes: job.expectedDurationMinutes,
     }).then(() => {
-      // Update job state on success
+      // Update job state on successful spawn (clear error)
       const jobState: JobState = {
         slug: job.slug,
         lastRun: new Date().toISOString(),
+        lastError: undefined,
         consecutiveFailures: 0,
         nextScheduled: this.getNextRun(job.slug),
       };
@@ -306,12 +315,14 @@ export class JobScheduler {
         metadata: { slug: job.slug, reason, model: job.model },
       });
     }).catch((err) => {
-      // Track failure
+      // Track failure with error message
       const failures = this.getConsecutiveFailures(job.slug) + 1;
+      const errorMsg = err instanceof Error ? err.message : String(err);
       const jobState: JobState = {
         slug: job.slug,
         lastRun: new Date().toISOString(),
         lastResult: 'failure',
+        lastError: errorMsg,
         consecutiveFailures: failures,
         nextScheduled: this.getNextRun(job.slug),
       };
@@ -319,10 +330,12 @@ export class JobScheduler {
 
       this.state.appendEvent({
         type: 'job_error',
-        summary: `Job "${job.slug}" failed to spawn: ${err}`,
+        summary: `Job "${job.slug}" failed to spawn: ${errorMsg}`,
         timestamp: new Date().toISOString(),
         metadata: { slug: job.slug, consecutiveFailures: failures },
       });
+
+      this.alertOnConsecutiveFailures(job, failures, errorMsg);
     });
   }
 
@@ -372,10 +385,16 @@ export class JobScheduler {
       slug: job.slug,
       lastRun: existingState?.lastRun ?? new Date().toISOString(),
       lastResult: failed ? 'failure' : 'success',
+      lastError: failed ? `Session ${session.status} (${session.name})` : undefined,
       consecutiveFailures: failed ? (existingState?.consecutiveFailures ?? 0) + 1 : 0,
       nextScheduled: this.getNextRun(job.slug),
     };
     this.state.saveJobState(jobState);
+
+    // Alert on consecutive failures
+    if (failed && jobState.lastError) {
+      this.alertOnConsecutiveFailures(job, jobState.consecutiveFailures, jobState.lastError);
+    }
 
     // Try to drain the queue now that a slot is available
     this.processQueue();
@@ -496,6 +515,54 @@ export class JobScheduler {
     const mappings = this.state.get<Record<string, number>>('job-topic-mappings') ?? {};
     mappings[slug] = topicId;
     this.state.set('job-topic-mappings', mappings);
+  }
+
+  /**
+   * Run a job's gate command. Returns true if the job should proceed, false to skip.
+   * Gates are zero-token pre-screening — a bash command that exits 0 (proceed) or non-zero (skip).
+   */
+  private runGate(job: JobDefinition): boolean {
+    try {
+      execFileSync('/bin/sh', ['-c', job.gate!], {
+        encoding: 'utf-8',
+        timeout: 10000,
+        stdio: ['pipe', 'pipe', 'pipe'],
+      });
+      return true;
+    } catch {
+      // Non-zero exit = nothing to do, skip silently
+      this.state.appendEvent({
+        type: 'job_gate_skip',
+        summary: `Job "${job.slug}" skipped — gate check returned nothing to do`,
+        timestamp: new Date().toISOString(),
+        metadata: { slug: job.slug },
+      });
+      return false;
+    }
+  }
+
+  /**
+   * Alert when a job hits consecutive failure thresholds.
+   * Critical/high priority jobs alert after 2 failures.
+   * Medium/low priority jobs alert after 3 failures.
+   * Only alerts at the threshold (not every failure after).
+   */
+  private alertOnConsecutiveFailures(job: JobDefinition, failures: number, error: string): void {
+    const threshold = (job.priority === 'critical' || job.priority === 'high') ? 2 : 3;
+    if (failures !== threshold) return;
+
+    const alertText = `*Job Alert: ${job.name}*\n\n${failures} consecutive failures.\nLast error: ${error}\nPriority: ${job.priority}`;
+
+    // Send to job's topic if available
+    if (this.telegram && job.topicId) {
+      this.telegram.sendToTopic(job.topicId, alertText).catch(err => {
+        console.error(`[scheduler] Failed to send failure alert: ${err}`);
+      });
+    } else if (this.messenger) {
+      this.messenger.send({ userId: 'system', content: alertText }).catch(err => {
+        console.error(`[scheduler] Failed to send failure alert: ${err}`);
+      });
+    }
   }
 
   private checkMissedJobs(enabledJobs: JobDefinition[]): void {

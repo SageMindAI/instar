@@ -330,6 +330,47 @@ function cleanupTelegramTempFiles(): void {
   }
 }
 
+/**
+ * Tee stdout/stderr to a log file for observability.
+ * The self-diagnosis job checks .instar/logs/server.log — this ensures it exists.
+ * Log is truncated at 5MB to prevent unbounded growth.
+ */
+function setupServerLog(stateDir: string): void {
+  const logDir = path.join(stateDir, '..', 'logs');
+  fs.mkdirSync(logDir, { recursive: true });
+  const logPath = path.join(logDir, 'server.log');
+
+  // Truncate if over 5MB
+  try {
+    const stat = fs.statSync(logPath);
+    if (stat.size > 5 * 1024 * 1024) {
+      // Keep last 1MB
+      const content = fs.readFileSync(logPath, 'utf-8');
+      fs.writeFileSync(logPath, content.slice(-1024 * 1024));
+    }
+  } catch { /* file doesn't exist yet */ }
+
+  const logStream = fs.createWriteStream(logPath, { flags: 'a' });
+  const origLog = console.log;
+  const origWarn = console.warn;
+  const origError = console.error;
+
+  const timestamp = () => new Date().toISOString();
+
+  console.log = (...args: unknown[]) => {
+    origLog(...args);
+    logStream.write(`${timestamp()} [LOG] ${args.map(String).join(' ')}\n`);
+  };
+  console.warn = (...args: unknown[]) => {
+    origWarn(...args);
+    logStream.write(`${timestamp()} [WARN] ${args.map(String).join(' ')}\n`);
+  };
+  console.error = (...args: unknown[]) => {
+    origError(...args);
+    logStream.write(`${timestamp()} [ERROR] ${args.map(String).join(' ')}\n`);
+  };
+}
+
 export async function startServer(options: StartOptions): Promise<void> {
   const config = loadConfig(options.dir);
   ensureStateDir(config.stateDir);
@@ -342,6 +383,9 @@ export async function startServer(options: StartOptions): Promise<void> {
     console.log(`  Port: ${config.port}`);
     console.log(`  State: ${config.stateDir}`);
     console.log();
+
+    // Set up file logging for observability
+    setupServerLog(config.stateDir);
 
     // Clean up stale Telegram temp files on startup
     cleanupTelegramTempFiles();

@@ -75,6 +75,22 @@ This toolkit is meant to be tested against real Claude Code projects. The flow:
 4. **User identity is channel-based** — A user is known by their channel identifiers (Telegram topic, email, etc.)
 5. **Jobs are declarative** — JSON definitions with cron expressions, not code.
 
+## Standards
+
+- **LLM-Supervised Execution** (`docs/LLM-SUPERVISED-EXECUTION.md`): Every critical pipeline must have at minimum a Tier 1 LLM supervisor. Jobs support a `supervision` field (`tier0`, `tier1`, `tier2`) on `JobDefinition`. Tier 1 = Haiku wrapping programmatic tools with validation after every step.
+
+## API Authentication
+
+All HTTP API endpoints (except `/health` basic check) require a Bearer token:
+
+```
+Authorization: Bearer <authToken>
+```
+
+The `authToken` is set in `instar.config.json` during setup. Agents calling the local server API from skills/scripts must include this header.
+
+The feedback webhook (`dawn.bot-me.ai/api/instar/feedback`) uses different auth — `User-Agent: instar/<version>` and `X-Instar-Version: <version>` headers for identification. No Bearer token needed for the external feedback endpoint.
+
 ## Key Patterns from Dawn
 
 These patterns were earned through real failures. Don't weaken them:

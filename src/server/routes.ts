@@ -82,6 +82,23 @@ export function createRoutes(ctx: RouteContext): Router {
         heapUsed: Math.round(mem.heapUsed / 1024 / 1024),
         heapTotal: Math.round(mem.heapTotal / 1024 / 1024),
       };
+
+      // Job health summary
+      if (ctx.scheduler) {
+        const jobs = ctx.scheduler.getJobs();
+        const failingJobs = jobs
+          .map(j => ({ slug: j.slug, state: ctx.state.getJobState(j.slug) }))
+          .filter(j => j.state && j.state.consecutiveFailures > 0);
+        base.jobs = {
+          total: jobs.length,
+          enabled: jobs.filter(j => j.enabled).length,
+          failing: failingJobs.map(j => ({
+            slug: j.slug,
+            failures: j.state!.consecutiveFailures,
+            lastError: j.state!.lastError,
+          })),
+        };
+      }
     }
     res.json(base);
   });

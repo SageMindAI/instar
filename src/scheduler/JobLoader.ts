@@ -125,6 +125,11 @@ export function validateJob(job: unknown, index?: number): void {
     throw new Error(`${prefix}: execute.args must be a string if provided, got ${typeof exec.args}`);
   }
 
+  // Optional gate must be a string if present
+  if (j.gate !== undefined && typeof j.gate !== 'string') {
+    throw new Error(`${prefix}: "gate" must be a string (shell command) if provided, got ${typeof j.gate}`);
+  }
+
   // Grounding config — validate structure if present
   if (j.grounding !== undefined) {
     validateGrounding(j.grounding, prefix);

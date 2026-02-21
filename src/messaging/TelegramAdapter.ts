@@ -89,6 +89,21 @@ export interface AttentionItem {
   topicId?: number;
 }
 
+/**
+ * Telegram General topic convention:
+ * - Incoming: messages in General have message_thread_id=1 (or undefined in older API)
+ * - Internal: we use GENERAL_TOPIC_ID (1) as the sentinel
+ * - Outgoing: we OMIT message_thread_id for General (don't send 1, don't send 0)
+ *
+ * The isGeneralTopic() helper should be used instead of raw `topicId === 1` checks
+ * to keep the convention in one place.
+ */
+const GENERAL_TOPIC_ID = 1;
+
+function isGeneralTopic(topicId: number): boolean {
+  return topicId <= GENERAL_TOPIC_ID;
+}
+
 const PRIORITY_EMOJI: Record<string, string> = {
   URGENT: '\ud83d\udd34',  // 🔴
   HIGH: '\ud83d\udfe0',     // 🟠
@@ -202,7 +217,7 @@ export class TelegramAdapter implements MessagingAdapter {
       parse_mode: 'Markdown',
     };
 
-    if (topicId && parseInt(topicId, 10) > 1) {
+    if (topicId && !isGeneralTopic(parseInt(topicId, 10))) {
       params.message_thread_id = parseInt(topicId, 10);
     }
 
@@ -230,8 +245,7 @@ export class TelegramAdapter implements MessagingAdapter {
       chat_id: this.config.chatId,
       text,
     };
-    // Topic ID 1 = General topic (our fallback) — omit message_thread_id for General
-    if (topicId > 1) {
+    if (!isGeneralTopic(topicId)) {
       params.message_thread_id = topicId;
     }
 
@@ -922,7 +936,7 @@ export class TelegramAdapter implements MessagingAdapter {
         text: detail,
         parse_mode: 'HTML',
       };
-      if (topicId > 1) sendParams.message_thread_id = topicId;
+      if (!isGeneralTopic(topicId)) sendParams.message_thread_id = topicId;
       await this.apiCall('sendMessage', sendParams);
     } catch (err) {
       console.error(`[telegram] Failed to create attention topic for "${item.title}": ${err}`);
@@ -1185,7 +1199,7 @@ export class TelegramAdapter implements MessagingAdapter {
       return;
     }
 
-    const numericTopicId = msg.message_thread_id ?? 1;
+    const numericTopicId = msg.message_thread_id ?? GENERAL_TOPIC_ID;
     const topicId = numericTopicId.toString();
 
     // Auto-capture topic name from reply_to_message
