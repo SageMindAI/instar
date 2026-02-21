@@ -401,21 +401,21 @@ Instead of per-action permission prompts, Instar pushes security to a higher lev
 
 **Identity coherence** -- A grounded, coherent agent with clear identity (`AGENT.md`), relationship context (`USER.md`), and accumulated memory (`MEMORY.md`) makes better decisions than a stateless process approving actions one at a time. The intelligence layer IS the security layer.
 
-**Scoped access** -- The agent operates within your project directory. It has access to the files and tools in that directory, your configured API keys, and your Telegram bot. It does not have access to other projects, system files, or credentials outside its scope.
-
 **Audit trail** -- Every session runs in tmux with full output capture. Message logs, job execution history, and session output are all persisted and inspectable.
 
 ### What You Should Know
 
-- The agent **can read, write, and execute** within your project directory without asking
-- The agent **can run shell commands** (builds, tests, git operations) without prompting
-- The agent **can send messages** via Telegram if configured
-- The agent **cannot access** other projects, system credentials, or resources outside its configured scope
+**There is no sandbox.** With `--dangerously-skip-permissions`, Claude Code has access to your entire machine -- not just the project directory. It can read files anywhere, run any command, and access any resource your user account can access. This is the same level of access as running any program on your computer.
+
+- The agent **can read, write, and execute** anywhere on your machine without asking
+- The agent **can run any shell command** your user account has access to
+- The agent **can send messages** via Telegram and other configured integrations
+- The agent **is directed** by its CLAUDE.md, identity files, and behavioral hooks to stay within its project scope -- but this is behavioral guidance, not a technical boundary
 - All behavioral hooks, identity files, and CLAUDE.md instructions are **in your project** and fully editable by you
 
 ### Proceed at Your Own Risk
 
-This is infrastructure for people who want genuine AI autonomy, not a sandbox demo. You are giving an AI agent meaningful access to your project. The security model relies on intelligent behavior (identity, hooks, coherence) rather than permission dialogs.
+This is infrastructure for people who want genuine AI autonomy, not a sandbox demo. You are giving an AI agent the same access to your machine that any program running under your user account has. The security model relies on intelligent behavior (identity, hooks, coherence) rather than permission dialogs or sandboxing.
 
 If you're not comfortable with that trade-off, Claude Code's default permission mode may be a better fit for your use case.
 
