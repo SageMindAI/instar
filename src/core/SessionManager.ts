@@ -430,26 +430,23 @@ export class SessionManager extends EventEmitter {
       );
     }
 
-    // Spawn Claude in tmux. When a Telegram topic triggered the session,
-    // export the topic ID as an env var so hooks can prime Claude to respond.
+    // Spawn Claude in tmux — no bash -c shell intermediary.
+    // Uses tmux -e flags to set/unset env vars directly, matching spawnSession pattern.
+    // This avoids shell injection risks and handles claudePath with spaces.
     try {
       const tmuxArgs = [
         'new-session', '-d',
         '-s', tmuxSession,
         '-c', this.config.projectDir,
         '-x', '200', '-y', '50',
+        '-e', 'CLAUDECODE=', // Prevent nested Claude Code detection
       ];
 
       if (options?.telegramTopicId) {
-        // Wrap in bash shell to export env var before Claude starts
-        // Also unset CLAUDECODE to prevent nested Claude Code errors
-        const claudeCmd = `${this.config.claudePath} --dangerously-skip-permissions`;
-        tmuxArgs.push('bash', '-c', `unset CLAUDECODE; export INSTAR_TELEGRAM_TOPIC=${options.telegramTopicId} && exec ${claudeCmd}`);
-      } else {
-        // Unset CLAUDECODE to prevent nested Claude Code errors
-        const claudeCmd = `${this.config.claudePath} --dangerously-skip-permissions`;
-        tmuxArgs.push('bash', '-c', `unset CLAUDECODE; exec ${claudeCmd}`);
+        tmuxArgs.push('-e', `INSTAR_TELEGRAM_TOPIC=${options.telegramTopicId}`);
       }
+
+      tmuxArgs.push(this.config.claudePath, '--dangerously-skip-permissions');
 
       execFileSync(this.config.tmuxPath, tmuxArgs, { encoding: 'utf-8' });
     } catch (err) {
