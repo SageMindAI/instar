@@ -24,6 +24,7 @@ import { AnthropicIntelligenceProvider } from '../core/AnthropicIntelligenceProv
 import { FeedbackManager } from '../core/FeedbackManager.js';
 import { DispatchManager } from '../core/DispatchManager.js';
 import { UpdateChecker } from '../core/UpdateChecker.js';
+import { AutoUpdater } from '../core/AutoUpdater.js';
 import { registerPort, unregisterPort, startHeartbeat } from '../core/PortRegistry.js';
 import { TelegraphService } from '../publishing/TelegraphService.js';
 import { PrivateViewer } from '../publishing/PrivateViewer.js';
@@ -530,15 +531,28 @@ export async function startServer(options: StartOptions): Promise<void> {
       projectName: config.projectName,
     });
 
-    // Check for updates on startup
+    // Check for updates on startup (non-blocking)
     updateChecker.check().then(info => {
       if (info.updateAvailable) {
         console.log(pc.yellow(`  Update available: ${info.currentVersion} → ${info.latestVersion}`));
-        console.log(pc.yellow(`  Run: npm update -g instar`));
       } else {
         console.log(pc.green(`  Instar ${info.currentVersion} is up to date`));
       }
     }).catch(() => { /* ignore startup check failures */ });
+
+    // Start auto-updater — periodic check + auto-apply + notify + restart
+    const autoUpdater = new AutoUpdater(
+      updateChecker,
+      state,
+      config.stateDir,
+      {
+        checkIntervalMinutes: 30,
+        autoApply: config.updates?.autoApply ?? true,
+        autoRestart: true,
+      },
+      telegram,
+    );
+    autoUpdater.start();
 
     // Set up Telegraph publishing (auto-enabled when config exists or Telegram is configured)
     let publisher: TelegraphService | undefined;
@@ -578,7 +592,7 @@ export async function startServer(options: StartOptions): Promise<void> {
     });
     console.log(pc.green('  Evolution system enabled'));
 
-    const server = new AgentServer({ config, sessionManager, state, scheduler, telegram, relationships, feedback, dispatches, updateChecker, quotaTracker, publisher, viewer, tunnel, evolution });
+    const server = new AgentServer({ config, sessionManager, state, scheduler, telegram, relationships, feedback, dispatches, updateChecker, autoUpdater, quotaTracker, publisher, viewer, tunnel, evolution });
     await server.start();
 
     // Start tunnel AFTER server is listening
@@ -595,6 +609,7 @@ export async function startServer(options: StartOptions): Promise<void> {
     // Graceful shutdown
     const shutdown = async () => {
       console.log('\nShutting down...');
+      autoUpdater.stop();
       if (tunnel) await tunnel.stop();
       stopHeartbeat();
       unregisterPort(config.projectName);

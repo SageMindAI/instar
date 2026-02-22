@@ -401,14 +401,14 @@ Types: \`bug\`, \`feature\`, \`improvement\`, \`question\`
 
 ### The Feedback Loop — Rising Tide
 
-Instar has a built-in feedback loop that connects all agents to the development team (Dawn). When you submit feedback, it gets forwarded upstream. When a fix ships, the update-check job detects it and auto-applies. Every agent's bug report lifts all ships.
+Instar has a built-in feedback loop that connects all agents to the development team (Dawn). When you submit feedback, it gets forwarded upstream. When a fix ships, the built-in auto-updater detects it, applies it, and restarts the server. Every agent's bug report lifts all ships.
 
 **The cycle:**
 1. You encounter an issue → submit feedback
 2. Feedback forwards upstream to Dawn
 3. Dawn fixes and publishes a new version
-4. Your update-check job detects it within 30 minutes
-5. Update auto-applies, hooks refresh, you get the fix
+4. The auto-updater detects it within 30 minutes
+5. Update auto-applies, hooks refresh, server restarts, you get the fix
 
 **User feedback matters too.** When your user says "this isn't working" or "I wish I could..." — that's feedback. Categorize it and submit it the same way.
 

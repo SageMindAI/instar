@@ -20,6 +20,7 @@ import type { RelationshipManager } from '../core/RelationshipManager.js';
 import type { FeedbackManager } from '../core/FeedbackManager.js';
 import type { DispatchManager } from '../core/DispatchManager.js';
 import type { UpdateChecker } from '../core/UpdateChecker.js';
+import type { AutoUpdater } from '../core/AutoUpdater.js';
 import type { QuotaTracker } from '../monitoring/QuotaTracker.js';
 import type { TelegraphService } from '../publishing/TelegraphService.js';
 import type { PrivateViewer } from '../publishing/PrivateViewer.js';
@@ -37,6 +38,7 @@ export interface RouteContext {
   feedback: FeedbackManager | null;
   dispatches: DispatchManager | null;
   updateChecker: UpdateChecker | null;
+  autoUpdater: AutoUpdater | null;
   quotaTracker: QuotaTracker | null;
   publisher: TelegraphService | null;
   viewer: PrivateViewer | null;
@@ -564,6 +566,37 @@ export function createRoutes(ctx: RouteContext): Router {
     res.json({ topics: ctx.telegram.getAllTopicMappings() });
   });
 
+  router.post('/telegram/topics', async (req, res) => {
+    if (!ctx.telegram) {
+      res.status(503).json({ error: 'Telegram not configured' });
+      return;
+    }
+
+    const { name, color } = req.body;
+    if (!name || typeof name !== 'string' || name.trim().length < 1) {
+      res.status(400).json({ error: '"name" is required (non-empty string)' });
+      return;
+    }
+    if (name.length > 128) {
+      res.status(400).json({ error: '"name" must be 128 characters or fewer' });
+      return;
+    }
+
+    // Color is optional — defaults to green (9367192)
+    const iconColor = typeof color === 'number' ? color : 9367192;
+
+    try {
+      const topic = await ctx.telegram.createForumTopic(name.trim(), iconColor);
+      res.status(201).json({
+        topicId: topic.topicId,
+        name: name.trim(),
+        created: true,
+      });
+    } catch (err) {
+      res.status(500).json({ error: err instanceof Error ? err.message : String(err) });
+    }
+  });
+
   router.post('/telegram/reply/:topicId', async (req, res) => {
     if (!ctx.telegram) {
       res.status(503).json({ error: 'Telegram not configured' });
@@ -1005,6 +1038,16 @@ export function createRoutes(ctx: RouteContext): Router {
     } catch (err) {
       res.status(500).json({ error: err instanceof Error ? err.message : String(err) });
     }
+  });
+
+  // ── Auto-Updater ────────────────────────────────────────────────
+
+  router.get('/updates/auto', (_req, res) => {
+    if (!ctx.autoUpdater) {
+      res.status(503).json({ error: 'Auto-updater not configured' });
+      return;
+    }
+    res.json(ctx.autoUpdater.getStatus());
   });
 
   // ── Dispatches ───────────────────────────────────────────────────

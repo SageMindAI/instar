@@ -16,6 +16,7 @@ import type { RelationshipManager } from '../core/RelationshipManager.js';
 import type { FeedbackManager } from '../core/FeedbackManager.js';
 import type { DispatchManager } from '../core/DispatchManager.js';
 import type { UpdateChecker } from '../core/UpdateChecker.js';
+import type { AutoUpdater } from '../core/AutoUpdater.js';
 import type { QuotaTracker } from '../monitoring/QuotaTracker.js';
 import type { TelegraphService } from '../publishing/TelegraphService.js';
 import type { PrivateViewer } from '../publishing/PrivateViewer.js';
@@ -40,6 +41,7 @@ export class AgentServer {
     feedback?: FeedbackManager;
     dispatches?: DispatchManager;
     updateChecker?: UpdateChecker;
+    autoUpdater?: AutoUpdater;
     quotaTracker?: QuotaTracker;
     publisher?: TelegraphService;
     viewer?: PrivateViewer;
@@ -67,6 +69,7 @@ export class AgentServer {
       feedback: options.feedback ?? null,
       dispatches: options.dispatches ?? null,
       updateChecker: options.updateChecker ?? null,
+      autoUpdater: options.autoUpdater ?? null,
       quotaTracker: options.quotaTracker ?? null,
       publisher: options.publisher ?? null,
       viewer: options.viewer ?? null,

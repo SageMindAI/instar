@@ -655,9 +655,9 @@ Instar has a built-in feedback loop. When something isn't working, your user can
 - User complains to you naturally about an issue or missing capability
 - You route the feedback to the Instar maintainers with context
 - A fix or improvement is published as a new npm version
-- The \`update-check\` job detects the new version and notifies your user
+- The built-in auto-updater detects the new version, applies it, notifies your user, and restarts the server
 
-**A rising tide lifts all ships** — every user's feedback improves the platform for everyone. Report issues when you encounter them. Check for updates regularly.
+**A rising tide lifts all ships** — every user's feedback improves the platform for everyone. Updates are applied automatically.
 
 - Report: \`curl -X POST http://localhost:${port}/feedback -d '{"issue":"description","context":"relevant logs"}'\`
 - Check updates: \`npm outdated -g instar\`
@@ -993,7 +993,7 @@ curl -s -X POST http://localhost:${port}/feedback/retry
 
 ## How It Works
 
-Your feedback is stored locally AND forwarded to the instar maintainers. When they fix the issue and publish an update, your update-check job detects it automatically. One agent's bug report lifts all ships.
+Your feedback is stored locally AND forwarded to the instar maintainers. When they fix the issue and publish an update, the built-in auto-updater detects it, applies it, and restarts the server — no manual intervention needed. One agent's bug report lifts all ships.
 
 **User feedback matters too.** When your user says "this isn't working" or "I wish I could..." — capture it with their original words. User language carries context that technical rephrasing loses.
 `,
@@ -1060,16 +1060,16 @@ function getDefaultJobs(port: number): object[] {
     {
       slug: 'update-check',
       name: 'Update Check',
-      description: 'Check if a newer version of instar is available. Understand what changed, notify the user, and apply the update. Runs frequently during early adoption.',
+      description: 'Legacy update check job — disabled because the built-in AutoUpdater handles updates automatically (check, apply, notify, restart). See GET /updates/auto for status.',
       schedule: '*/30 * * * *',
       priority: 'medium',
       expectedDurationMinutes: 2,
       model: 'haiku',
-      enabled: true,
+      enabled: false,
       gate: `curl -sf http://localhost:${port}/updates 2>/dev/null | python3 -c "import sys,json; d=json.load(sys.stdin); exit(0 if d.get('updateAvailable') else 1)"`,
       execute: {
-        type: 'prompt',
-        value: `Check for instar updates: curl -s http://localhost:${port}/updates. If updateAvailable is false, exit silently — do NOT notify the user or produce any output. If updateAvailable is true: 1) Read the changeSummary to understand what changed. 2) Apply the update immediately: curl -s -X POST http://localhost:${port}/updates/apply. 3) After successful apply, notify the user via Telegram (if configured) with a brief, conversational message: what version was installed, what's new (plain language, not jargon), and that a server restart is needed if restartNeeded is true. 4) If the update fails, notify the user with the error. Rollback is available: curl -s -X POST http://localhost:${port}/updates/rollback. Keep this lightweight — no output when there's nothing to report.`,
+        type: 'script',
+        value: `curl -s http://localhost:${port}/updates/auto`,
       },
       tags: ['coherence', 'default'],
     },

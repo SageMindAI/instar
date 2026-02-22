@@ -1414,9 +1414,9 @@ Instar has a built-in feedback loop — a rising tide that lifts all ships. When
 - User complains naturally about an issue or missing capability
 - Agent packages the issue with context and routes it upstream
 - A fix is published as a new npm version
-- The \`update-check\` job detects the new version and notifies the user
+- The built-in auto-updater detects the new version, applies it, notifies the user, and restarts the server
 
-Every user's feedback makes the platform better for everyone. Report issues when you encounter them. Check for updates regularly with \`npm outdated -g instar\`.
+Every user's feedback makes the platform better for everyone. Report issues when you encounter them. Updates are applied automatically — check status with \`curl http://localhost:PORT/updates/auto\`.
 
 ### Self-Evolution
 
