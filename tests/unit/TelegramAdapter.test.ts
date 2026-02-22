@@ -123,35 +123,40 @@ describe('TelegramAdapter', () => {
     });
 
     // Mock fetch for getUpdates then sendMessage
-    let callCount = 0;
+    // Track getUpdates calls separately so ensureLifelineTopic() calls don't offset the count
+    let getUpdatesCallCount = 0;
     const mockFetch = vi.fn().mockImplementation(async (url: string) => {
-      callCount++;
-      if (url.includes('getUpdates') && callCount === 1) {
-        return {
-          ok: true,
-          json: async () => ({
+      if (url.includes('getUpdates')) {
+        getUpdatesCallCount++;
+        if (getUpdatesCallCount === 1) {
+          return {
             ok: true,
-            result: [{
-              update_id: 100,
-              message: {
-                message_id: 42,
-                from: { id: 12345, first_name: 'Test', username: 'testuser' },
-                chat: { id: -100123456 },
-                message_thread_id: 99,
-                text: 'Hello world',
-                date: Math.floor(Date.now() / 1000),
-              },
-            }],
-          }),
-        };
+            json: async () => ({
+              ok: true,
+              result: [{
+                update_id: 100,
+                message: {
+                  message_id: 42,
+                  from: { id: 12345, first_name: 'Test', username: 'testuser' },
+                  chat: { id: -100123456 },
+                  message_thread_id: 99,
+                  text: 'Hello world',
+                  date: Math.floor(Date.now() / 1000),
+                },
+              }],
+            }),
+          };
+        }
       }
-      // Subsequent polls return empty
+      // Non-getUpdates calls (ensureLifelineTopic, etc.) and subsequent polls return empty
       return {
         ok: true,
         json: async () => ({ ok: true, result: [] }),
       };
     });
     vi.stubGlobal('fetch', mockFetch);
+    // Bypass Lifeline topic verification so mock sequence is predictable
+    vi.spyOn(adapter, 'ensureLifelineTopic').mockResolvedValue(null);
 
     await adapter.start();
     await new Promise(r => setTimeout(r, 300));

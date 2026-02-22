@@ -494,6 +494,8 @@ describe('TelegramAdapter messaging', () => {
         messages.push({ content: msg.content });
       });
 
+      // Bypass Lifeline topic verification so mock sequence is predictable
+      vi.spyOn(adapter, 'ensureLifelineTopic').mockResolvedValue(null);
       await adapter.start();
 
       // Wait for one poll cycle to process
@@ -528,6 +530,8 @@ describe('TelegramAdapter messaging', () => {
           json: async () => ({ ok: true, result: [] }),
         });
 
+      // Bypass Lifeline topic verification so mock sequence is predictable
+      vi.spyOn(adapter, 'ensureLifelineTopic').mockResolvedValue(null);
       await adapter.start();
       await new Promise(resolve => setTimeout(resolve, 200));
       await adapter.stop();
@@ -572,6 +576,8 @@ describe('TelegramAdapter messaging', () => {
         });
       };
 
+      // Bypass Lifeline topic verification so mock sequence is predictable
+      vi.spyOn(adapter, 'ensureLifelineTopic').mockResolvedValue(null);
       await adapter.start();
       await new Promise(resolve => setTimeout(resolve, 200));
       await adapter.stop();
@@ -605,6 +611,8 @@ describe('TelegramAdapter messaging', () => {
           json: async () => ({ ok: true, result: [] }),
         });
 
+      // Bypass Lifeline topic verification so mock sequence is predictable
+      vi.spyOn(adapter, 'ensureLifelineTopic').mockResolvedValue(null);
       await adapter.start();
       await new Promise(resolve => setTimeout(resolve, 200));
       await adapter.stop();
