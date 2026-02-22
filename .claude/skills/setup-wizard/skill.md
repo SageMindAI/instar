@@ -254,9 +254,24 @@ This project uses instar for persistent agent capabilities.
 
 **Telegram comes BEFORE technical configuration.** It's the whole point — everything else supports getting the user onto Telegram.
 
+### Step 3-pre: Brief Telegram Introduction
+
+Not everyone knows what Telegram is. Before asking about setup, give a one-paragraph intro:
+
+> **Telegram** is a free messaging app — like iMessage or WhatsApp, but with features that make it perfect for talking to an AI agent. It supports topic threads (like Slack channels), works on phone and desktop, and has a great bot API.
+>
+> If you don't have it yet, install it on your phone first: https://telegram.org/apps
+> You'll need your phone to log in on the web too.
+
+Then ask: "Do you have Telegram installed? If not, take a minute to set it up and come back."
+
+Wait for confirmation before proceeding. If they say no or want to skip, accept in one sentence and move on.
+
+### Why Telegram
+
 Frame it clearly:
 
-> Right now we're in a terminal. Telegram is where your agent comes alive:
+> Once connected, Telegram is where your agent lives:
 > - **Just talk** — no commands, no terminal, just conversation
 > - **Topic threads** — organized channels for different concerns
 > - **Mobile access** — your agent is always reachable

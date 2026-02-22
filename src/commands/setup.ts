@@ -258,12 +258,18 @@ async function runClassicSetup(): Promise<void> {
   console.log();
   console.log(pc.bold('  Telegram — How You Talk to Your Agent'));
   console.log();
+  console.log(pc.dim('  Telegram is a free messaging app (like iMessage or WhatsApp) with'));
+  console.log(pc.dim('  features perfect for AI agents: topic threads, bot API, mobile + desktop.'));
+  console.log();
   console.log(pc.dim('  Once connected, you just talk — no commands, no terminal.'));
   console.log(pc.dim('  Topic threads, message history, mobile access, proactive notifications.'));
   if (!isProjectAgent) {
     console.log();
     console.log(pc.dim('  For a personal agent, Telegram IS the interface.'));
   }
+  console.log();
+  console.log(pc.dim(`  If you don't have Telegram yet: ${pc.cyan('https://telegram.org/apps')}`));
+  console.log(pc.dim('  Install it on your phone first — you\'ll need it to log in on the web.'));
   console.log();
   const telegramConfig = await promptForTelegram();
 
