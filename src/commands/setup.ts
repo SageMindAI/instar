@@ -470,27 +470,21 @@ async function runClassicSetup(): Promise<void> {
   console.log(`  ${pc.dim('(full token saved in .instar/config.json — use for API calls)')}`);
   console.log();
 
-  // Check if instar is globally installed (needed for server commands)
+  // Global install is required for auto-updates and persistent server commands.
+  // npx caches a snapshot that npm install -g doesn't touch, so agents
+  // installed only via npx can never auto-update.
   const isGloballyInstalled = isInstarGlobal();
   if (!isGloballyInstalled) {
-    console.log(pc.dim('  Tip: instar is not installed globally. For persistent server'));
-    console.log(pc.dim('  commands (start, stop, status), install it globally:'));
+    console.log(pc.dim('  Installing instar globally (required for auto-updates)...'));
     console.log();
 
-    const installGlobal = await confirm({
-      message: 'Install instar globally? (npm install -g instar)',
-      default: true,
-    });
-
-    if (installGlobal) {
-      try {
-        console.log(pc.dim('  Running: npm install -g instar'));
-        execFileSync('npm', ['install', '-g', 'instar'], { encoding: 'utf-8', stdio: 'inherit' });
-        console.log(`  ${pc.green('✓')} instar installed globally`);
-      } catch {
-        console.log(pc.yellow('  Could not install globally. You can run it later:'));
-        console.log(`    ${pc.cyan('npm install -g instar')}`);
-      }
+    try {
+      execFileSync('npm', ['install', '-g', 'instar'], { encoding: 'utf-8', stdio: 'inherit' });
+      console.log(`  ${pc.green('✓')} instar installed globally`);
+    } catch {
+      console.log(pc.yellow('  Could not install globally. Auto-updates will not work.'));
+      console.log(pc.yellow('  Please run manually:'));
+      console.log(`    ${pc.cyan('npm install -g instar')}`);
     }
     console.log();
   }

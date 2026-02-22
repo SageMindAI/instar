@@ -18,7 +18,7 @@
  *   the old one releases it during shutdown.
  */
 
-import { spawn } from 'node:child_process';
+import { spawn, execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import type { UpdateChecker } from './UpdateChecker.js';
@@ -95,6 +95,16 @@ export class AutoUpdater {
     if (this.interval) return;
 
     const intervalMs = this.config.checkIntervalMinutes * 60 * 1000;
+
+    // Warn if running from npx cache (auto-updates won't work properly)
+    const scriptPath = process.argv[1] || '';
+    if (scriptPath.includes('.npm/_npx') || scriptPath.includes('/_npx/')) {
+      console.warn(
+        '[AutoUpdater] WARNING: Running from npx cache. Auto-updates require a global install.\n' +
+        '[AutoUpdater] Run: npm install -g instar'
+      );
+    }
+
     console.log(
       `[AutoUpdater] Started (every ${this.config.checkIntervalMinutes}m, ` +
       `autoApply: ${this.config.autoApply}, autoRestart: ${this.config.autoRestart})`
@@ -247,13 +257,35 @@ export class AutoUpdater {
   private selfRestart(): void {
     console.log('[AutoUpdater] Initiating self-restart...');
 
-    // Build the command to restart
-    // process.argv[0] = node binary
-    // process.argv[1..] = CLI args (e.g., /path/to/cli.js server start --foreground)
-    const args = process.argv.slice(1)
-      .map(a => `'${a.replace(/'/g, "'\\''")}'`)
-      .join(' ');
-    const cmd = `sleep 2 && exec ${process.execPath} ${args}`;
+    // After an update, prefer the global binary (which has the new version)
+    // over process.argv (which may point to a stale npx cache).
+    // Extract non-path args (server, start, --foreground, --dir, etc.)
+    const cliArgs = process.argv.slice(2); // skip node + script path
+    let instarBin: string | null = null;
+    try {
+      const which = execFileSync('which', ['instar'], {
+        encoding: 'utf-8',
+        stdio: ['pipe', 'pipe', 'pipe'],
+      }).trim();
+      if (which && !which.includes('.npm/_npx')) {
+        instarBin = which;
+      }
+    } catch { /* not found globally */ }
+
+    let cmd: string;
+    if (instarBin) {
+      // Use the global binary — guaranteed to be the updated version
+      const quotedArgs = cliArgs.map(a => `'${a.replace(/'/g, "'\\''")}'`).join(' ');
+      cmd = `sleep 2 && exec '${instarBin.replace(/'/g, "'\\''")}' ${quotedArgs}`;
+      console.log(`[AutoUpdater] Will restart from global binary: ${instarBin}`);
+    } else {
+      // Fallback: use the original process.argv (global not available)
+      const args = process.argv.slice(1)
+        .map(a => `'${a.replace(/'/g, "'\\''")}'`)
+        .join(' ');
+      cmd = `sleep 2 && exec ${process.execPath} ${args}`;
+      console.log('[AutoUpdater] No global binary found, restarting from current path');
+    }
 
     try {
       const child = spawn('sh', ['-c', cmd], {
