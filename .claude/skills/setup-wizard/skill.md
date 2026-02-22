@@ -250,6 +250,35 @@ This project uses instar for persistent agent capabilities.
 - **Research before escalating** — Check tools first. Build solutions. "Needs human" is last resort.
 ```
 
+**If Telegram was configured**, also add this section to CLAUDE.md:
+
+```markdown
+## Telegram Relay
+
+When user input starts with `[telegram:N]` (e.g., `[telegram:26] hello`), the message came from a user via Telegram topic N.
+
+**IMMEDIATE ACKNOWLEDGMENT (MANDATORY):** When you receive a Telegram message, your FIRST action — before reading files, searching code, or doing any work — must be sending a brief acknowledgment back. This confirms the message was received and you haven't stalled. Examples: "Got it, looking into this now." / "On it — checking the scheduler." / "Received, working on the sync." Then do the work, then send the full response.
+
+**Response relay:** After completing your work, relay your response back:
+
+\`\`\`bash
+cat <<'EOF' | .claude/scripts/telegram-reply.sh N
+Your response text here
+EOF
+\`\`\`
+
+Or for short messages:
+\`\`\`bash
+.claude/scripts/telegram-reply.sh N "Your response text here"
+\`\`\`
+
+Strip the `[telegram:N]` prefix before interpreting the message. Respond naturally, then relay. Only relay your conversational text — not tool output or internal reasoning.
+
+The relay script sends your response to the instar server (port XXXX), which delivers it to the Telegram topic.
+```
+
+Replace `XXXX` with the configured port number.
+
 ## Phase 3: Telegram Setup — The Destination
 
 **Telegram comes BEFORE technical configuration.** It's the whole point — everything else supports getting the user onto Telegram.
@@ -513,6 +542,81 @@ curl -s "https://api.telegram.org/bot${TOKEN}/getUpdates?timeout=5"
 - **If one automation tool fails mid-flow**, you can switch to the other tool or to manual FOR JUST THE REMAINING STEPS. Don't restart from scratch.
 - **NEVER silently fail.** If a browser action doesn't work, say "I tried to click X but it didn't respond. Here's what I see on screen: [describe]. Let me try another approach."
 
+### Step 3-post: Install Telegram Relay Script
+
+**If Telegram was configured**, install the relay script that lets Claude sessions send messages back to Telegram topics. This must happen before the server starts so sessions can communicate immediately.
+
+1. Create the scripts directory and write the script:
+
+```bash
+mkdir -p <project_dir>/.claude/scripts
+```
+
+2. Create `<project_dir>/.claude/scripts/telegram-reply.sh` with this content (replace `<PORT>` with the configured instar port, e.g., 4040):
+
+```bash
+#!/bin/bash
+# telegram-reply.sh — Send a message back to a Telegram topic via instar server.
+#
+# Usage:
+#   .claude/scripts/telegram-reply.sh TOPIC_ID "message text"
+#   echo "message text" | .claude/scripts/telegram-reply.sh TOPIC_ID
+#   cat <<'EOF' | .claude/scripts/telegram-reply.sh TOPIC_ID
+#   Multi-line message here
+#   EOF
+
+TOPIC_ID="$1"
+shift
+
+if [ -z "$TOPIC_ID" ]; then
+  echo "Usage: telegram-reply.sh TOPIC_ID [message]" >&2
+  exit 1
+fi
+
+# Read message from args or stdin
+if [ $# -gt 0 ]; then
+  MSG="$*"
+else
+  MSG="$(cat)"
+fi
+
+if [ -z "$MSG" ]; then
+  echo "No message provided" >&2
+  exit 1
+fi
+
+PORT="${INSTAR_PORT:-<PORT>}"
+
+# Escape for JSON
+JSON_MSG=$(printf '%s' "$MSG" | python3 -c 'import sys,json; print(json.dumps(sys.stdin.read()))' 2>/dev/null)
+if [ -z "$JSON_MSG" ]; then
+  JSON_MSG="$(printf '%s' "$MSG" | sed 's/\\\\/\\\\\\\\/g; s/"/\\"/g' | sed ':a;N;$!ba;s/\n/\\n/g')"
+  JSON_MSG="\"$JSON_MSG\""
+fi
+
+RESPONSE=$(curl -s -w "\n%{http_code}" -X POST "http://localhost:${PORT}/telegram/reply/${TOPIC_ID}" \
+  -H 'Content-Type: application/json' \
+  -d "{\"text\":${JSON_MSG}}")
+
+HTTP_CODE=$(echo "$RESPONSE" | tail -1)
+BODY=$(echo "$RESPONSE" | sed '$d')
+
+if [ "$HTTP_CODE" = "200" ]; then
+  echo "Sent $(echo "$MSG" | wc -c | tr -d ' ') chars to topic $TOPIC_ID"
+else
+  echo "Failed (HTTP $HTTP_CODE): $BODY" >&2
+  exit 1
+fi
+```
+
+3. Make it executable:
+
+```bash
+chmod +x <project_dir>/.claude/scripts/telegram-reply.sh
+```
+
+**If Telegram was NOT configured**, skip this step entirely.
+
 ## Phase 4: Technical Configuration
 
 Now that identity and Telegram are established, handle the remaining technical setup. These should feel like sensible defaults, not interrogation.
@@ -581,7 +685,19 @@ mkdir -p .instar/state/sessions .instar/state/jobs .instar/logs
     "quotaThresholds": { "normal": 50, "elevated": 70, "critical": 85, "shutdown": 95 }
   },
   "users": [],
-  "messaging": [],
+  "messaging": [
+    {
+      "type": "telegram",
+      "enabled": true,
+      "config": {
+        "token": "<BOT_TOKEN from BotFather>",
+        "chatId": "<CHAT_ID>",
+        "lifelineTopicId": "<LIFELINE_THREAD_ID from Step 3e-vi>",
+        "pollIntervalMs": 2000,
+        "stallTimeoutMinutes": 5
+      }
+    }
+  ],
   "monitoring": {
     "quotaTracking": false,
     "memoryMonitoring": true,
@@ -589,6 +705,8 @@ mkdir -p .instar/state/sessions .instar/state/jobs .instar/logs
   }
 }
 ```
+
+**Note:** If Telegram was NOT configured, leave `"messaging"` as `[]`.
 
 **`.instar/jobs.json`**: `[]` (empty array, or populated if jobs were configured)
 
