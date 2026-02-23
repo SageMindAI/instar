@@ -7,6 +7,7 @@
 
 import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import type { SessionManager } from '../core/SessionManager.js';
 import type { JobScheduler } from '../scheduler/JobScheduler.js';
@@ -179,7 +180,6 @@ export class HealthChecker {
   private checkMemory(): ComponentHealth {
     const now = new Date().toISOString();
     try {
-      const os = require('node:os');
       const totalBytes = os.totalmem();
       const freeBytes = os.freemem();
       const totalGB = totalBytes / (1024 ** 3);

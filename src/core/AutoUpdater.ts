@@ -286,6 +286,23 @@ export class AutoUpdater {
       }
     } catch { /* not found globally */ }
 
+    // If `which instar` didn't find a global binary, try npm's prefix path directly.
+    // This handles the common case where npm's global bin directory is not in PATH
+    // (automation contexts, fresh shell sessions, custom npm prefixes).
+    if (!instarBin) {
+      try {
+        const npmPrefix = execFileSync('npm', ['prefix', '-g'], {
+          encoding: 'utf-8',
+          stdio: ['pipe', 'pipe', 'pipe'],
+        }).trim();
+        const candidate = `${npmPrefix}/bin/instar`;
+        if (fs.existsSync(candidate)) {
+          instarBin = candidate;
+          console.log(`[AutoUpdater] Found global binary via npm prefix: ${instarBin}`);
+        }
+      } catch { /* npm not available or prefix lookup failed */ }
+    }
+
     let cmd: string;
     if (instarBin) {
       // Use the global binary — guaranteed to be the updated version
@@ -293,7 +310,23 @@ export class AutoUpdater {
       cmd = `sleep 2 && exec '${instarBin.replace(/'/g, "'\\''")}' ${quotedArgs}`;
       console.log(`[AutoUpdater] Will restart from global binary: ${instarBin}`);
     } else {
-      // Fallback: use the original process.argv (global not available)
+      // No global binary found. If we were running from npx cache, restarting
+      // from process.argv would loop (npx cache is the old version, which would
+      // detect the update again and restart again indefinitely).
+      const scriptPath = process.argv[1] || '';
+      const isNpxCache = scriptPath.includes('.npm/_npx') || scriptPath.includes('/_npx/');
+      if (isNpxCache) {
+        console.error('[AutoUpdater] Update applied but cannot restart — global binary not found in PATH or npm prefix.');
+        console.error('[AutoUpdater] Restarting from npx cache would cause a restart loop.');
+        console.error('[AutoUpdater] Manual restart required: npm install -g instar && instar server start');
+        void this.notify(
+          'Update applied but auto-restart skipped — global binary not in PATH.\n\n' +
+          'Run manually to activate the update:\n' +
+          '```\nnpm install -g instar\ninstar server start --foreground\n```'
+        );
+        return;
+      }
+      // Not from npx cache — safe to restart from current path
       const args = process.argv.slice(1)
         .map(a => `'${a.replace(/'/g, "'\\''")}'`)
         .join(' ');
