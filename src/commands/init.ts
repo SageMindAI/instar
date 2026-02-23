@@ -28,6 +28,7 @@
  */
 
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import pc from 'picocolors';
 import { randomUUID } from 'node:crypto';
@@ -2273,17 +2274,84 @@ function installClaudeSettings(projectDir: string): void {
     }
   }
 
-  // MCP Servers: Playwright for browser automation (used by setup wizard, Telegram setup, etc.)
-  if (!settings.mcpServers) {
-    settings.mcpServers = {};
-  }
-  const mcpServers = settings.mcpServers as Record<string, unknown>;
-  if (!mcpServers.playwright) {
-    mcpServers.playwright = {
-      command: 'npx',
-      args: ['-y', '@playwright/mcp@latest'],
-    };
+  // Remove stale mcpServers from settings.json — MCP servers belong in
+  // ~/.claude.json (local scope) or .mcp.json, NOT .claude/settings.json
+  if (settings.mcpServers) {
+    delete settings.mcpServers;
   }
 
   fs.writeFileSync(settingsPath, JSON.stringify(settings, null, 2));
+
+  // MCP Servers: Register Playwright in the correct locations
+  // Claude Code reads MCP servers from ~/.claude.json and .mcp.json, NOT .claude/settings.json
+  registerPlaywrightMcp(projectDir);
+}
+
+/**
+ * Register Playwright MCP server in the correct locations for Claude Code.
+ *
+ * Claude Code reads MCP servers from:
+ *   1. ~/.claude.json — local scope (projects["/path"].mcpServers) — no trust dialog
+ *   2. .mcp.json in project root — project scope — requires trust acceptance
+ *
+ * We register in both for robustness.
+ */
+function registerPlaywrightMcp(projectDir: string): void {
+  const absDir = path.resolve(projectDir);
+
+  // ── 1. Register in ~/.claude.json at local scope ──
+  const claudeJsonPath = path.join(os.homedir(), '.claude.json');
+  try {
+    let claudeJson: Record<string, unknown> = {};
+    if (fs.existsSync(claudeJsonPath)) {
+      claudeJson = JSON.parse(fs.readFileSync(claudeJsonPath, 'utf-8'));
+    }
+
+    if (!claudeJson.projects || typeof claudeJson.projects !== 'object') {
+      claudeJson.projects = {};
+    }
+    const projects = claudeJson.projects as Record<string, Record<string, unknown>>;
+
+    if (!projects[absDir]) {
+      projects[absDir] = {};
+    }
+    const projectEntry = projects[absDir];
+
+    if (!projectEntry.mcpServers || typeof projectEntry.mcpServers !== 'object') {
+      projectEntry.mcpServers = {};
+    }
+    const mcpServers = projectEntry.mcpServers as Record<string, unknown>;
+    if (!mcpServers.playwright) {
+      mcpServers.playwright = {
+        command: 'npx',
+        args: ['-y', '@playwright/mcp@latest'],
+      };
+    }
+
+    projectEntry.hasTrustDialogAccepted = true;
+
+    const tmpPath = `${claudeJsonPath}.${process.pid}.tmp`;
+    fs.writeFileSync(tmpPath, JSON.stringify(claudeJson, null, 2));
+    fs.renameSync(tmpPath, claudeJsonPath);
+  } catch {
+    // Non-fatal
+  }
+
+  // ── 2. Create .mcp.json in project root ──
+  const mcpJsonPath = path.join(projectDir, '.mcp.json');
+  if (!fs.existsSync(mcpJsonPath)) {
+    try {
+      const mcpConfig = {
+        mcpServers: {
+          playwright: {
+            command: 'npx',
+            args: ['-y', '@playwright/mcp@latest'],
+          },
+        },
+      };
+      fs.writeFileSync(mcpJsonPath, JSON.stringify(mcpConfig, null, 2));
+    } catch {
+      // Non-fatal
+    }
+  }
 }

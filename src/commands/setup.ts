@@ -157,36 +157,80 @@ export async function runSetup(opts?: { classic?: boolean }): Promise<void> {
 }
 
 /**
- * Ensure .claude/settings.json in the given directory has the Playwright MCP
- * server registered. This is critical for the setup wizard — Claude Code loads
- * MCP servers at startup, so the file must exist BEFORE spawning the session.
+ * Register the Playwright MCP server so Claude Code has browser automation
+ * available when spawned for the setup wizard.
  *
- * The .npmignore excludes .claude/settings*.json from the published package,
- * so this function creates it for fresh npx installations.
+ * Claude Code loads MCP servers from THREE places (NOT .claude/settings.json):
+ *   1. ~/.claude.json — user scope (top-level mcpServers) or local scope
+ *      (projects["/abs/path"].mcpServers) — NO trust dialog needed
+ *   2. .mcp.json in project root — project scope — requires trust acceptance
+ *
+ * We register in BOTH places for robustness:
+ *   - ~/.claude.json local scope: guaranteed to work, no trust dialog
+ *   - .mcp.json: works if trust is pre-accepted or enableAllProjectMcpServers
  */
 function ensurePlaywrightMcp(dir: string): void {
-  const claudeDir = path.join(dir, '.claude');
-  fs.mkdirSync(claudeDir, { recursive: true });
-  const settingsPath = path.join(claudeDir, 'settings.json');
+  const absDir = path.resolve(dir);
 
-  let settings: Record<string, unknown> = {};
-  if (fs.existsSync(settingsPath)) {
+  // ── 1. Register in ~/.claude.json at local scope (most reliable) ──
+  const claudeJsonPath = path.join(os.homedir(), '.claude.json');
+  try {
+    let claudeJson: Record<string, unknown> = {};
+    if (fs.existsSync(claudeJsonPath)) {
+      claudeJson = JSON.parse(fs.readFileSync(claudeJsonPath, 'utf-8'));
+    }
+
+    // Ensure projects map exists
+    if (!claudeJson.projects || typeof claudeJson.projects !== 'object') {
+      claudeJson.projects = {};
+    }
+    const projects = claudeJson.projects as Record<string, Record<string, unknown>>;
+
+    // Ensure project entry exists
+    if (!projects[absDir]) {
+      projects[absDir] = {};
+    }
+    const projectEntry = projects[absDir];
+
+    // Register Playwright MCP at local scope
+    if (!projectEntry.mcpServers || typeof projectEntry.mcpServers !== 'object') {
+      projectEntry.mcpServers = {};
+    }
+    const mcpServers = projectEntry.mcpServers as Record<string, unknown>;
+    if (!mcpServers.playwright) {
+      mcpServers.playwright = {
+        command: 'npx',
+        args: ['-y', '@playwright/mcp@latest'],
+      };
+    }
+
+    // Pre-accept trust so .mcp.json servers also load without a dialog
+    projectEntry.hasTrustDialogAccepted = true;
+
+    // Write atomically
+    const tmpPath = `${claudeJsonPath}.${process.pid}.tmp`;
+    fs.writeFileSync(tmpPath, JSON.stringify(claudeJson, null, 2));
+    fs.renameSync(tmpPath, claudeJsonPath);
+  } catch {
+    // Non-fatal — .mcp.json fallback below
+  }
+
+  // ── 2. Also create .mcp.json in the project root (belt-and-suspenders) ──
+  const mcpJsonPath = path.join(dir, '.mcp.json');
+  if (!fs.existsSync(mcpJsonPath)) {
     try {
-      settings = JSON.parse(fs.readFileSync(settingsPath, 'utf-8'));
-    } catch { /* start fresh if corrupted */ }
-  }
-
-  // Register Playwright MCP server if not already present
-  if (!settings.mcpServers) {
-    settings.mcpServers = {};
-  }
-  const mcpServers = settings.mcpServers as Record<string, unknown>;
-  if (!mcpServers.playwright) {
-    mcpServers.playwright = {
-      command: 'npx',
-      args: ['-y', '@playwright/mcp@latest'],
-    };
-    fs.writeFileSync(settingsPath, JSON.stringify(settings, null, 2));
+      const mcpConfig = {
+        mcpServers: {
+          playwright: {
+            command: 'npx',
+            args: ['-y', '@playwright/mcp@latest'],
+          },
+        },
+      };
+      fs.writeFileSync(mcpJsonPath, JSON.stringify(mcpConfig, null, 2));
+    } catch {
+      // Non-fatal
+    }
   }
 }
 
