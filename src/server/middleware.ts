@@ -38,6 +38,12 @@ export function authMiddleware(authToken?: string) {
       return;
     }
 
+    // Internal endpoints are localhost-only (server binds 127.0.0.1) — skip auth
+    if (req.path.startsWith('/internal/')) {
+      next();
+      return;
+    }
+
     // View routes support signed URLs for browser access (see ?sig= below)
     if (req.path.startsWith('/view/') && req.method === 'GET') {
       const sig = typeof req.query.sig === 'string' ? req.query.sig : null;
