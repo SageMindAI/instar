@@ -130,8 +130,12 @@ export class UpdateChecker {
 
     try {
       // Use `npm install -g instar@latest` — `npm update -g` is unreliable
-      // for global packages and often silently fails to change the version
-      await this.execAsync('npm', ['install', '-g', 'instar@latest'], 120000);
+      // for global packages and often silently fails to change the version.
+      // --ignore-scripts prevents cloudflared's postinstall binary download from
+      // failing with ENOENT in environments where the download path doesn't exist.
+      // The cloudflared binary is installed lazily on-demand by TunnelManager when
+      // the tunnel feature is first used (via install(bin) from the cloudflared package).
+      await this.execAsync('npm', ['install', '-g', 'instar@latest', '--ignore-scripts'], 120000);
     } catch (err) {
       return {
         success: false,
@@ -228,7 +232,7 @@ export class UpdateChecker {
     const currentVersion = this.getInstalledVersion();
 
     try {
-      await this.execAsync('npm', ['install', '-g', `instar@${rollbackInfo.previousVersion}`], 120000);
+      await this.execAsync('npm', ['install', '-g', `instar@${rollbackInfo.previousVersion}`, '--ignore-scripts'], 120000);
     } catch (err) {
       return {
         success: false,
