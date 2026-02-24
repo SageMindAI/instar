@@ -171,15 +171,17 @@ export class AutoDispatcher {
         return;
       }
 
-      // Report passive auto-applications
+      // Report passive auto-applications (conversational, not changelog)
       if (result.autoApplied && result.autoApplied > 0) {
         console.log(`[AutoDispatcher] Auto-applied ${result.autoApplied} passive dispatch(es)`);
+        const appliedTitles = result.dispatches
+          .filter(d => d.applied)
+          .map(d => d.title);
+        const titleList = appliedTitles.length <= 2
+          ? appliedTitles.join(' and ')
+          : `${appliedTitles.length} improvements`;
         await this.notify(
-          `Applied ${result.autoApplied} intelligence dispatch(es) to context.\n` +
-          result.dispatches
-            .filter(d => d.applied)
-            .map(d => `  - ${d.title} (${d.type})`)
-            .join('\n')
+          `I just picked up ${titleList} from Dawn. Already applied — no action needed on your end.`
         );
       }
 
@@ -207,8 +209,8 @@ export class AutoDispatcher {
         const securityDispatches = remaining.filter(d => d.type === 'security');
         if (securityDispatches.length > 0) {
           await this.notify(
-            `⚠️ ${securityDispatches.length} security dispatch(es) require manual review:\n` +
-            securityDispatches.map(d => `  - ${d.title}`).join('\n')
+            `Heads up — I received a security-related update that I'd like you to review before I apply it. ` +
+            `Nothing urgent, just being careful.`
           );
         }
       }
@@ -260,9 +262,7 @@ export class AutoDispatcher {
 
       console.log(`[AutoDispatcher] Dispatch executed successfully: ${dispatch.title}`);
       await this.notify(
-        `Executed dispatch: ${dispatch.title}\n` +
-        `${result.completedSteps}/${result.totalSteps} steps completed` +
-        (result.verified ? ' (verified)' : '')
+        `Just applied an improvement from Dawn: ${dispatch.title}. Everything went smoothly.`
       );
     } else {
       console.error(`[AutoDispatcher] Dispatch execution failed: ${result.message}`);
@@ -275,9 +275,9 @@ export class AutoDispatcher {
       );
 
       await this.notify(
-        `⚠️ Dispatch execution failed: ${dispatch.title}\n` +
-        `${result.message}` +
-        (result.rolledBack ? '\nChanges were rolled back.' : '')
+        `I tried to apply an update (${dispatch.title}) but ran into an issue. ` +
+        (result.rolledBack ? `I've rolled it back so nothing's affected. ` : '') +
+        `I'll try again later.`
       );
     }
   }
@@ -286,7 +286,7 @@ export class AutoDispatcher {
    * Send notification via Telegram.
    */
   private async notify(message: string): Promise<void> {
-    const formatted = `📡 *Intelligence Dispatch*\n\n${message}`;
+    const formatted = message;
 
     if (this.telegram) {
       try {

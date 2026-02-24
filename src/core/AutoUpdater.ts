@@ -185,11 +185,8 @@ export class AutoUpdater {
       if (!this.config.autoApply) {
         // Just notify — don't apply
         await this.notify(
-          `Update available: v${info.currentVersion} → v${info.latestVersion}\n\n` +
-          (info.changeSummary ? `What changed:\n${info.changeSummary}\n\n` : '') +
-          `Details: ${info.changelogUrl || 'https://github.com/SageMindAI/instar/releases'}\n\n` +
-          `Auto-apply is disabled. Apply manually:\n` +
-          `curl -X POST http://localhost:${this.getPort()}/updates/apply`
+          `There's a new version available (v${info.latestVersion}). I'm currently on v${info.currentVersion}. ` +
+          `Auto-updates are off, so I'll need you to apply it when you're ready.`
         );
         return;
       }
@@ -206,8 +203,9 @@ export class AutoUpdater {
         this.saveState();
         console.error(`[AutoUpdater] Update failed: ${result.message}`);
         await this.notify(
-          `Update to v${info.latestVersion} failed: ${result.message}\n\n` +
-          `The current version (v${result.previousVersion}) is still running.`
+          `Heads up — I tried to update to v${info.latestVersion} but it didn't work out. ` +
+          `I'm still running fine on v${result.previousVersion}, so nothing's broken. ` +
+          `I'll try again next cycle.`
         );
         return;
       }
@@ -219,24 +217,16 @@ export class AutoUpdater {
 
       console.log(`[AutoUpdater] Updated: v${result.previousVersion} → v${result.newVersion}`);
 
-      // Step 5: Notify via Telegram
+      // Step 5: Notify via Telegram (brief, conversational — the upgrade-notify session handles details)
       const restartNote = result.restartNeeded && this.config.autoRestart
-        ? '\nServer is restarting now...'
+        ? ' Restarting now to pick up the changes.'
         : result.restartNeeded
-          ? '\nA server restart is needed to use the new version.'
+          ? ' A restart is needed to use the new version.'
           : '';
 
-      const changeSummary = info.changeSummary
-        ? `What changed:\n${info.changeSummary}\n`
-        : '';
-      const detailsUrl = info.changelogUrl || 'https://github.com/SageMindAI/instar/releases';
-
       await this.notify(
-        `Updated: v${result.previousVersion} → v${result.newVersion}\n\n` +
-        changeSummary +
-        `Details: ${detailsUrl}\n` +
-        restartNote +
-        `\n\nTo disable auto-updates, set "autoApply": false in .instar/config.json under "updates".`
+        `Just updated to v${result.newVersion}.${restartNote} ` +
+        `I'll send you a summary of what's new once I'm back up.`
       );
 
       // Step 6: Self-restart if needed and configured
@@ -320,9 +310,8 @@ export class AutoUpdater {
         console.error('[AutoUpdater] Restarting from npx cache would cause a restart loop.');
         console.error('[AutoUpdater] Manual restart required: npm install -g instar && instar server start');
         void this.notify(
-          'Update applied but auto-restart skipped — global binary not in PATH.\n\n' +
-          'Run manually to activate the update:\n' +
-          '```\nnpm install -g instar\ninstar server start --foreground\n```'
+          `I've updated to the latest version, but I wasn't able to restart automatically. ` +
+          `Could you restart me when you get a chance?`
         );
         return;
       }
@@ -358,7 +347,7 @@ export class AutoUpdater {
    * Falls back to console logging if Telegram is not available.
    */
   private async notify(message: string): Promise<void> {
-    const formatted = `🔄 *Auto-Update*\n\n${message}`;
+    const formatted = message;
 
     if (this.telegram) {
       try {
