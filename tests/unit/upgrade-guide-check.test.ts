@@ -12,6 +12,7 @@ import { describe, it, expect } from 'vitest';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { PostUpdateMigrator } from '../../src/core/PostUpdateMigrator.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, '..', '..');
@@ -56,8 +57,14 @@ describe('Upgrade Guide Infrastructure', () => {
   });
 
   describe('session-start hook loads feature guide', () => {
-    const hookPath = path.join(ROOT, 'src', 'templates', 'hooks', 'session-start.sh');
-    const hookContent = fs.readFileSync(hookPath, 'utf-8');
+    const migrator = new PostUpdateMigrator({
+      projectDir: ROOT,
+      stateDir: path.join(ROOT, '.instar'),
+      port: 4040,
+      hasTelegram: true,
+      projectName: 'test',
+    });
+    const hookContent = migrator.getHookContent('session-start');
 
     it('calls /capabilities endpoint', () => {
       expect(hookContent).toContain('/capabilities');
@@ -70,7 +77,7 @@ describe('Upgrade Guide Infrastructure', () => {
 
     it('loads topic context before identity', () => {
       const topicIdx = hookContent.indexOf('CONVERSATION CONTEXT');
-      const identityIdx = hookContent.indexOf('YOUR IDENTITY');
+      const identityIdx = hookContent.indexOf('Identity:');
       expect(topicIdx).toBeLessThan(identityIdx);
       expect(topicIdx).toBeGreaterThan(-1);
     });
