@@ -78,6 +78,23 @@ export { ContextHierarchy } from './core/ContextHierarchy.js';
 export type { ContextSegment, ContextHierarchyConfig, ContextDispatchTable } from './core/ContextHierarchy.js';
 export { CanonicalState } from './core/CanonicalState.js';
 export type { QuickFact, AntiPattern, ProjectEntry, CanonicalStateConfig } from './core/CanonicalState.js';
+export { ExternalOperationGate, computeRiskLevel, scopeFromCount, AUTONOMY_PROFILES } from './core/ExternalOperationGate.js';
+export type {
+  OperationMutability, OperationReversibility, OperationScope, RiskLevel,
+  GateAction, TrustLevel, TrustSource, AutonomyBehavior,
+  OperationClassification, GateDecision, CheckpointConfig,
+  ServicePermissions, ExternalOperationGateConfig, OperationLogEntry,
+} from './core/ExternalOperationGate.js';
+export { MessageSentinel } from './core/MessageSentinel.js';
+export type {
+  SentinelCategory, SentinelClassification, SentinelAction,
+  MessageSentinelConfig, SentinelStats,
+} from './core/MessageSentinel.js';
+export { AdaptiveTrust } from './core/AdaptiveTrust.js';
+export type {
+  TrustProfile, ServiceTrust, TrustEntry, TrustHistory,
+  TrustChangeEvent, AdaptiveTrustConfig, TrustElevationSuggestion,
+} from './core/AdaptiveTrust.js';
 
 // Memory
 export { MemoryIndex } from './memory/MemoryIndex.js';
