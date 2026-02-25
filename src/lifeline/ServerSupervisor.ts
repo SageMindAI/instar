@@ -10,6 +10,8 @@
 
 import { execFileSync } from 'node:child_process';
 import { EventEmitter } from 'node:events';
+import fs from 'node:fs';
+import path from 'node:path';
 import { detectTmuxPath } from '../core/Config.js';
 
 export interface SupervisorEvents {
@@ -36,16 +38,19 @@ export class ServerSupervisor extends EventEmitter {
   private maxRetriesExhaustedAt = 0;
   private consecutiveFailures = 0; // Hysteresis: require 2 consecutive failures before marking unhealthy
   private readonly unhealthyThreshold = 2;
+  private stateDir: string | null;
 
   constructor(options: {
     projectDir: string;
     projectName: string;
     port: number;
+    stateDir?: string;
   }) {
     super();
     this.projectDir = options.projectDir;
     this.projectName = options.projectName;
     this.port = options.port;
+    this.stateDir = options.stateDir ?? null;
     this.tmuxPath = detectTmuxPath();
     this.serverSessionName = `${this.projectName}-server`;
   }
@@ -188,6 +193,7 @@ export class ServerSupervisor extends EventEmitter {
         const healthy = await this.checkHealth();
         if (healthy) {
           if (!this.isRunning) {
+            this.clearPlannedRestartFlag();
             this.emit('serverUp');
           }
           this.isRunning = true;
@@ -234,6 +240,17 @@ export class ServerSupervisor extends EventEmitter {
   }
 
   private handleUnhealthy(): void {
+    // Check if this is a planned restart (e.g., auto-update in progress).
+    // If so, suppress the "server down" alert and don't auto-restart —
+    // the replacement process will come up on its own.
+    if (this.isPlannedRestart()) {
+      console.log('[Supervisor] Health check failed but update-restart flag is active — suppressing alert');
+      this.consecutiveFailures = 0;
+      // Reset grace period so the replacement process has time to start
+      this.spawnedAt = Date.now();
+      return;
+    }
+
     if (this.isRunning) {
       this.isRunning = false;
       this.emit('serverDown', 'Health check failed');
@@ -277,5 +294,42 @@ export class ServerSupervisor extends EventEmitter {
 
       this.spawnServer();
     }, delay);
+  }
+
+  // ── Update restart flag ──────────────────────────────────────────
+
+  /**
+   * Check if the server is in a planned restart (e.g., auto-update).
+   * The AutoUpdater writes a flag file with a TTL before restarting.
+   */
+  private isPlannedRestart(): boolean {
+    if (!this.stateDir) return false;
+    const flagPath = path.join(this.stateDir, 'state', 'update-restart.json');
+    try {
+      if (!fs.existsSync(flagPath)) return false;
+      const data = JSON.parse(fs.readFileSync(flagPath, 'utf-8'));
+      if (data.expiresAt && new Date(data.expiresAt).getTime() < Date.now()) {
+        // Expired — clean up and treat as unplanned failure
+        try { fs.unlinkSync(flagPath); } catch { /* ignore */ }
+        return false;
+      }
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  /**
+   * Clear the update-restart flag after the server comes back healthy.
+   */
+  private clearPlannedRestartFlag(): void {
+    if (!this.stateDir) return;
+    const flagPath = path.join(this.stateDir, 'state', 'update-restart.json');
+    try {
+      if (fs.existsSync(flagPath)) {
+        fs.unlinkSync(flagPath);
+        console.log('[Supervisor] Cleared update-restart flag — server recovered after update');
+      }
+    } catch { /* ignore */ }
   }
 }

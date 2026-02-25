@@ -134,6 +134,7 @@ export class TelegramLifeline {
       projectDir: this.projectConfig.projectDir,
       projectName: this.projectConfig.projectName,
       port: this.projectConfig.port,
+      stateDir: this.projectConfig.stateDir,
     });
 
     // Wire supervisor events

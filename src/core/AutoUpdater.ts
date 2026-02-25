@@ -66,6 +66,7 @@ export class AutoUpdater {
   private pendingUpdate: string | null = null;
   private isApplying = false;
   private loopNotified = false;
+  private stateDir: string;
   private stateFile: string;
 
   constructor(
@@ -78,6 +79,7 @@ export class AutoUpdater {
     this.updateChecker = updateChecker;
     this.state = state;
     this.telegram = telegram ?? null;
+    this.stateDir = stateDir;
     this.stateFile = path.join(stateDir, 'state', 'auto-updater.json');
 
     this.config = {
@@ -366,6 +368,10 @@ export class AutoUpdater {
     }
 
     try {
+      // Signal the lifeline supervisor that this is a planned restart —
+      // suppresses "server down" alerts during the update window
+      this.writeUpdateRestartFlag();
+
       const child = spawn('sh', ['-c', cmd], {
         detached: true,
         stdio: 'inherit',
@@ -446,6 +452,36 @@ export class AutoUpdater {
       return fs.existsSync(guidePath);
     } catch {
       return false;
+    }
+  }
+
+  // ── Update restart flag ────────────────────────────────────────────
+
+  /**
+   * Write a flag file to signal the lifeline supervisor that the server
+   * is about to restart for an update. The supervisor checks this flag
+   * before firing "server down" alerts, preventing unnecessary noise.
+   *
+   * The flag has a 3-minute TTL — if the replacement server doesn't
+   * come up by then, it's a real problem and alerts should fire.
+   */
+  private writeUpdateRestartFlag(): void {
+    const flagPath = path.join(this.stateDir, 'state', 'update-restart.json');
+    const data = {
+      pid: process.pid,
+      startedAt: new Date().toISOString(),
+      targetVersion: this.lastAppliedVersion ?? 'unknown',
+      expiresAt: new Date(Date.now() + 3 * 60 * 1000).toISOString(),
+    };
+    try {
+      const dir = path.dirname(flagPath);
+      fs.mkdirSync(dir, { recursive: true });
+      const tmpPath = `${flagPath}.${process.pid}.tmp`;
+      fs.writeFileSync(tmpPath, JSON.stringify(data, null, 2));
+      fs.renameSync(tmpPath, flagPath);
+      console.log('[AutoUpdater] Wrote update-restart flag (expires in 3 min)');
+    } catch (err) {
+      console.error(`[AutoUpdater] Failed to write update-restart flag: ${err}`);
     }
   }
 
