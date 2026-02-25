@@ -16,6 +16,12 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
+import { loadConfig } from '../../src/core/Config.js';
+
+// Mock loadConfig to avoid dependency on tmux/Claude CLI being installed (CI)
+vi.mock('../../src/core/Config.js', () => ({
+  loadConfig: vi.fn(),
+}));
 
 describe('intent reflect', () => {
   let tmpDir: string;
@@ -30,10 +36,12 @@ describe('intent reflect', () => {
     fs.mkdirSync(path.join(stateDir, 'state', 'jobs'), { recursive: true });
     fs.mkdirSync(path.join(stateDir, 'logs'), { recursive: true });
 
-    // Write a minimal config.json so loadConfig can find the project
-    fs.writeFileSync(path.join(stateDir, 'config.json'), JSON.stringify({
+    // Configure the loadConfig mock to return config pointing at our tmpDir
+    vi.mocked(loadConfig).mockReturnValue({
       projectName: 'test-project',
-    }));
+      projectDir: tmpDir,
+      stateDir,
+    } as any);
 
     consoleLogs = [];
     vi.spyOn(console, 'log').mockImplementation((...args: any[]) => {

@@ -60,6 +60,7 @@ export async function intentReflect(options: IntentReflectOptions): Promise<void
     console.log(pc.red(`Not initialized: ${err instanceof Error ? err.message : String(err)}`));
     console.log(`Run ${pc.cyan('instar init')} first.`);
     process.exit(1);
+    return; // Safety: process.exit may not actually exit in test environments
   }
 
   const days = options.days ?? 7;
