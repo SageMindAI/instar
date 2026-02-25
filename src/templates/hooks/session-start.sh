@@ -97,7 +97,7 @@ if [ ! -f "$MARKER_FILE" ]; then
     fi
   fi
 
-  # Server health check
+  # Server health check + Telegram topic history
   CONFIG_FILE="$INSTAR_DIR/config.json"
   if [ -f "$CONFIG_FILE" ]; then
     PORT=$(grep -o '"port":[0-9]*' "$CONFIG_FILE" | head -1 | cut -d':' -f2)
@@ -105,6 +105,73 @@ if [ ! -f "$MARKER_FILE" ]; then
       HEALTH=$(curl -s -o /dev/null -w "%{http_code}" "http://localhost:${PORT}/health" 2>/dev/null)
       if [ "$HEALTH" = "200" ]; then
         echo "Server running on port ${PORT}. Check capabilities: curl http://localhost:${PORT}/capabilities"
+
+        # Inject recent Telegram messages for the lifeline topic — gives the agent
+        # thread context without needing to remember what was said before.
+        LIFELINE_TOPIC=$(python3 -c "
+import json, sys
+try:
+    cfg = json.load(open('$CONFIG_FILE'))
+    # Check messaging array (standard location)
+    for m in cfg.get('messaging', []):
+        if m.get('type') == 'telegram':
+            tid = m.get('config', {}).get('lifelineTopicId')
+            if tid:
+                print(tid)
+                sys.exit(0)
+    # Fallback: top-level telegram config
+    tid = cfg.get('telegram', {}).get('lifelineTopicId')
+    if tid:
+        print(tid)
+except Exception:
+    pass
+" 2>/dev/null)
+
+        if [ -n "$LIFELINE_TOPIC" ]; then
+          AUTH_TOKEN=$(python3 -c "import json; print(json.load(open('$CONFIG_FILE')).get('authToken',''))" 2>/dev/null)
+          if [ -n "$AUTH_TOKEN" ]; then
+            RECENT_MSGS=$(curl -s \
+              -H "Authorization: Bearer ${AUTH_TOKEN}" \
+              "http://localhost:${PORT}/telegram/topics/${LIFELINE_TOPIC}/messages?limit=10" 2>/dev/null)
+          else
+            RECENT_MSGS=$(curl -s \
+              "http://localhost:${PORT}/telegram/topics/${LIFELINE_TOPIC}/messages?limit=10" 2>/dev/null)
+          fi
+
+          MSG_COUNT=$(echo "$RECENT_MSGS" | python3 -c "
+import sys, json
+try:
+    data = json.load(sys.stdin)
+    msgs = data.get('messages', [])
+    print(len(msgs))
+except:
+    print(0)
+" 2>/dev/null)
+
+          if [ -n "$MSG_COUNT" ] && [ "$MSG_COUNT" -gt "0" ] 2>/dev/null; then
+            echo ""
+            echo "--- RECENT TELEGRAM MESSAGES (Lifeline topic, last ${MSG_COUNT}) ---"
+            echo "$RECENT_MSGS" | python3 -c "
+import sys, json
+try:
+    data = json.load(sys.stdin)
+    msgs = data.get('messages', [])
+    for m in msgs:
+        ts = m.get('timestamp', '')[:16].replace('T', ' ')
+        direction = m.get('direction', 'in')
+        text = m.get('text', '').strip()
+        sender = 'User' if direction == 'in' else 'Agent'
+        # Truncate long messages
+        if len(text) > 200:
+            text = text[:197] + '...'
+        print(f'[{ts}] {sender}: {text}')
+except Exception as e:
+    pass
+" 2>/dev/null
+            echo "--- END RECENT MESSAGES ---"
+            echo "Context: These are messages from your Lifeline Telegram topic. Use this to maintain conversation continuity."
+          fi
+        fi
       else
         echo "WARNING: Server on port ${PORT} is not responding. Run: instar server start"
       fi

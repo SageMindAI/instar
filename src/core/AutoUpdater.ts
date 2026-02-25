@@ -224,9 +224,16 @@ export class AutoUpdater {
           ? ' A restart is needed to use the new version.'
           : '';
 
+      // Only promise a summary if an upgrade guide exists for the new version.
+      // Without a guide, the upgrade-notify session has nothing to report — don't
+      // make a promise we can't keep.
+      const guideExists = this.hasUpgradeGuide(result.newVersion);
+      const summaryNote = guideExists
+        ? ` I'll send you a summary of what's new once I'm back up.`
+        : '';
+
       await this.notify(
-        `Just updated to v${result.newVersion}.${restartNote} ` +
-        `I'll send you a summary of what's new once I'm back up.`
+        `Just updated to v${result.newVersion}.${restartNote}${summaryNote}`
       );
 
       // Step 6: Self-restart if needed and configured
@@ -382,6 +389,29 @@ export class AutoUpdater {
     // The port is available on the UpdateChecker config but not exposed.
     // Use a reasonable default — agents can find their port from config.
     return 4040;
+  }
+
+  // ── Upgrade guide detection ─────────────────────────────────────────
+
+  /**
+   * Check if an upgrade guide exists for the given version.
+   * This is used to decide whether to promise a "what's new" summary
+   * in the post-update notification — we should only make a promise
+   * we can keep.
+   */
+  private hasUpgradeGuide(version: string): boolean {
+    try {
+      // This file is at dist/core/AutoUpdater.js after compilation.
+      // The upgrades/ dir is at the package root (3 levels up).
+      const moduleDir = path.resolve(
+        new URL(import.meta.url).pathname,
+        '..', '..', '..'
+      );
+      const guidePath = path.join(moduleDir, 'upgrades', `${version}.md`);
+      return fs.existsSync(guidePath);
+    } catch {
+      return false;
+    }
   }
 
   // ── State persistence ──────────────────────────────────────────────

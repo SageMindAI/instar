@@ -85,12 +85,79 @@ if [ -d "$INSTAR_DIR/relationships" ]; then
   fi
 fi
 
-# Server health reminder
+# Server health reminder + recent Telegram context
 CONFIG_FILE="$INSTAR_DIR/config.json"
 if [ -f "$CONFIG_FILE" ]; then
   PORT=$(grep -o '"port":[0-9]*' "$CONFIG_FILE" | head -1 | cut -d':' -f2)
   if [ -n "$PORT" ]; then
     echo "Server: curl http://localhost:${PORT}/health | Capabilities: curl http://localhost:${PORT}/capabilities"
+
+    # Inject recent Telegram messages after compaction — thread context is often
+    # the first thing lost in compaction; re-injecting it immediately restores continuity.
+    HEALTH=$(curl -s -o /dev/null -w "%{http_code}" "http://localhost:${PORT}/health" 2>/dev/null)
+    if [ "$HEALTH" = "200" ]; then
+      LIFELINE_TOPIC=$(python3 -c "
+import json, sys
+try:
+    cfg = json.load(open('$CONFIG_FILE'))
+    for m in cfg.get('messaging', []):
+        if m.get('type') == 'telegram':
+            tid = m.get('config', {}).get('lifelineTopicId')
+            if tid:
+                print(tid)
+                sys.exit(0)
+    tid = cfg.get('telegram', {}).get('lifelineTopicId')
+    if tid:
+        print(tid)
+except Exception:
+    pass
+" 2>/dev/null)
+
+      if [ -n "$LIFELINE_TOPIC" ]; then
+        AUTH_TOKEN=$(python3 -c "import json; print(json.load(open('$CONFIG_FILE')).get('authToken',''))" 2>/dev/null)
+        if [ -n "$AUTH_TOKEN" ]; then
+          RECENT_MSGS=$(curl -s \
+            -H "Authorization: Bearer ${AUTH_TOKEN}" \
+            "http://localhost:${PORT}/telegram/topics/${LIFELINE_TOPIC}/messages?limit=10" 2>/dev/null)
+        else
+          RECENT_MSGS=$(curl -s \
+            "http://localhost:${PORT}/telegram/topics/${LIFELINE_TOPIC}/messages?limit=10" 2>/dev/null)
+        fi
+
+        MSG_COUNT=$(echo "$RECENT_MSGS" | python3 -c "
+import sys, json
+try:
+    data = json.load(sys.stdin)
+    msgs = data.get('messages', [])
+    print(len(msgs))
+except:
+    print(0)
+" 2>/dev/null)
+
+        if [ -n "$MSG_COUNT" ] && [ "$MSG_COUNT" -gt "0" ] 2>/dev/null; then
+          echo ""
+          echo "--- RECENT TELEGRAM CONTEXT (restoring after compaction, last ${MSG_COUNT} messages) ---"
+          echo "$RECENT_MSGS" | python3 -c "
+import sys, json
+try:
+    data = json.load(sys.stdin)
+    msgs = data.get('messages', [])
+    for m in msgs:
+        ts = m.get('timestamp', '')[:16].replace('T', ' ')
+        direction = m.get('direction', 'in')
+        text = m.get('text', '').strip()
+        sender = 'User' if direction == 'in' else 'Agent'
+        if len(text) > 200:
+            text = text[:197] + '...'
+        print(f'[{ts}] {sender}: {text}')
+except Exception as e:
+    pass
+" 2>/dev/null
+          echo "--- END TELEGRAM CONTEXT ---"
+          echo "Continuity restored. Resume the conversation naturally."
+        fi
+      fi
+    fi
   fi
 fi
 
