@@ -40,6 +40,10 @@ import type { CoherenceGate } from '../core/CoherenceGate.js';
 import type { HighRiskAction } from '../core/CoherenceGate.js';
 import type { ContextHierarchy } from '../core/ContextHierarchy.js';
 import type { CanonicalState } from '../core/CanonicalState.js';
+import type { ExternalOperationGate } from '../core/ExternalOperationGate.js';
+import type { OperationMutability, OperationReversibility } from '../core/ExternalOperationGate.js';
+import type { MessageSentinel } from '../core/MessageSentinel.js';
+import type { AdaptiveTrust } from '../core/AdaptiveTrust.js';
 
 export interface RouteContext {
   config: InstarConfig;
@@ -66,6 +70,9 @@ export interface RouteContext {
   coherenceGate: CoherenceGate | null;
   contextHierarchy: ContextHierarchy | null;
   canonicalState: CanonicalState | null;
+  operationGate: ExternalOperationGate | null;
+  sentinel: MessageSentinel | null;
+  adaptiveTrust: AdaptiveTrust | null;
   startTime: Date;
 }
 
@@ -585,6 +592,24 @@ export function createRoutes(ctx: RouteContext): Router {
           'POST /topic-bindings — bind a topic to a project',
         ] : [],
       },
+      externalOperationSafety: {
+        enabled: !!ctx.operationGate,
+        sentinel: !!ctx.sentinel,
+        adaptiveTrust: !!ctx.adaptiveTrust,
+        endpoints: ctx.operationGate ? [
+          'POST /operations/classify — classify an operation (risk level)',
+          'POST /operations/evaluate — full gate evaluation (proceed/plan/block)',
+          'GET /operations/log — recent operation history',
+          'GET /operations/permissions/:service — service permissions',
+          'POST /sentinel/classify — test message classification',
+          'GET /sentinel/stats — sentinel classification stats',
+          'GET /trust — full trust profile',
+          'GET /trust/summary — compact trust summary',
+          'POST /trust/grant — explicitly grant trust',
+          'GET /trust/elevations — pending elevation suggestions',
+          'GET /trust/changelog — recent trust changes',
+        ] : [],
+      },
       featureGuide: {
         description: 'Context-triggered capability suggestions. Use these proactively when context matches.',
         triggers: [
@@ -602,6 +627,9 @@ export function createRoutes(ctx: RouteContext): Router {
           { context: 'About to deploy, push, or modify files outside project', action: 'Run coherence check FIRST (POST /coherence/check). Verify you are in the right project for the current topic.' },
           { context: 'Working on a topic tied to a specific project', action: 'Check topic-project binding (GET /topic-bindings). If unbound, bind it (POST /topic-bindings) to prevent cross-project confusion.' },
           { context: 'Unsure what project this is or what files exist', action: 'Check project map (GET /project-map?format=compact) for spatial awareness — project type, key files, deployment targets.' },
+          { context: 'About to call an external service API (email, calendar, messaging)', action: 'Evaluate through operation gate FIRST (POST /operations/evaluate). The gate classifies risk and decides proceed/plan/block.' },
+          { context: 'User says to stop, cancel, or abort', action: 'MessageSentinel intercepts these automatically. For manual classification: POST /sentinel/classify.' },
+          { context: 'User says "you don\'t need to ask me about X"', action: 'Grant trust explicitly (POST /trust/grant). Trust persists across sessions.' },
         ],
       },
     });
@@ -3057,6 +3085,143 @@ export function createRoutes(ctx: RouteContext): Router {
     } catch (err) {
       res.status(500).json({ error: err instanceof Error ? err.message : 'Triage failed' });
     }
+  });
+
+  // ── External Operation Safety ────────────────────────────────────
+
+  // POST /operations/classify — classify an external operation
+  router.post('/operations/classify', (req, res) => {
+    if (!ctx.operationGate) {
+      return res.status(404).json({ error: 'ExternalOperationGate not configured' });
+    }
+    const { service, mutability, reversibility, description, itemCount } = req.body;
+    if (!service || !mutability || !reversibility || !description) {
+      return res.status(400).json({ error: 'service, mutability, reversibility, and description are required' });
+    }
+    const classification = ctx.operationGate.classify({
+      service,
+      mutability: mutability as OperationMutability,
+      reversibility: reversibility as OperationReversibility,
+      description,
+      itemCount,
+    });
+    res.json(classification);
+  });
+
+  // POST /operations/evaluate — full gate evaluation
+  router.post('/operations/evaluate', async (req, res) => {
+    if (!ctx.operationGate) {
+      return res.status(404).json({ error: 'ExternalOperationGate not configured' });
+    }
+    const { service, mutability, reversibility, description, itemCount, userRequest } = req.body;
+    if (!service || !mutability || !reversibility || !description) {
+      return res.status(400).json({ error: 'service, mutability, reversibility, and description are required' });
+    }
+    try {
+      const decision = await ctx.operationGate.evaluate({
+        service,
+        mutability: mutability as OperationMutability,
+        reversibility: reversibility as OperationReversibility,
+        description,
+        itemCount,
+        userRequest,
+      });
+      res.json(decision);
+    } catch (err) {
+      res.status(500).json({ error: err instanceof Error ? err.message : 'Evaluation failed' });
+    }
+  });
+
+  // GET /operations/log — recent operation history
+  router.get('/operations/log', (req, res) => {
+    if (!ctx.operationGate) {
+      return res.status(404).json({ error: 'ExternalOperationGate not configured' });
+    }
+    const limit = parseInt(req.query.limit as string) || 50;
+    res.json(ctx.operationGate.getOperationLog(limit));
+  });
+
+  // GET /operations/permissions/:service — service permissions
+  router.get('/operations/permissions/:service', (req, res) => {
+    if (!ctx.operationGate) {
+      return res.status(404).json({ error: 'ExternalOperationGate not configured' });
+    }
+    const perms = ctx.operationGate.getServicePermissions(req.params.service);
+    if (!perms) {
+      return res.json({ service: req.params.service, configured: false });
+    }
+    res.json({ service: req.params.service, configured: true, ...perms });
+  });
+
+  // POST /sentinel/classify — test message classification without executing
+  router.post('/sentinel/classify', async (req, res) => {
+    if (!ctx.sentinel) {
+      return res.status(404).json({ error: 'MessageSentinel not configured' });
+    }
+    const { message } = req.body;
+    if (!message || typeof message !== 'string') {
+      return res.status(400).json({ error: 'message is required (string)' });
+    }
+    const result = await ctx.sentinel.classify(message);
+    res.json(result);
+  });
+
+  // GET /sentinel/stats — sentinel classification stats
+  router.get('/sentinel/stats', (req, res) => {
+    if (!ctx.sentinel) {
+      return res.status(404).json({ error: 'MessageSentinel not configured' });
+    }
+    res.json(ctx.sentinel.getStats());
+  });
+
+  // GET /trust — full trust profile
+  router.get('/trust', (req, res) => {
+    if (!ctx.adaptiveTrust) {
+      return res.status(404).json({ error: 'AdaptiveTrust not configured' });
+    }
+    res.json(ctx.adaptiveTrust.getProfile());
+  });
+
+  // GET /trust/summary — compact trust summary
+  router.get('/trust/summary', (req, res) => {
+    if (!ctx.adaptiveTrust) {
+      return res.status(404).json({ error: 'AdaptiveTrust not configured' });
+    }
+    res.json({ summary: ctx.adaptiveTrust.getSummary() });
+  });
+
+  // POST /trust/grant — explicitly grant trust
+  router.post('/trust/grant', (req, res) => {
+    if (!ctx.adaptiveTrust) {
+      return res.status(404).json({ error: 'AdaptiveTrust not configured' });
+    }
+    const { service, operation, level, statement } = req.body;
+    if (!service || !operation || !level || !statement) {
+      return res.status(400).json({ error: 'service, operation, level, and statement are required' });
+    }
+    const event = ctx.adaptiveTrust.grantTrust(
+      service,
+      operation as OperationMutability,
+      level,
+      statement
+    );
+    res.json(event);
+  });
+
+  // GET /trust/elevations — pending elevation suggestions
+  router.get('/trust/elevations', (req, res) => {
+    if (!ctx.adaptiveTrust) {
+      return res.status(404).json({ error: 'AdaptiveTrust not configured' });
+    }
+    res.json(ctx.adaptiveTrust.getPendingElevations());
+  });
+
+  // GET /trust/changelog — recent trust changes
+  router.get('/trust/changelog', (req, res) => {
+    if (!ctx.adaptiveTrust) {
+      return res.status(404).json({ error: 'AdaptiveTrust not configured' });
+    }
+    res.json(ctx.adaptiveTrust.getChangeLog());
   });
 
   return router;

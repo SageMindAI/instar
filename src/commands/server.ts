@@ -50,6 +50,9 @@ import { ProjectMapper } from '../core/ProjectMapper.js';
 import { CoherenceGate } from '../core/CoherenceGate.js';
 import { ContextHierarchy } from '../core/ContextHierarchy.js';
 import { CanonicalState } from '../core/CanonicalState.js';
+import { ExternalOperationGate, AUTONOMY_PROFILES } from '../core/ExternalOperationGate.js';
+import { MessageSentinel } from '../core/MessageSentinel.js';
+import { AdaptiveTrust } from '../core/AdaptiveTrust.js';
 import type { Message, IntelligenceProvider } from '../core/types.js';
 // setup.ts uses @inquirer/prompts which requires Node 20.12+
 // Dynamic import to avoid breaking the server on older Node versions
@@ -1391,7 +1394,20 @@ export async function startServer(options: StartOptions): Promise<void> {
       console.log(pc.green(`  Canonical state: ${stateResult.created.length} registries created`));
     }
 
-    const server = new AgentServer({ config, sessionManager, state, scheduler, telegram, relationships, feedback, feedbackAnomalyDetector, dispatches, updateChecker, autoUpdater, autoDispatcher, quotaTracker, publisher, viewer, tunnel, evolution, watchdog, topicMemory, triageNurse, projectMapper, coherenceGate, contextHierarchy, canonicalState, coordinator: coordinator.enabled ? coordinator : undefined, localSigningKeyPem });
+    // External Operation Safety — gate, sentinel, trust
+    const autonomyLevel = config.agentAutonomy?.level ?? 'collaborative';
+    const autonomyProfile = AUTONOMY_PROFILES[autonomyLevel] ?? AUTONOMY_PROFILES.collaborative;
+    const operationGate = new ExternalOperationGate({
+      stateDir: config.stateDir,
+      autonomyDefaults: autonomyProfile,
+    });
+    const sentinel = new MessageSentinel({});
+    const adaptiveTrust = new AdaptiveTrust({
+      stateDir: config.stateDir,
+    });
+    console.log(pc.green(`  External operation safety: gate=${autonomyLevel}, sentinel=on, trust=on`));
+
+    const server = new AgentServer({ config, sessionManager, state, scheduler, telegram, relationships, feedback, feedbackAnomalyDetector, dispatches, updateChecker, autoUpdater, autoDispatcher, quotaTracker, publisher, viewer, tunnel, evolution, watchdog, topicMemory, triageNurse, projectMapper, coherenceGate, contextHierarchy, canonicalState, operationGate, sentinel, adaptiveTrust, coordinator: coordinator.enabled ? coordinator : undefined, localSigningKeyPem });
     await server.start();
 
     // Start tunnel AFTER server is listening

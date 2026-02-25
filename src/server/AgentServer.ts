@@ -74,6 +74,9 @@ export class AgentServer {
     coherenceGate?: import('../core/CoherenceGate.js').CoherenceGate;
     contextHierarchy?: import('../core/ContextHierarchy.js').ContextHierarchy;
     canonicalState?: import('../core/CanonicalState.js').CanonicalState;
+    operationGate?: import('../core/ExternalOperationGate.js').ExternalOperationGate;
+    sentinel?: import('../core/MessageSentinel.js').MessageSentinel;
+    adaptiveTrust?: import('../core/AdaptiveTrust.js').AdaptiveTrust;
     coordinator?: MultiMachineCoordinator;
     localSigningKeyPem?: string;
   }) {
@@ -200,6 +203,9 @@ export class AgentServer {
       coherenceGate: options.coherenceGate ?? null,
       contextHierarchy: options.contextHierarchy ?? null,
       canonicalState: options.canonicalState ?? null,
+      operationGate: options.operationGate ?? null,
+      sentinel: options.sentinel ?? null,
+      adaptiveTrust: options.adaptiveTrust ?? null,
       startTime: this.startTime,
     });
     this.app.use(routes);
