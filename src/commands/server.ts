@@ -50,7 +50,7 @@ import { ProjectMapper } from '../core/ProjectMapper.js';
 import { CoherenceGate } from '../core/CoherenceGate.js';
 import { ContextHierarchy } from '../core/ContextHierarchy.js';
 import { CanonicalState } from '../core/CanonicalState.js';
-import type { Message } from '../core/types.js';
+import type { Message, IntelligenceProvider } from '../core/types.js';
 // setup.ts uses @inquirer/prompts which requires Node 20.12+
 // Dynamic import to avoid breaking the server on older Node versions
 // import { installAutoStart } from './setup.js';
