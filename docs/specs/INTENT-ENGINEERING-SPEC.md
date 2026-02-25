@@ -778,19 +778,19 @@ Dawn is the existence proof. Everything described in this spec was built first f
 
 > Sequenced per review consensus: measure → define → audit → inherit → position.
 
-### Phase 1: Foundation (Build Next)
-- [ ] Define `DecisionJournalEntry` type in `types.ts`
-- [ ] Implement zero-config JSONL decision logging in job scheduler
-- [ ] Add `## Intent` section to AGENT.md scaffold template
-- [ ] Build `instar intent reflect` CLI command
-- [ ] Sign identity files (AGENT.md, CLAUDE.md) with Ed25519 at write time, verify at read time
+### Phase 1: Foundation ✅ (v0.9.6, commit 0dc1c8f)
+- [x] Define `DecisionJournalEntry` type in `types.ts`
+- [x] Implement zero-config JSONL decision logging in job scheduler
+- [x] Add `## Intent` section to AGENT.md scaffold template
+- [x] Build `instar intent reflect` CLI command
+- [ ] Sign identity files (AGENT.md, CLAUDE.md) with Ed25519 at write time, verify at read time (deferred — opt-in for solo, required for org)
 
-### Phase 2: Security (Before Learning Ecosystem Scales)
-- [ ] Add human approval gate to all outgoing Dawn dispatches
-- [ ] Implement semantic validation on learning UP channel submissions
-- [ ] Add pseudonymized traceability to UP submissions
-- [ ] Rate-limit UP submissions per agent
-- [ ] Add anomaly detection for learning submissions contradicting established patterns
+### Phase 2: Security ✅ (commit 3c8b8dc)
+- [x] Add human approval gate to security/behavioral dispatches (DispatchManager.approve/reject + API routes)
+- [x] Implement semantic validation on learning UP channel submissions (min quality, duplicate detection)
+- [x] Add pseudonymized traceability to UP submissions (SHA-256 agent pseudonyms)
+- [x] Rate-limit UP submissions per agent (10/min endpoint + per-agent anomaly detector)
+- [x] Add anomaly detection for learning submissions (FeedbackAnomalyDetector: burst/rapid-fire/daily limits)
 
 ### Phase 3: Organizational (After 2-3 Weeks of Decision Journal Data)
 - [ ] Evaluate decision journal data to determine if structured format is needed (v2 decision)
