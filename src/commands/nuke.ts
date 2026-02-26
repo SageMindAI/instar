@@ -94,7 +94,7 @@ export async function nukeAgent(name: string, options: NukeOptions = {}): Promis
 
   console.log();
 
-  // Step 1: Stop server
+  // Step 1: Stop server AND all spawned sessions
   if (hasTmux) {
     try {
       execFileSync('tmux', ['kill-session', '-t', `${projectName}-server`], { stdio: 'pipe' });
@@ -102,6 +102,26 @@ export async function nukeAgent(name: string, options: NukeOptions = {}): Promis
     } catch {
       console.log(pc.yellow('  Could not stop server (may already be stopped)'));
     }
+  }
+
+  // Kill ALL tmux sessions prefixed with the project name (spawned Claude sessions)
+  try {
+    const sessions = execFileSync('tmux', ['list-sessions', '-F', '#{session_name}'], {
+      encoding: 'utf-8',
+      stdio: ['pipe', 'pipe', 'pipe'],
+    }).trim().split('\n').filter(Boolean);
+
+    const projectSessions = sessions.filter(s => s.startsWith(`${projectName}-`) && s !== `${projectName}-server`);
+    for (const session of projectSessions) {
+      try {
+        execFileSync('tmux', ['kill-session', '-t', session], { stdio: 'pipe' });
+      } catch { /* already dead */ }
+    }
+    if (projectSessions.length > 0) {
+      console.log(`  ${pc.green('✓')} Killed ${projectSessions.length} spawned session(s)`);
+    }
+  } catch {
+    // tmux not running or no sessions — fine
   }
 
   // Step 2: Remove auto-start

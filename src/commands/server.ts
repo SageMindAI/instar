@@ -98,6 +98,11 @@ function isAutostartInstalled(projectName: string): boolean {
  *
  * Returns the new tmux session name.
  */
+// Module-level reference so spawnSessionForTopic can trigger orphan cleanup under memory pressure.
+// Set once the reaper is initialized in startServer().
+let _orphanReaper: import('../monitoring/OrphanProcessReaper.js').OrphanProcessReaper | null = null;
+let _memoryMonitor: import('../monitoring/MemoryPressureMonitor.js').MemoryPressureMonitor | null = null;
+
 async function spawnSessionForTopic(
   sessionManager: SessionManager,
   telegram: TelegramAdapter,
@@ -107,6 +112,21 @@ async function spawnSessionForTopic(
   topicMemory?: TopicMemory,
 ): Promise<string> {
   const msg = latestMessage || 'Session started — send a message to continue.';
+
+  // If memory is elevated/critical and we have the reaper, try to free memory
+  // by cleaning orphans before spawning. Interactive sessions are NEVER blocked
+  // (the user must always be able to interact), but we clean up first.
+  if (_memoryMonitor && _orphanReaper) {
+    const memState = _memoryMonitor.getState();
+    if (memState.state === 'elevated' || memState.state === 'critical') {
+      console.log(`[spawnSessionForTopic] Memory ${memState.state} (${memState.pressurePercent.toFixed(1)}%) — triggering orphan cleanup before spawn`);
+      try {
+        await _orphanReaper.scan();
+      } catch (err) {
+        console.error('[spawnSessionForTopic] Orphan cleanup failed:', err);
+      }
+    }
+  }
 
   let contextContent: string = '';
 
@@ -1402,6 +1422,28 @@ export async function startServer(options: StartOptions): Promise<void> {
       };
     }
 
+    // Start OrphanProcessReaper (detect and clean up untracked Claude processes)
+    const { OrphanProcessReaper } = await import('../monitoring/OrphanProcessReaper.js');
+    const orphanReaper = new OrphanProcessReaper(config, sessionManager, {
+      pollIntervalMs: 60_000,      // Check every minute
+      orphanMaxAgeMs: 3_600_000,   // Kill Instar orphans after 1 hour
+      externalReportAgeMs: 14_400_000, // Report external processes after 4 hours
+      highMemoryThresholdMB: 500,  // Flag processes using >500MB
+      autoKillOrphans: true,       // Auto-kill Instar orphans (safe — only project-prefixed tmux sessions)
+      alertCallback: telegram
+        ? async (msg: string) => {
+            const attentionTopicId = state.get<number>('agent-attention-topic');
+            if (attentionTopicId) {
+              await telegram.sendToTopic(attentionTopicId, msg);
+            }
+          }
+        : undefined,
+    });
+    orphanReaper.start();
+    _orphanReaper = orphanReaper;
+    _memoryMonitor = memoryMonitor;
+    console.log(pc.green('  Orphan process reaper enabled'));
+
     // Start CaffeinateManager (prevents macOS system sleep)
     const { CaffeinateManager } = await import('../core/CaffeinateManager.js');
     const caffeinateManager = new CaffeinateManager({ stateDir: config.stateDir });
@@ -1526,7 +1568,7 @@ export async function startServer(options: StartOptions): Promise<void> {
       console.log(pc.green('  Sentinel wired into Telegram message flow'));
     }
 
-    const server = new AgentServer({ config, sessionManager, state, scheduler, telegram, relationships, feedback, feedbackAnomalyDetector, dispatches, updateChecker, autoUpdater, autoDispatcher, quotaTracker, publisher, viewer, tunnel, evolution, watchdog, topicMemory, triageNurse, projectMapper, coherenceGate, contextHierarchy, canonicalState, operationGate, sentinel, adaptiveTrust, memoryMonitor, coordinator: coordinator.enabled ? coordinator : undefined, localSigningKeyPem });
+    const server = new AgentServer({ config, sessionManager, state, scheduler, telegram, relationships, feedback, feedbackAnomalyDetector, dispatches, updateChecker, autoUpdater, autoDispatcher, quotaTracker, publisher, viewer, tunnel, evolution, watchdog, topicMemory, triageNurse, projectMapper, coherenceGate, contextHierarchy, canonicalState, operationGate, sentinel, adaptiveTrust, memoryMonitor, orphanReaper, coordinator: coordinator.enabled ? coordinator : undefined, localSigningKeyPem });
     await server.start();
 
     // Connect DegradationReporter downstream systems now that everything is initialized.

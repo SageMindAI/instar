@@ -34,6 +34,7 @@ import type { EvolutionManager } from '../core/EvolutionManager.js';
 import type { EvolutionStatus, EvolutionType, GapCategory } from '../core/types.js';
 import type { SessionWatchdog } from '../monitoring/SessionWatchdog.js';
 import type { StallTriageNurse } from '../monitoring/StallTriageNurse.js';
+import type { OrphanProcessReaper } from '../monitoring/OrphanProcessReaper.js';
 import type { TopicMemory } from '../memory/TopicMemory.js';
 import type { FeedbackAnomalyDetector } from '../monitoring/FeedbackAnomalyDetector.js';
 import type { ProjectMapper } from '../core/ProjectMapper.js';
@@ -76,6 +77,7 @@ export interface RouteContext {
   sentinel: MessageSentinel | null;
   adaptiveTrust: AdaptiveTrust | null;
   memoryMonitor: MemoryPressureMonitor | null;
+  orphanReaper: OrphanProcessReaper | null;
   startTime: Date;
 }
 
@@ -149,6 +151,22 @@ export function createRoutes(ctx: RouteContext): Router {
         freeGB: Math.round(freeMem / (1024 ** 3) * 10) / 10,
         usedPercent: Math.round(((totalMem - freeMem) / totalMem) * 1000) / 10,
       };
+
+      // Orphan reaper last report (per-process memory visibility)
+      if (ctx.orphanReaper) {
+        const reaperReport = ctx.orphanReaper.getLastReport();
+        if (reaperReport) {
+          base.claudeProcesses = {
+            tracked: reaperReport.tracked.length,
+            orphans: reaperReport.orphans.length,
+            external: reaperReport.external.length,
+            totalMemoryMB: reaperReport.totalMemoryMB,
+            orphanMemoryMB: reaperReport.orphanMemoryMB,
+            externalMemoryMB: reaperReport.externalMemoryMB,
+            lastScan: reaperReport.timestamp,
+          };
+        }
+      }
 
       // Job health summary
       if (ctx.scheduler) {
@@ -3273,6 +3291,51 @@ export function createRoutes(ctx: RouteContext): Router {
       ...ctx.memoryMonitor.getState(),
       thresholds: ctx.memoryMonitor.getThresholds(),
     });
+  });
+
+  // ── Orphan Process Reaper ──────────────────────────────────────────
+
+  // GET /monitoring/processes — scan for all Claude processes and classify them
+  router.get('/monitoring/processes', async (_req, res) => {
+    if (!ctx.orphanReaper) {
+      return res.status(404).json({ error: 'OrphanProcessReaper not configured' });
+    }
+    const report = await ctx.orphanReaper.scan();
+    res.json(report);
+  });
+
+  // GET /monitoring/processes/last — get last scan report without re-scanning
+  router.get('/monitoring/processes/last', (_req, res) => {
+    if (!ctx.orphanReaper) {
+      return res.status(404).json({ error: 'OrphanProcessReaper not configured' });
+    }
+    const report = ctx.orphanReaper.getLastReport();
+    if (!report) {
+      return res.json({ message: 'No scan has been performed yet' });
+    }
+    res.json(report);
+  });
+
+  // POST /monitoring/processes/kill — kill a specific external process by PID (user-initiated)
+  router.post('/monitoring/processes/kill', (req, res) => {
+    if (!ctx.orphanReaper) {
+      return res.status(404).json({ error: 'OrphanProcessReaper not configured' });
+    }
+    const { pid } = req.body;
+    if (typeof pid !== 'number') {
+      return res.status(400).json({ error: 'pid (number) required' });
+    }
+    const result = ctx.orphanReaper.killExternalProcess(pid);
+    res.json(result);
+  });
+
+  // POST /monitoring/processes/kill-all-external — kill all external Claude processes (user-initiated)
+  router.post('/monitoring/processes/kill-all-external', (_req, res) => {
+    if (!ctx.orphanReaper) {
+      return res.status(404).json({ error: 'OrphanProcessReaper not configured' });
+    }
+    const result = ctx.orphanReaper.killAllExternal();
+    res.json(result);
   });
 
   // PATCH /monitoring/memory/thresholds — update memory warning thresholds at runtime
