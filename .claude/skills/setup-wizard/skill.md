@@ -56,22 +56,9 @@ Present THREE options:
 
 ### If existingAgent=false (no agent found)
 
-**FIRST: Scan GitHub for existing agents.** Before showing options, check if the user has backed-up agents on GitHub. This handles the common case of setting up a new machine.
+The setup launcher passes `ghStatus` in the detection context. Use it to determine what's possible:
 
-```bash
-# Check if gh is available and authenticated
-gh auth status 2>&1
-```
-
-If `gh` is available and authenticated, scan for existing agent repos:
-
-```bash
-gh repo list --json name,url,isPrivate --limit 100 2>/dev/null
-```
-
-Filter the results for repos whose name starts with `instar-`. These are agent backups created by the cloud backup feature.
-
-**If existing agent repos are found:**
+#### If ghStatus="ready" and GITHUB BACKUPS found
 
 Present them FIRST — this is the most likely reason someone is running setup on a new machine:
 
@@ -84,7 +71,61 @@ Present them FIRST — this is the most likely reason someone is running setup o
 If the user picks an existing agent → Go to [Restore Flow](#restore-flow)
 If "Start fresh" → continue to the normal options below.
 
-**If no existing repos found** (or gh not available):
+#### If ghStatus="auth-needed"
+
+GitHub CLI is installed but not signed in. Walk the user through auth FIRST so we can scan for existing agents:
+
+> Before we set up your agent, let me check if you have any existing agents backed up.
+>
+> I need to sign you into GitHub — this opens your browser.
+
+```bash
+gh auth login --web --git-protocol https
+```
+
+After auth succeeds, scan for repos:
+```bash
+gh repo list --json name,url --limit 100
+```
+
+Filter for `instar-*` repos. If found → present them as restore options (same as above).
+If none found → continue to normal options.
+
+#### If ghStatus="unavailable"
+
+The launcher couldn't install gh automatically. **Don't skip silently.** Ask the user:
+
+> Have you used Instar before on another machine?
+
+**If yes**: Help them get gh installed:
+
+> To restore your agent, I need the GitHub CLI. Let me help you install it.
+
+Try the installation interactively:
+```bash
+# macOS
+brew install gh
+
+# Linux (if brew unavailable)
+curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | sudo dd of=/usr/share/keyrings/githubcli-archive-keyring.gpg
+echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" | sudo tee /etc/apt/sources.list.d/github-cli-github-cli.list > /dev/null
+sudo apt update && sudo apt install gh -y
+```
+
+If installation succeeds → auth → scan → restore flow.
+If installation fails → tell the user:
+
+> I couldn't install the GitHub CLI automatically. You can install it manually from https://cli.github.com and then run `npx instar` again to restore your agent.
+>
+> For now, let's set up a fresh agent.
+
+**If no** (never used Instar before): Continue to normal options.
+
+#### If ghStatus="ready" but no GITHUB BACKUPS found
+
+Continue to normal options — no restore needed.
+
+#### Normal options (no restore available)
 
 **If inside a git repo:**
 1. **"Set up a new project agent"** → Go to standard Phase 1

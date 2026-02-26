@@ -23,7 +23,7 @@ import path from 'node:path';
 import pc from 'picocolors';
 import { input, confirm, select, number } from '@inquirer/prompts';
 import { Cron } from 'croner';
-import { detectTmuxPath, detectClaudePath, ensureStateDir, getInstarVersion } from '../core/Config.js';
+import { detectTmuxPath, detectClaudePath, detectGhPath, ensureStateDir, getInstarVersion } from '../core/Config.js';
 import { FeedbackManager } from '../core/FeedbackManager.js';
 import { ensurePrerequisites } from '../core/Prerequisites.js';
 import { UserManager } from '../users/UserManager.js';
@@ -149,35 +149,88 @@ export async function runSetup(opts?: { classic?: boolean }): Promise<void> {
       } catch { /* non-fatal */ }
     }
 
-    // Check for GitHub-backed agents (instar-* repos)
-    let githubAgents: string[] = [];
-    try {
-      const ghResult = execFileSync('gh', ['repo', 'list', '--json', 'name', '--limit', '100'], {
-        encoding: 'utf-8',
-        stdio: ['pipe', 'pipe', 'pipe'],
-        timeout: 10000,
-      }).trim();
-      if (ghResult) {
-        const repos = JSON.parse(ghResult) as Array<{ name: string }>;
-        githubAgents = repos
-          .filter(r => r.name.startsWith('instar-'))
-          .map(r => r.name.replace(/^instar-/, ''));
+    // Proactively ensure gh CLI is available for GitHub scanning
+    // This enables agent restore on new machines — don't skip silently
+    let ghPath = detectGhPath();
+    let ghStatus: 'ready' | 'installed' | 'auth-needed' | 'unavailable' = 'unavailable';
+
+    if (!ghPath) {
+      // Try to install gh
+      console.log(pc.dim('  Installing GitHub CLI for agent backup/restore...'));
+      try {
+        if (process.platform === 'darwin') {
+          execFileSync('brew', ['install', 'gh'], { stdio: 'pipe', timeout: 60000 });
+        } else {
+          // Linux — try apt, snap, or dnf
+          try {
+            execFileSync('sudo', ['apt', 'install', '-y', 'gh'], { stdio: 'pipe', timeout: 60000 });
+          } catch {
+            try {
+              execFileSync('snap', ['install', 'gh'], { stdio: 'pipe', timeout: 60000 });
+            } catch {
+              // Can't auto-install
+            }
+          }
+        }
+        ghPath = detectGhPath();
+        if (ghPath) {
+          ghStatus = 'installed';
+          console.log(`  ${pc.green('✓')} GitHub CLI installed`);
+        }
+      } catch {
+        console.log(pc.dim('  GitHub CLI not available — the wizard can help set it up.'));
       }
-    } catch {
-      // gh not available or not authenticated — wizard will handle this
     }
 
-    if (existingStandalone.length > 0 || githubAgents.length > 0) {
-      detectionContext = ` No agent in current directory.`;
-      if (existingStandalone.length > 0) {
-        detectionContext += ` EXISTING STANDALONE AGENTS on this machine: [${existingStandalone.map(n => `"${n}"`).join(',')}] at ${standaloneDir}/.`;
+    // Check gh auth status
+    if (ghPath) {
+      try {
+        execFileSync(ghPath, ['auth', 'status'], { stdio: 'pipe', timeout: 5000 });
+        ghStatus = 'ready';
+      } catch {
+        ghStatus = 'auth-needed';
       }
-      if (githubAgents.length > 0) {
-        detectionContext += ` GITHUB BACKUPS found: [${githubAgents.map(n => `"${n}"`).join(',')}] (repos: ${githubAgents.map(n => `instar-${n}`).join(', ')}).`;
-        detectionContext += ` Offer to restore from GitHub backup before suggesting a new agent.`;
+    }
+
+    // Scan for GitHub-backed agents (only if gh is ready)
+    let githubAgents: string[] = [];
+    if (ghStatus === 'ready' && ghPath) {
+      try {
+        const ghResult = execFileSync(ghPath, ['repo', 'list', '--json', 'name', '--limit', '100'], {
+          encoding: 'utf-8',
+          stdio: ['pipe', 'pipe', 'pipe'],
+          timeout: 15000,
+        }).trim();
+        if (ghResult) {
+          const repos = JSON.parse(ghResult) as Array<{ name: string }>;
+          githubAgents = repos
+            .filter(r => r.name.startsWith('instar-'))
+            .map(r => r.name.replace(/^instar-/, ''));
+        }
+      } catch {
+        // Scan failed — wizard will handle
       }
-    } else {
-      detectionContext = ' No existing agent found.';
+    }
+
+    // Build detection context with full status
+    detectionContext = ` No agent in current directory.`;
+    detectionContext += ` ghStatus="${ghStatus}".`;
+
+    if (existingStandalone.length > 0) {
+      detectionContext += ` EXISTING STANDALONE AGENTS on this machine: [${existingStandalone.map(n => `"${n}"`).join(',')}] at ${standaloneDir}/.`;
+    }
+    if (githubAgents.length > 0) {
+      detectionContext += ` GITHUB BACKUPS found: [${githubAgents.map(n => `"${n}"`).join(',')}] (repos: ${githubAgents.map(n => `instar-${n}`).join(', ')}).`;
+      detectionContext += ` Offer to restore from GitHub backup before suggesting a new agent.`;
+    }
+    if (ghStatus === 'auth-needed') {
+      detectionContext += ` GitHub CLI is installed but NOT authenticated. The wizard should walk the user through "gh auth login --web" to enable GitHub scanning and cloud backup.`;
+    }
+    if (ghStatus === 'unavailable') {
+      detectionContext += ` GitHub CLI could not be installed automatically. The wizard should ask the user "Have you used Instar before on another machine?" and if yes, help them install gh manually to scan for backups.`;
+    }
+    if (existingStandalone.length === 0 && githubAgents.length === 0 && ghStatus === 'ready') {
+      detectionContext += ` No existing agents found locally or on GitHub.`;
     }
   }
 
