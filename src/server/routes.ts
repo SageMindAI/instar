@@ -414,70 +414,7 @@ export function createRoutes(ctx: RouteContext): Router {
     }
   });
 
-  // ── Knowledge Base ───────────────────────────────────────────────
 
-  router.post('/knowledge/ingest', async (req, res) => {
-    try {
-      const { KnowledgeManager } = await import('../knowledge/KnowledgeManager.js');
-      const km = new KnowledgeManager(ctx.config.stateDir);
-      const { content, title, url, type, tags, summary } = req.body || {};
-      if (!content || !title) {
-        res.status(400).json({ error: 'content and title are required' });
-        return;
-      }
-      const result = km.ingest(content, { title, url, type, tags, summary });
-
-      // Auto-sync MemoryIndex if available
-      try {
-        const { MemoryIndex } = await import('../memory/MemoryIndex.js');
-        const memoryConfig = (ctx.config as any).memory || {};
-        const index = new MemoryIndex(ctx.config.stateDir, { ...memoryConfig, enabled: true });
-        await index.open();
-        try { index.sync(); } finally { index.close(); }
-      } catch { /* memory index optional */ }
-
-      res.json(result);
-    } catch (err) {
-      res.status(500).json({ error: err instanceof Error ? err.message : 'Ingest failed' });
-    }
-  });
-
-  router.get('/knowledge/catalog', async (req, res) => {
-    try {
-      const { KnowledgeManager } = await import('../knowledge/KnowledgeManager.js');
-      const km = new KnowledgeManager(ctx.config.stateDir);
-      const tag = req.query.tag as string | undefined;
-      const sources = km.getCatalog(tag);
-      res.json({ sources });
-    } catch (err) {
-      res.status(500).json({ error: err instanceof Error ? err.message : 'Catalog failed' });
-    }
-  });
-
-  router.delete('/knowledge/:id', async (req, res) => {
-    try {
-      const { KnowledgeManager } = await import('../knowledge/KnowledgeManager.js');
-      const km = new KnowledgeManager(ctx.config.stateDir);
-      const removed = km.remove(req.params.id);
-      if (!removed) {
-        res.status(404).json({ error: 'Source not found' });
-        return;
-      }
-
-      // Trigger reindex to clean up FTS5 entries
-      try {
-        const { MemoryIndex } = await import('../memory/MemoryIndex.js');
-        const memoryConfig = (ctx.config as any).memory || {};
-        const index = new MemoryIndex(ctx.config.stateDir, { ...memoryConfig, enabled: true });
-        await index.open();
-        try { index.sync(); } finally { index.close(); }
-      } catch { /* memory index optional */ }
-
-      res.json({ removed: true });
-    } catch (err) {
-      res.status(500).json({ error: err instanceof Error ? err.message : 'Remove failed' });
-    }
-  });
 
   // ── Status ──────────────────────────────────────────────────────
 
