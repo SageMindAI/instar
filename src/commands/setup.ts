@@ -4,7 +4,7 @@
  * `npx instar` or `instar setup` walks through everything:
  *   1. Project detection + naming
  *   2. Server port + session limits
- *   3. Telegram (optional, with full walkthrough)
+ *   3. Telegram setup (primary communication channel)
  *   4. User setup (name, email, permissions)
  *   5. Scheduler + first job (optional)
  *   6. Start server
@@ -134,7 +134,51 @@ export async function runSetup(opts?: { classic?: boolean }): Promise<void> {
 
     detectionContext = ` EXISTING AGENT DETECTED: existingAgent=true, agentName="${agentName}", knownUsers=[${knownUsers.map(u => `"${u}"`).join(',')}], machinesPaired=${machinesPaired}, gitStateEnabled=${gitStateEnabled}, telegramConfigured=${telegramConfigured}, registrationPolicy="${registrationPolicy}", autonomyLevel="${autonomyLevel}". Present the 3-option decision tree: (1) "I'm a new user joining this agent", (2) "I'm an existing user on a new machine", (3) "I want to start fresh with a new agent".`;
   } else {
-    detectionContext = ' No existing agent found.';
+    // No agent in CWD — check for existing standalone agents and GitHub backups
+    const standaloneDir = path.join(os.homedir(), '.instar', 'agents');
+    const existingStandalone: string[] = [];
+
+    if (fs.existsSync(standaloneDir)) {
+      try {
+        for (const name of fs.readdirSync(standaloneDir)) {
+          const configFile = path.join(standaloneDir, name, '.instar', 'config.json');
+          if (fs.existsSync(configFile)) {
+            existingStandalone.push(name);
+          }
+        }
+      } catch { /* non-fatal */ }
+    }
+
+    // Check for GitHub-backed agents (instar-* repos)
+    let githubAgents: string[] = [];
+    try {
+      const ghResult = execFileSync('gh', ['repo', 'list', '--json', 'name', '--limit', '100'], {
+        encoding: 'utf-8',
+        stdio: ['pipe', 'pipe', 'pipe'],
+        timeout: 10000,
+      }).trim();
+      if (ghResult) {
+        const repos = JSON.parse(ghResult) as Array<{ name: string }>;
+        githubAgents = repos
+          .filter(r => r.name.startsWith('instar-'))
+          .map(r => r.name.replace(/^instar-/, ''));
+      }
+    } catch {
+      // gh not available or not authenticated — wizard will handle this
+    }
+
+    if (existingStandalone.length > 0 || githubAgents.length > 0) {
+      detectionContext = ` No agent in current directory.`;
+      if (existingStandalone.length > 0) {
+        detectionContext += ` EXISTING STANDALONE AGENTS on this machine: [${existingStandalone.map(n => `"${n}"`).join(',')}] at ${standaloneDir}/.`;
+      }
+      if (githubAgents.length > 0) {
+        detectionContext += ` GITHUB BACKUPS found: [${githubAgents.map(n => `"${n}"`).join(',')}] (repos: ${githubAgents.map(n => `instar-${n}`).join(', ')}).`;
+        detectionContext += ` Offer to restore from GitHub backup before suggesting a new agent.`;
+      }
+    } else {
+      detectionContext = ' No existing agent found.';
+    }
   }
 
   // Pre-install Playwright browser binaries AND register the MCP server so the
@@ -1019,20 +1063,44 @@ function escapeXml(str: string): string {
  * Full Telegram walkthrough. Returns config or null if skipped.
  */
 async function promptForTelegram(): Promise<{ token: string; chatId: string } | null> {
-  const enableTelegram = await confirm({
-    message: 'Set up Telegram? (this is how you\'ll talk to your agent — mobile, threaded, always available)',
-    default: true,
+  console.log();
+  console.log(pc.bold('  Telegram Setup'));
+  console.log();
+  console.log('  Telegram is how you\'ll talk to your agent — from your phone, your');
+  console.log('  desktop, anywhere. No terminal needed. Your agent can also reach out');
+  console.log('  to you proactively when something needs your attention.');
+  console.log();
+  console.log(pc.dim('  If you don\'t have Telegram yet, install it now: https://telegram.org/apps'));
+  console.log();
+
+  const ready = await select({
+    message: 'Ready to connect Telegram? (takes about 2 minutes)',
+    choices: [
+      { name: 'Yes, let\'s set it up', value: 'yes' },
+      { name: 'I need to install Telegram first — I\'ll come back', value: 'install' },
+      { name: 'Skip (terminal-only mode — no mobile, no proactive messages)', value: 'skip' },
+    ],
   });
 
-  if (!enableTelegram) {
-    console.log(pc.dim('  You can set it up later — just ask your agent once it\'s running.'));
+  if (ready === 'install') {
+    console.log();
+    console.log(`  Install Telegram: ${pc.cyan('https://telegram.org/apps')}`);
+    console.log(pc.dim('  Then run: instar telegram setup'));
+    console.log();
+    return null;
+  }
+
+  if (ready === 'skip') {
+    console.log();
+    console.log(pc.yellow('  Without Telegram, you\'ll only be able to talk to your agent via terminal.'));
+    console.log(pc.yellow('  No mobile access, no proactive messages, no topic threads.'));
+    console.log(pc.dim('  You can set it up anytime: instar telegram setup'));
+    console.log();
     return null;
   }
 
   console.log();
-  console.log(pc.bold('  Telegram Setup'));
   console.log(pc.dim('  We\'ll walk you through creating a Telegram bot and a group for it to live in.'));
-  console.log(pc.dim('  Takes about 2 minutes. You can skip any step and finish later.'));
   console.log();
 
   // ── Step 1: Create a bot ──
@@ -1053,12 +1121,13 @@ async function promptForTelegram(): Promise<{ token: string; chatId: string } | 
   console.log();
 
   const hasToken = await confirm({
-    message: 'Have your bot token ready? (say No to skip Telegram for now)',
+    message: 'Have your bot token ready?',
     default: true,
   });
 
   if (!hasToken) {
-    console.log(pc.dim('  No problem! Run `instar telegram setup` when you\'re ready.'));
+    console.log(pc.dim('  No rush — follow the steps above and paste the token when you have it.'));
+    console.log(pc.dim('  Or run `instar telegram setup` later to pick up where you left off.'));
     return null;
   }
 
@@ -1161,7 +1230,7 @@ async function promptForTelegram(): Promise<{ token: string; chatId: string } | 
     choices: [
       { name: 'Try again (send another message in the group first)', value: 'retry' },
       { name: 'Enter the chat ID manually', value: 'manual' },
-      { name: 'Skip for now (finish Telegram setup later)', value: 'skip' },
+      { name: 'Finish later (run `instar telegram setup`)', value: 'skip' },
     ],
   });
 
