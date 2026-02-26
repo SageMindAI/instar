@@ -239,25 +239,39 @@ Triggered when the user selects an existing agent from the GitHub scan results. 
    ```
    Or directly register via the AgentRegistry module.
 
-7. **Check Telegram config** — if messaging is configured, verify the bot token still works:
+7. **Try restoring secrets** — check if the secret store has saved credentials:
+   ```javascript
+   import { SecretManager } from 'instar';
+   const mgr = new SecretManager({ agentName: '<name>' });
+   mgr.initialize();
+   const telegram = mgr.restoreTelegramConfig();
+   ```
+   If `telegram` is not null, validate the token:
+   ```bash
+   curl -s "https://api.telegram.org/bot${TOKEN}/getMe"
+   ```
+   If valid → write token + chatId to config.json and skip Telegram setup.
+   If invalid or no secrets found → check config.json for existing Telegram config.
+
+8. **Check Telegram config** (fallback) — if secrets didn't restore, check config.json:
    ```bash
    curl -s "https://api.telegram.org/bot${TOKEN}/getMe"
    ```
    If the token is valid → great, Telegram is ready.
    If invalid → offer to reconfigure Telegram (go to Phase 3).
 
-8. **Generate new machine identity** for this machine (distinct from the original):
+9. **Generate new machine identity** for this machine (distinct from the original):
    ```bash
    # Machine identity is per-machine, not carried over from backup
    # The existing machine identity in the backup is from the old machine
    ```
 
-9. **Install auto-start**:
-   ```bash
-   npx instar autostart install --dir "$TARGET"
-   ```
+10. **Install auto-start**:
+    ```bash
+    npx instar autostart install --dir "$TARGET"
+    ```
 
-10. **Start the server and greet**:
+11. **Start the server and greet**:
     Start the server, then send a greeting to the Lifeline topic:
     > I'm back! Restored from backup on a new machine. All my memories and identity are intact.
     >
@@ -588,11 +602,106 @@ Or for short messages:
 Strip the `[telegram:N]` prefix before interpreting the message. Respond naturally, then relay. Only relay your conversational text — not tool output or internal reasoning.
 ```
 
+## Phase 2.5: Secret Management — Protecting Credentials
+
+**Before Telegram setup**, configure how the agent stores sensitive data. This determines whether Telegram tokens (and other secrets) survive agent deletion and reinstall.
+
+### Why This Comes Before Telegram
+
+When a user reinstalls an agent, the Telegram bot token and chat ID are the hardest things to recover. If we set up secret management FIRST, we can:
+1. Auto-restore Telegram credentials on reinstall (no re-setup needed)
+2. Back up tokens before nuke (transparent to user)
+3. Share credentials across machines (via Bitwarden)
+
+### Step 2.5a: Check for Existing Secret Backend
+
+First, check if this agent already has a secret backend configured:
+
+```bash
+# Check if backend preference exists
+cat "$HOME/.instar/secrets/backend.json" 2>/dev/null
+```
+
+If a preference exists and it's not `manual`, tell the user and move on:
+> "Your secrets are backed up using [Bitwarden / local encrypted store]. Any saved credentials will be auto-restored."
+
+Then try to restore Telegram credentials:
+```javascript
+import { SecretManager } from 'instar';
+const mgr = new SecretManager({ agentName: '<name>' });
+mgr.initialize();
+const telegram = mgr.restoreTelegramConfig();
+// If telegram is not null, we have token + chatId
+```
+
+If Telegram credentials are restored and valid (verify with `getMe` API call), **skip Phase 3 entirely** and tell the user:
+> "Telegram credentials restored and validated! Bot @[username] is ready."
+
+### Step 2.5b: Configure Secret Backend (Fresh Install)
+
+If no preference exists, present the choice conversationally:
+
+> **How should your agent store sensitive data?**
+>
+> Things like Telegram tokens and auth keys need to be stored securely. This choice persists across reinstalls.
+
+Present these options via AskUserQuestion:
+
+1. **"Bitwarden (Recommended)"** — Description: "Cross-machine. Cloud-backed. Install any agent on any machine with just your master password."
+2. **"Local encrypted store"** — Description: "AES-256 encrypted on this machine. macOS Keychain for password-free access. Survives reinstalls."
+3. **"I'll manage secrets manually"** — Description: "You'll paste tokens each time you install."
+
+**If Bitwarden selected:**
+```bash
+# Check if bw CLI is available
+which bw 2>/dev/null
+```
+If not available, tell them how to install it and fall back to local:
+> "Bitwarden CLI isn't installed yet. You can set it up later. For now, I'll use the local encrypted store."
+
+**If Local selected (or Bitwarden fallback):**
+The local store auto-initializes using macOS Keychain (no password needed) or a machine-derived key. No user interaction required — just initialize it silently:
+```javascript
+const mgr = new SecretManager({ agentName: '<name>', backend: 'local' });
+mgr.initialize();
+```
+Tell the user:
+> "Local encrypted store initialized. Your secrets are AES-256 encrypted and will survive reinstalls."
+
+**If Manual selected:**
+> "Got it. You'll need to provide tokens manually during setup and after reinstalls."
+
+### Step 2.5c: Save Backend Preference
+
+Write the backend preference so it persists:
+```javascript
+mgr.configureBackend(chosenBackend);
+```
+
+This saves to `~/.instar/secrets/backend.json` — it survives agent deletion since it's outside the agent directory.
+
+---
+
 ## Phase 3: Telegram Setup — The Destination
 
 **Telegram is NOT optional.** It is the primary interface for talking to your agent. Everything else in setup supports getting the user onto Telegram. Treat this as a required step, not an opt-in feature.
 
-### Step 3-pre: Set Expectations
+### Step 3-pre: Check if Telegram Already Configured
+
+**FIRST**, check if Phase 2.5 already restored Telegram credentials. If `SecretManager.restoreTelegramConfig()` returned valid credentials earlier, **skip this entire phase** and move to Phase 4. The user doesn't need to set up Telegram again.
+
+Also check if the config already has a valid Telegram token (e.g., from a restore flow):
+```bash
+# Read token from config
+TOKEN=$(jq -r '.messaging[]? | select(.type=="telegram") | .config.token' .instar/config.json 2>/dev/null)
+if [ -n "$TOKEN" ]; then
+  curl -s "https://api.telegram.org/bot${TOKEN}/getMe" | jq -r '.ok'
+fi
+```
+
+If the token is valid → skip Phase 3 entirely.
+
+### Step 3a: Set Expectations
 
 Not everyone knows what Telegram is. Frame it as the core of the experience — not an add-on:
 
