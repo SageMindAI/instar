@@ -221,13 +221,23 @@ describe('NotificationBatcher', () => {
   });
 
   describe('formatDigest', () => {
+    const qItem = (overrides: Partial<{ category: string; message: string; timestamp: Date; topicId: number; count: number; dedupKey: string }>) => ({
+      category: 'system',
+      message: 'test',
+      timestamp: new Date(),
+      topicId: 100,
+      dedupKey: 'test',
+      count: 1,
+      ...overrides,
+    });
+
     it('groups by category with headers', () => {
       const { batcher } = createBatcher();
 
       const items = [
-        { category: 'job-complete', message: 'Job A', timestamp: new Date('2026-02-25T12:00:00Z'), topicId: 100 },
-        { category: 'job-complete', message: 'Job B', timestamp: new Date('2026-02-25T12:01:00Z'), topicId: 100 },
-        { category: 'session-lifecycle', message: 'Session X started', timestamp: new Date('2026-02-25T12:02:00Z'), topicId: 100 },
+        qItem({ category: 'job-complete', message: 'Job A', timestamp: new Date('2026-02-25T12:00:00Z'), dedupKey: 'a' }),
+        qItem({ category: 'job-complete', message: 'Job B', timestamp: new Date('2026-02-25T12:01:00Z'), dedupKey: 'b' }),
+        qItem({ category: 'session-lifecycle', message: 'Session X started', timestamp: new Date('2026-02-25T12:02:00Z'), dedupKey: 'c' }),
       ];
 
       const digest = batcher.formatDigest('Summary', items);
@@ -240,8 +250,8 @@ describe('NotificationBatcher', () => {
       const { batcher } = createBatcher();
 
       const items = [
-        { category: 'session-lifecycle', message: 'Late', timestamp: new Date('2026-02-25T13:00:00Z'), topicId: 100 },
-        { category: 'job-complete', message: 'Early', timestamp: new Date('2026-02-25T12:00:00Z'), topicId: 100 },
+        qItem({ category: 'session-lifecycle', message: 'Late', timestamp: new Date('2026-02-25T13:00:00Z'), dedupKey: 'a' }),
+        qItem({ category: 'job-complete', message: 'Early', timestamp: new Date('2026-02-25T12:00:00Z'), dedupKey: 'b' }),
       ];
 
       const digest = batcher.formatDigest('Test', items);
@@ -251,9 +261,7 @@ describe('NotificationBatcher', () => {
     it('uses category name for unknown categories', () => {
       const { batcher } = createBatcher();
 
-      const items = [
-        { category: 'custom-thing', message: 'Custom', timestamp: new Date(), topicId: 100 },
-      ];
+      const items = [qItem({ category: 'custom-thing', message: 'Custom', dedupKey: 'custom' })];
 
       expect(batcher.formatDigest('Test', items)).toContain('CUSTOM THING:');
     });
@@ -261,9 +269,7 @@ describe('NotificationBatcher', () => {
     it('strips HTML tags', () => {
       const { batcher } = createBatcher();
 
-      const items = [
-        { category: 'system', message: '<b>Bold</b> text <i>italic</i>', timestamp: new Date(), topicId: 100 },
-      ];
+      const items = [qItem({ category: 'system', message: '<b>Bold</b> text <i>italic</i>', dedupKey: 'html' })];
 
       const digest = batcher.formatDigest('Test', items);
       expect(digest).not.toContain('<b>');
@@ -273,9 +279,7 @@ describe('NotificationBatcher', () => {
     it('truncates long messages', () => {
       const { batcher } = createBatcher();
 
-      const items = [
-        { category: 'system', message: 'A'.repeat(200), timestamp: new Date(), topicId: 100 },
-      ];
+      const items = [qItem({ category: 'system', message: 'A'.repeat(200), dedupKey: 'long' })];
 
       const digest = batcher.formatDigest('Test', items);
       const itemLine = digest.split('\n').find(l => l.trim().startsWith('- '));
@@ -284,8 +288,15 @@ describe('NotificationBatcher', () => {
 
     it('uses singular "item" for single item', () => {
       const { batcher } = createBatcher();
-      const items = [{ category: 'system', message: 'One', timestamp: new Date(), topicId: 100 }];
+      const items = [qItem({ category: 'system', message: 'One', dedupKey: 'one' })];
       expect(batcher.formatDigest('Test', items)).toContain('(1 item)');
+    });
+
+    it('shows repeat count for collapsed duplicates', () => {
+      const { batcher } = createBatcher();
+      const items = [qItem({ category: 'system', message: 'External process alert', dedupKey: 'ext', count: 5 })];
+      const digest = batcher.formatDigest('Test', items);
+      expect(digest).toContain('(×5)');
     });
   });
 
@@ -429,6 +440,95 @@ describe('NotificationBatcher', () => {
     });
   });
 
+  describe('deduplication', () => {
+    it('collapses identical messages within a batch window', async () => {
+      const { batcher } = createBatcher();
+
+      // Same message enqueued 3 times
+      await batcher.enqueue(makeNotification({ tier: 'SUMMARY', message: 'Coherence: 1 issue(s)' }));
+      await batcher.enqueue(makeNotification({ tier: 'SUMMARY', message: 'Coherence: 1 issue(s)' }));
+      await batcher.enqueue(makeNotification({ tier: 'SUMMARY', message: 'Coherence: 1 issue(s)' }));
+
+      // Should collapse to 1 entry
+      expect(batcher.getQueueSize().summary).toBe(1);
+    });
+
+    it('normalizes PIDs and memory values for dedup', async () => {
+      const { batcher } = createBatcher();
+
+      await batcher.enqueue(makeNotification({
+        tier: 'SUMMARY',
+        message: 'Found 1 long-running process PID 12345: 200MB, running 5h 30m',
+      }));
+      await batcher.enqueue(makeNotification({
+        tier: 'SUMMARY',
+        message: 'Found 1 long-running process PID 67890: 350MB, running 6h 15m',
+      }));
+
+      // Different PIDs/memory/duration but same shape — should collapse
+      expect(batcher.getQueueSize().summary).toBe(1);
+    });
+
+    it('does NOT collapse messages with different shapes', async () => {
+      const { batcher } = createBatcher();
+
+      await batcher.enqueue(makeNotification({
+        tier: 'SUMMARY',
+        message: 'Coherence: shadow installation detected',
+      }));
+      await batcher.enqueue(makeNotification({
+        tier: 'SUMMARY',
+        message: 'Found 1 long-running process outside Instar',
+      }));
+
+      // Different message shapes — keep both
+      expect(batcher.getQueueSize().summary).toBe(2);
+    });
+
+    it('dedup is scoped per topicId', async () => {
+      const { batcher } = createBatcher();
+
+      await batcher.enqueue(makeNotification({ tier: 'SUMMARY', message: 'Same msg', topicId: 100 }));
+      await batcher.enqueue(makeNotification({ tier: 'SUMMARY', message: 'Same msg', topicId: 200 }));
+
+      // Same message but different topics — keep both
+      expect(batcher.getQueueSize().summary).toBe(2);
+    });
+
+    it('shows collapsed count in digest output', async () => {
+      const { batcher, sendFn } = createBatcher();
+
+      await batcher.enqueue(makeNotification({ tier: 'SUMMARY', message: 'Recurring alert about PID 123' }));
+      await batcher.enqueue(makeNotification({ tier: 'SUMMARY', message: 'Recurring alert about PID 456' }));
+      await batcher.enqueue(makeNotification({ tier: 'SUMMARY', message: 'Recurring alert about PID 789' }));
+
+      await batcher.flush('SUMMARY');
+
+      expect(sendFn.calls).toHaveLength(1);
+      expect(sendFn.calls[0].text).toContain('1 item'); // Collapsed to 1
+      expect(sendFn.calls[0].text).toContain('(×3)');
+    });
+
+    it('does not show count suffix for single occurrences', async () => {
+      const { batcher, sendFn } = createBatcher();
+
+      await batcher.enqueue(makeNotification({ tier: 'SUMMARY', message: 'Unique alert' }));
+      await batcher.flush('SUMMARY');
+
+      expect(sendFn.calls[0].text).not.toContain('×');
+    });
+
+    it('dedup works independently for SUMMARY and DIGEST queues', async () => {
+      const { batcher } = createBatcher();
+
+      await batcher.enqueue(makeNotification({ tier: 'SUMMARY', message: 'Shared message' }));
+      await batcher.enqueue(makeNotification({ tier: 'DIGEST', message: 'Shared message' }));
+
+      // Same message in different tiers — each queue has 1
+      expect(batcher.getQueueSize()).toEqual({ summary: 1, digest: 1 });
+    });
+  });
+
   describe('edge cases', () => {
     it('handles mixed tiers correctly', async () => {
       const { batcher, sendFn } = createBatcher();
@@ -450,9 +550,11 @@ describe('NotificationBatcher', () => {
     it('handles rapid enqueue without race conditions', async () => {
       const { batcher, sendFn } = createBatcher();
 
+      // Use distinct message shapes (not just different numbers) to avoid dedup
+      const categories = ['alpha', 'bravo', 'charlie', 'delta', 'echo', 'foxtrot', 'golf', 'hotel', 'india', 'juliet'];
       const promises = [];
       for (let i = 0; i < 10; i++) {
-        promises.push(batcher.enqueue(makeNotification({ tier: 'SUMMARY', message: `Item ${i}` })));
+        promises.push(batcher.enqueue(makeNotification({ tier: 'SUMMARY', message: `${categories[i]} notification` })));
       }
       await Promise.all(promises);
       await batcher.flush('SUMMARY');

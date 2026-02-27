@@ -1645,7 +1645,7 @@ export async function startServer(options: StartOptions): Promise<void> {
       highMemoryThresholdMB: 500,  // Flag processes using >500MB
       autoKillOrphans: true,       // Auto-kill Instar orphans (safe — only project-prefixed tmux sessions)
       alertCallback: async (msg: string) => {
-        notify('SUMMARY', 'system', msg);
+        notify('DIGEST', 'system', msg);
       },
     });
     orphanReaper.start();

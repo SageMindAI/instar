@@ -35,6 +35,8 @@ interface QueuedNotification {
   message: string;
   timestamp: Date;
   topicId: number;
+  dedupKey: string;
+  count: number;
 }
 
 export interface BatcherStats {
@@ -109,18 +111,25 @@ export class NotificationBatcher {
       return;
     }
 
-    const queued: QueuedNotification = {
+    const dedupKey = this.generateDedupKey(notification.category, notification.message);
+    const queue = effectiveTier === 'SUMMARY' ? this.summaryQueue : this.digestQueue;
+
+    // Dedup: if an identical notification shape already exists in this batch window, collapse it
+    const existing = queue.find(q => q.dedupKey === dedupKey && q.topicId === notification.topicId);
+    if (existing) {
+      existing.count++;
+      existing.timestamp = notification.timestamp; // Update to latest
+      return;
+    }
+
+    queue.push({
       category: notification.category,
       message: notification.message,
       timestamp: notification.timestamp,
       topicId: notification.topicId,
-    };
-
-    if (effectiveTier === 'SUMMARY') {
-      this.summaryQueue.push(queued);
-    } else {
-      this.digestQueue.push(queued);
-    }
+      dedupKey,
+      count: 1,
+    });
   }
 
   async flushAll(): Promise<number> {
@@ -209,7 +218,8 @@ export class NotificationBatcher {
       for (const item of categoryItems) {
         const cleanMessage = item.message.replace(/<[^>]+>/g, '').trim();
         const firstLine = cleanMessage.split('\n').find(l => l.trim().length > 0) || cleanMessage;
-        lines.push(`  - ${firstLine.slice(0, 120)}`);
+        const suffix = item.count > 1 ? ` (×${item.count})` : '';
+        lines.push(`  - ${firstLine.slice(0, 115)}${suffix}`);
       }
 
       lines.push('');
@@ -234,6 +244,28 @@ export class NotificationBatcher {
     }
 
     return currentMinutes >= startMinutes && currentMinutes < endMinutes;
+  }
+
+  /**
+   * Generate a stable dedup key from category + message content.
+   * Strips variable parts (PIDs, memory values, timestamps, durations)
+   * so structurally identical notifications collapse.
+   */
+  private generateDedupKey(category: string, message: string): string {
+    const firstLine = message.split('\n').find(l => l.trim().length > 0) || message;
+    const normalized = firstLine
+      .replace(/PID \d+/g, 'PID _')
+      .replace(/\d+MB/g, '_MB')
+      .replace(/\d+KB/g, '_KB')
+      .replace(/\d+h \d+m/g, '_dur')
+      .replace(/\d+m/g, '_dur')
+      .replace(/\d+d \d+h/g, '_dur')
+      .replace(/v[\d.]+/g, 'v_')
+      .replace(/\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}/g, '_ts')
+      .replace(/\d+/g, '_')
+      .toLowerCase()
+      .trim();
+    return `${category}:${normalized}`;
   }
 
   private async sendDirect(topicId: number, message: string): Promise<void> {

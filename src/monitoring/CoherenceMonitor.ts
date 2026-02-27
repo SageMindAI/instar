@@ -77,8 +77,10 @@ export class CoherenceMonitor extends EventEmitter {
   private interval: ReturnType<typeof setInterval> | null = null;
   private lastReport: CoherenceReport | null = null;
   private correctionLog: Array<{ timestamp: string; check: string; detail: string }> = [];
-  /** Track which failure signatures have already been notified to suppress spam */
-  private notifiedFailures: Set<string> = new Set();
+  /** Track which failure signatures have already been notified (signature → timestamp ms) */
+  private notifiedFailures: Map<string, number> = new Map();
+  /** Don't re-notify about the same failure within this window */
+  private static readonly NOTIFY_COOLDOWN_MS = 2 * 60 * 60 * 1000; // 2 hours
 
   constructor(config: CoherenceMonitorConfig) {
     super();
@@ -150,9 +152,13 @@ export class CoherenceMonitor extends EventEmitter {
     this.lastReport = report;
     this.emit('check', report);
 
-    // When all checks pass, clear notification suppression so future regressions re-notify
-    if (status === 'coherent') {
-      this.notifiedFailures.clear();
+    // Cooldown-based: expired entries are cleaned up rather than clearing all on coherent.
+    // This prevents flapping (coherent → incoherent → coherent) from spamming notifications.
+    const now = Date.now();
+    for (const [sig, ts] of this.notifiedFailures) {
+      if (now - ts > CoherenceMonitor.NOTIFY_COOLDOWN_MS) {
+        this.notifiedFailures.delete(sig);
+      }
     }
 
     // Log non-coherent results
@@ -166,14 +172,16 @@ export class CoherenceMonitor extends EventEmitter {
       if (failed > 0) {
         console.warn(`[CoherenceMonitor] ${failed} incoherence(s) detected: ${failedChecks.map(c => `${c.name}: ${c.message}`).join('; ')}`);
 
-        // Deduplicate notifications: only notify for NEW failures, not repeats
+        // Deduplicate notifications: only notify if this failure signature hasn't been
+        // notified within the cooldown window. Prevents flapping from generating spam.
         const failureSignature = failedChecks.map(c => c.name).sort().join(',');
-        const isNewFailure = !this.notifiedFailures.has(failureSignature);
+        const lastNotified = this.notifiedFailures.get(failureSignature);
+        const isNewFailure = !lastNotified || (now - lastNotified > CoherenceMonitor.NOTIFY_COOLDOWN_MS);
 
         if (isNewFailure && this.config.onIncoherence) {
           try {
             this.config.onIncoherence(report);
-            this.notifiedFailures.add(failureSignature);
+            this.notifiedFailures.set(failureSignature, now);
           } catch (err) {
             console.error(`[CoherenceMonitor] Notification callback failed:`, err);
           }
