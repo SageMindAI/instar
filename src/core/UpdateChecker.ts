@@ -213,7 +213,16 @@ export class UpdateChecker {
             throw dirErr;
           }
         }
-        const migration = JSON.parse(output);
+        // Guard: old binaries may run a default command (e.g., setup wizard) instead of
+        // recognizing 'migrate', exiting 0 but returning non-JSON text. Treat parse
+        // failures the same as "unknown command" — use the in-memory fallback quietly.
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        let migration: any;
+        try {
+          migration = JSON.parse(output);
+        } catch {
+          migration = { upgraded: [], errors: [] };
+        }
         if (migration.upgraded && migration.upgraded.length > 0) {
           migrationSummary = ` Intelligence download: ${migration.upgraded.length} files upgraded (${migration.upgraded.join(', ')}).`;
         }
@@ -230,8 +239,10 @@ export class UpdateChecker {
         const errMsg = err instanceof Error ? err.message : String(err);
         const errStderr = (err as Error & { stderr?: string }).stderr || '';
         // If the binary doesn't support the migrate command at all (very old version),
+        // or if it returned non-JSON output (old binary ran a different default command),
         // skip silently — the in-memory migrator on server startup handles it.
-        const isMissingCommand = errStderr.includes('unknown command') || errMsg.includes('unknown command');
+        const isNonJsonOutput = errMsg.includes('is not valid JSON') || errMsg.includes('JSON') || errMsg.includes('Unexpected token');
+        const isMissingCommand = errStderr.includes('unknown command') || errMsg.includes('unknown command') || isNonJsonOutput;
 
         // Fallback: run in-memory migrator (better than nothing)
         try {
@@ -246,11 +257,12 @@ export class UpdateChecker {
 
         // Only fire degradation for unexpected failures — not for PATH conflicts with old binaries
         if (!isMissingCommand) {
+          const detail = errStderr ? ` (stderr: ${errStderr.slice(0, 200)})` : '';
           DegradationReporter.getInstance().report({
             feature: 'UpdateChecker.postUpdateMigration',
             primary: 'Run post-update migrations',
             fallback: 'Migration skipped — data may not be upgraded',
-            reason: `Why: ${errMsg}`,
+            reason: `Why: ${errMsg}${detail}`,
             impact: 'Agent configuration may be stale after update',
           });
         }
