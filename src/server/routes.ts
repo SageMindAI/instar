@@ -2007,6 +2007,18 @@ export function createRoutes(ctx: RouteContext): Router {
   });
 
   router.post('/updates/apply', async (_req, res) => {
+    // Prefer AutoUpdater path (coalescing + session-aware gating)
+    if (ctx.autoUpdater) {
+      try {
+        await ctx.autoUpdater.applyPendingUpdate();
+        res.json(ctx.autoUpdater.getStatus());
+      } catch (err) {
+        res.status(500).json({ error: err instanceof Error ? err.message : String(err) });
+      }
+      return;
+    }
+
+    // Fallback: direct apply (no coalescing/gating)
     if (!ctx.updateChecker) {
       res.status(503).json({ error: 'Update checker not configured' });
       return;
@@ -2049,6 +2061,32 @@ export function createRoutes(ctx: RouteContext): Router {
       return;
     }
     res.json(ctx.autoUpdater.getStatus());
+  });
+
+  // GET /updates/status — comprehensive update status for monitoring/UI
+  router.get('/updates/status', async (_req, res) => {
+    const status: Record<string, unknown> = {
+      currentVersion: ctx.updateChecker?.getInstalledVersion() ?? 'unknown',
+      autoApply: ctx.config.updates?.autoApply ?? true,
+    };
+
+    if (ctx.autoUpdater) {
+      const auto = ctx.autoUpdater.getStatus();
+      Object.assign(status, {
+        pendingUpdate: auto.pendingUpdate,
+        pendingUpdateDetectedAt: auto.pendingUpdateDetectedAt,
+        coalescingUntil: auto.coalescingUntil,
+        deferralReason: auto.deferralReason,
+        deferralElapsedMinutes: auto.deferralElapsedMinutes,
+        maxDeferralHours: auto.maxDeferralHours,
+        lastCheck: auto.lastCheck,
+        lastApply: auto.lastApply,
+        lastAppliedVersion: auto.lastAppliedVersion,
+        lastError: auto.lastError,
+      });
+    }
+
+    res.json(status);
   });
 
   // ── Dispatches ───────────────────────────────────────────────────

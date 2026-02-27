@@ -1547,6 +1547,8 @@ export async function startServer(options: StartOptions): Promise<void> {
       telegram,
       liveConfig,
     );
+    // Wire session deps for session-aware restart gating (Phase 2B)
+    autoUpdater.setSessionDeps(sessionManager, sessionMonitor);
     autoUpdater.start();
 
     // ForegroundRestartWatcher — the critical gap fix (v0.9.72).

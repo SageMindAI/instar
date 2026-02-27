@@ -24,6 +24,8 @@ import type { UpdateChecker } from './UpdateChecker.js';
 import type { TelegramAdapter } from '../messaging/TelegramAdapter.js';
 import type { StateManager } from './StateManager.js';
 import type { LiveConfig } from '../config/LiveConfig.js';
+import { UpdateGate } from './UpdateGate.js';
+import type { SessionManagerLike, SessionMonitorLike } from './UpdateGate.js';
 
 export interface AutoUpdaterConfig {
   /** How often to check for updates, in minutes. Default: 30 */
@@ -34,6 +36,10 @@ export interface AutoUpdaterConfig {
   notificationTopicId?: number;
   /** Whether to auto-restart after applying an update. Default: true */
   autoRestart?: boolean;
+  /** Delay before applying an update, in minutes. Allows coalescing rapid-fire publishes. Default: 5 */
+  applyDelayMinutes?: number;
+  /** Seconds to wait after sending pre-restart notification before actually restarting. Default: 60 */
+  preRestartDelaySecs?: number;
 }
 
 export interface AutoUpdaterStatus {
@@ -51,6 +57,16 @@ export interface AutoUpdaterStatus {
   pendingUpdate: string | null;
   /** Last error if any */
   lastError: string | null;
+  /** ISO timestamp: coalescing timer expires at this time (null = not coalescing) */
+  coalescingUntil: string | null;
+  /** ISO timestamp: when the pending update was first detected */
+  pendingUpdateDetectedAt: string | null;
+  /** Whether restart is being deferred for active sessions */
+  deferralReason: string | null;
+  /** How long we've been deferring, in minutes */
+  deferralElapsedMinutes: number;
+  /** Max deferral before forced restart */
+  maxDeferralHours: number;
 }
 
 export class AutoUpdater {
@@ -68,6 +84,17 @@ export class AutoUpdater {
   private stateDir: string;
   private stateFile: string;
   private liveConfig: LiveConfig | null = null;
+
+  // Update coalescing — batch rapid-fire publishes into a single restart
+  private applyTimer: ReturnType<typeof setTimeout> | null = null;
+  private pendingUpdateDetectedAt: string | null = null;
+  private coalescingUntil: string | null = null;
+
+  // Session-aware restart gating
+  private gate: UpdateGate;
+  private sessionManager: SessionManagerLike | null = null;
+  private sessionMonitor: SessionMonitorLike | null = null;
+  private deferralTimer: ReturnType<typeof setTimeout> | null = null;
 
   constructor(
     updateChecker: UpdateChecker,
@@ -89,7 +116,11 @@ export class AutoUpdater {
       autoApply: config?.autoApply ?? true,
       autoRestart: config?.autoRestart ?? true,
       notificationTopicId: config?.notificationTopicId ?? 0,
+      applyDelayMinutes: config?.applyDelayMinutes ?? 5,
+      preRestartDelaySecs: config?.preRestartDelaySecs ?? 60,
     };
+
+    this.gate = new UpdateGate();
 
     // Load persisted state (survives restarts)
     this.loadState();
@@ -125,12 +156,23 @@ export class AutoUpdater {
       clearInterval(this.interval);
       this.interval = null;
     }
+    if (this.applyTimer) {
+      clearTimeout(this.applyTimer);
+      this.applyTimer = null;
+      this.coalescingUntil = null;
+    }
+    if (this.deferralTimer) {
+      clearTimeout(this.deferralTimer);
+      this.deferralTimer = null;
+    }
+    this.gate.reset();
   }
 
   /**
    * Get current auto-updater status.
    */
   getStatus(): AutoUpdaterStatus {
+    const gateStatus = this.gate.getStatus();
     return {
       running: this.interval !== null,
       lastCheck: this.lastCheck,
@@ -139,6 +181,11 @@ export class AutoUpdater {
       config: { ...this.config },
       pendingUpdate: this.pendingUpdate,
       lastError: this.lastError,
+      coalescingUntil: this.coalescingUntil,
+      pendingUpdateDetectedAt: this.pendingUpdateDetectedAt,
+      deferralReason: gateStatus.deferralReason,
+      deferralElapsedMinutes: gateStatus.deferralElapsedMinutes,
+      maxDeferralHours: gateStatus.maxDeferralHours,
     };
   }
 
@@ -147,6 +194,15 @@ export class AutoUpdater {
    */
   setTelegram(telegram: TelegramAdapter): void {
     this.telegram = telegram;
+  }
+
+  /**
+   * Set session dependencies for session-aware restart gating.
+   * May be wired after construction (like Telegram).
+   */
+  setSessionDeps(sessionManager: SessionManagerLike, sessionMonitor?: SessionMonitorLike | null): void {
+    this.sessionManager = sessionManager;
+    this.sessionMonitor = sessionMonitor ?? null;
   }
 
   /**
@@ -185,7 +241,11 @@ export class AutoUpdater {
 
   /**
    * One tick of the update loop.
-   * Check → optionally apply → notify → optionally restart.
+   * Check → detect update → start coalescing timer → apply after delay.
+   *
+   * The coalescing timer handles rapid-fire publishes: if 0.9.74, 0.9.75,
+   * and 0.9.76 are published within 10 minutes, we apply only 0.9.76.
+   * Each new version resets the timer.
    */
   private async tick(): Promise<void> {
     if (this.isApplying) {
@@ -204,28 +264,97 @@ export class AutoUpdater {
 
       if (!info.updateAvailable) {
         this.pendingUpdate = null;
+        this.pendingUpdateDetectedAt = null;
+        this.coalescingUntil = null;
+        if (this.applyTimer) {
+          clearTimeout(this.applyTimer);
+          this.applyTimer = null;
+        }
         this.saveState();
         return;
       }
 
       console.log(`[AutoUpdater] Update available: ${info.currentVersion} → ${info.latestVersion}`);
+
+      // Track first detection time (don't reset on subsequent detections of newer versions)
+      if (!this.pendingUpdateDetectedAt) {
+        this.pendingUpdateDetectedAt = new Date().toISOString();
+      }
       this.pendingUpdate = info.latestVersion;
-      this.saveState();
 
       // Step 2: Auto-apply if configured
       if (!this.config.autoApply) {
+        this.saveState();
         // Notify with actionable instructions — don't leave the user hanging
-        await this.notify(
-          `There's a new version available (v${info.latestVersion}). I'm currently on v${info.currentVersion}.\n\n` +
-          `Auto-updates are off. Just say "update" or "apply the update" and I'll handle it. ` +
-          `Or to turn on auto-updates so this happens automatically, say "turn on auto-updates".`
-        );
+        // Only notify once per detected version (avoid spam on every tick)
+        if (!this.coalescingUntil) {
+          await this.notify(
+            `There's a new version available (v${info.latestVersion}). I'm currently on v${info.currentVersion}.\n\n` +
+            `Auto-updates are off. Just say "update" or "apply the update" and I'll handle it. ` +
+            `Or to turn on auto-updates so this happens automatically, say "turn on auto-updates".`
+          );
+          // Set coalescingUntil as a "notified" marker to prevent re-notification
+          this.coalescingUntil = 'notified';
+        }
         return;
       }
 
-      // Step 3: Apply the update
+      // Step 3: Start or reset coalescing timer
+      const delayMs = this.config.applyDelayMinutes * 60_000;
+
+      if (delayMs <= 0) {
+        // No coalescing — apply immediately (legacy behavior)
+        this.saveState();
+        await this.applyPendingUpdate();
+        return;
+      }
+
+      // Reset the coalescing timer (new version detected, wait for more)
+      if (this.applyTimer) {
+        clearTimeout(this.applyTimer);
+        console.log(`[AutoUpdater] Coalescing: timer reset — newer version v${info.latestVersion} detected`);
+      } else {
+        console.log(`[AutoUpdater] Coalescing: waiting ${this.config.applyDelayMinutes}m before applying v${info.latestVersion}`);
+      }
+
+      this.coalescingUntil = new Date(Date.now() + delayMs).toISOString();
+      this.saveState();
+
+      this.applyTimer = setTimeout(async () => {
+        this.applyTimer = null;
+        this.coalescingUntil = null;
+        await this.applyPendingUpdate();
+      }, delayMs);
+      this.applyTimer.unref(); // Don't prevent process exit
+    } catch (err) {
+      this.isApplying = false;
+      this.lastError = err instanceof Error ? err.message : String(err);
+      this.saveState();
+      console.error(`[AutoUpdater] Tick error: ${this.lastError}`);
+    }
+  }
+
+  /**
+   * Apply the pending update after coalescing delay.
+   * Extracted from tick() so it can be called by the coalescing timer
+   * and by manual trigger (POST /updates/apply).
+   */
+  async applyPendingUpdate(): Promise<void> {
+    if (this.isApplying) {
+      console.log('[AutoUpdater] Skipping apply — already in progress');
+      return;
+    }
+
+    if (!this.pendingUpdate) {
+      console.log('[AutoUpdater] No pending update to apply');
+      return;
+    }
+
+    const targetVersion = this.pendingUpdate;
+
+    try {
       this.isApplying = true;
-      console.log(`[AutoUpdater] Applying update to v${info.latestVersion}...`);
+      console.log(`[AutoUpdater] Applying update to v${targetVersion}...`);
 
       const result = await this.updateChecker.applyUpdate();
       this.isApplying = false;
@@ -235,35 +364,31 @@ export class AutoUpdater {
         this.saveState();
         console.error(`[AutoUpdater] Update failed: ${result.message}`);
         await this.notify(
-          `Heads up — I tried to update to v${info.latestVersion} but it didn't work out. ` +
+          `Heads up — I tried to update to v${targetVersion} but it didn't work out. ` +
           `I'm still running fine on v${result.previousVersion}, so nothing's broken. ` +
           `I'll try again next cycle.`
         );
         return;
       }
 
-      // Step 4: Update succeeded
+      // Update succeeded
       this.lastApply = new Date().toISOString();
       this.lastAppliedVersion = result.newVersion;
       this.pendingUpdate = null;
+      this.pendingUpdateDetectedAt = null;
+      this.coalescingUntil = null;
       this.saveState();
 
       console.log(`[AutoUpdater] Updated: v${result.previousVersion} → v${result.newVersion}`);
 
-      // Step 5: Notify via Telegram
+      // Notify via Telegram
       const guideExists = this.hasUpgradeGuide(result.newVersion);
       const summaryNote = guideExists
         ? ` I'll send you a summary of what's new once I'm back up.`
         : '';
 
       if (result.restartNeeded) {
-        await this.notify(
-          `Just updated to v${result.newVersion}. Restarting to pick up the changes.${summaryNote}`
-        );
-        // Step 6: Request restart from supervisor (don't self-restart)
-        // Brief delay to let the Telegram notification send
-        await new Promise(r => setTimeout(r, 2000));
-        this.requestRestart(result.newVersion!);
+        await this.gatedRestart(result.newVersion!, summaryNote);
       } else {
         await this.notify(`Just updated to v${result.newVersion}.${summaryNote}`);
       }
@@ -271,8 +396,93 @@ export class AutoUpdater {
       this.isApplying = false;
       this.lastError = err instanceof Error ? err.message : String(err);
       this.saveState();
-      console.error(`[AutoUpdater] Tick error: ${this.lastError}`);
+      console.error(`[AutoUpdater] Apply error: ${this.lastError}`);
     }
+  }
+
+  /**
+   * Attempt restart with session-aware gating.
+   * If sessions are active, defers and retries on a timer.
+   * After max deferral, restarts regardless with warnings.
+   */
+  private async gatedRestart(newVersion: string, summaryNote: string): Promise<void> {
+    // If no session manager is wired, skip gating
+    if (!this.sessionManager) {
+      await this.notify(
+        `Just updated to v${newVersion}. Restarting to pick up the changes.${summaryNote}`
+      );
+      await new Promise(r => setTimeout(r, 2000));
+      this.requestRestart(newVersion);
+      return;
+    }
+
+    const result = this.gate.canRestart(this.sessionManager, this.sessionMonitor);
+
+    if (result.unresponsiveSessions?.length) {
+      console.log(`[AutoUpdater] Unresponsive sessions (not blocking): ${result.unresponsiveSessions.join(', ')}`);
+    }
+
+    if (result.allowed) {
+      // Clear any deferral timer
+      if (this.deferralTimer) {
+        clearTimeout(this.deferralTimer);
+        this.deferralTimer = null;
+      }
+
+      // Check if there are still running sessions (idle/unresponsive — not blocking)
+      const runningSessions = this.sessionManager!.listRunningSessions();
+      const hasRunningSessions = runningSessions.length > 0;
+
+      if (result.reason?.includes('Max deferral')) {
+        await this.notify(
+          `Update to v${newVersion} was deferred for active sessions, but the maximum wait has been reached. Restarting now.${summaryNote}`
+        );
+      } else if (hasRunningSessions) {
+        // Sessions exist but aren't blocking — send pre-restart notification
+        const delaySecs = this.config.preRestartDelaySecs;
+        await this.notify(
+          `Just updated to v${newVersion}. Server restarting in ${delaySecs} seconds. ` +
+          `${runningSessions.length} session(s) will resume after restart.${summaryNote}`
+        );
+        // Give sessions a moment to checkpoint
+        if (delaySecs > 0) {
+          console.log(`[AutoUpdater] Pre-restart delay: ${delaySecs}s for ${runningSessions.length} session(s)`);
+          await new Promise(r => setTimeout(r, delaySecs * 1000));
+        }
+      } else {
+        await this.notify(
+          `Just updated to v${newVersion}. Restarting to pick up the changes.${summaryNote}`
+        );
+      }
+      await new Promise(r => setTimeout(r, 2000));
+      this.requestRestart(newVersion);
+      return;
+    }
+
+    // Sessions are blocking — defer
+    console.log(`[AutoUpdater] Restart deferred: ${result.reason}. Will retry in ${Math.round((result.retryInMs ?? 300_000) / 60_000)}m`);
+
+    // Send warnings at thresholds
+    if (this.gate.shouldSendFinalWarning()) {
+      await this.notify(
+        `Update to v${newVersion} installed. Server will restart in ~5 minutes regardless of active sessions.`
+      );
+    } else if (this.gate.shouldSendFirstWarning()) {
+      await this.notify(
+        `Update to v${newVersion} installed but restart is being deferred for ${result.blockingSessions?.length} active session(s). ` +
+        `Will force restart in ~30 minutes if sessions don't finish.`
+      );
+    }
+
+    // Schedule retry
+    if (this.deferralTimer) {
+      clearTimeout(this.deferralTimer);
+    }
+    this.deferralTimer = setTimeout(async () => {
+      this.deferralTimer = null;
+      await this.gatedRestart(newVersion, summaryNote);
+    }, result.retryInMs ?? 300_000);
+    this.deferralTimer.unref();
   }
 
   /**
@@ -382,6 +592,10 @@ export class AutoUpdater {
         this.lastAppliedVersion = data.lastAppliedVersion ?? null;
         this.lastError = data.lastError ?? null;
         this.pendingUpdate = data.pendingUpdate ?? null;
+        this.pendingUpdateDetectedAt = data.pendingUpdateDetectedAt ?? null;
+        // Don't restore coalescingUntil — the timer is in-memory only.
+        // On restart, if there's still a pendingUpdate, the next tick()
+        // will re-detect it and start a fresh coalescing timer.
       }
     } catch {
       // Start fresh if state is corrupted
@@ -398,6 +612,8 @@ export class AutoUpdater {
       lastAppliedVersion: this.lastAppliedVersion,
       lastError: this.lastError,
       pendingUpdate: this.pendingUpdate,
+      pendingUpdateDetectedAt: this.pendingUpdateDetectedAt,
+      coalescingUntil: this.coalescingUntil,
       savedAt: new Date().toISOString(),
     };
 

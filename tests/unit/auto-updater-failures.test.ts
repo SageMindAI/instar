@@ -85,7 +85,7 @@ describe('AutoUpdater — failure paths', () => {
         createMockUpdateChecker(),
         createMockState(),
         tmpDir,
-        { autoApply: true, autoRestart: true },
+        { autoApply: true, autoRestart: true, applyDelayMinutes: 0 },
       );
 
       // Trigger tick which will apply update and call requestRestart
@@ -119,7 +119,7 @@ describe('AutoUpdater — failure paths', () => {
         createMockUpdateChecker(),
         createMockState(),
         tmpDir,
-        { autoApply: true, autoRestart: true },
+        { autoApply: true, autoRestart: true, applyDelayMinutes: 0 },
       );
 
       // Should not throw — requestRestart catches write errors
@@ -165,7 +165,7 @@ describe('AutoUpdater — failure paths', () => {
         mockChecker,
         createMockState(),
         tmpDir,
-        { autoApply: true, autoRestart: true },
+        { autoApply: true, autoRestart: true, applyDelayMinutes: 0 },
       );
 
       await (updater as any).tick();
@@ -202,7 +202,7 @@ describe('AutoUpdater — failure paths', () => {
         mockChecker,
         createMockState(),
         tmpDir,
-        { autoApply: true },
+        { autoApply: true, applyDelayMinutes: 0 },
         telegram,
       );
 
@@ -256,7 +256,7 @@ describe('AutoUpdater — failure paths', () => {
         createMockUpdateChecker(),
         createMockState(),
         tmpDir,
-        { autoApply: true, autoRestart: false },
+        { autoApply: true, autoRestart: false, applyDelayMinutes: 0 },
         telegram,
       );
 
@@ -277,7 +277,7 @@ describe('AutoUpdater — failure paths', () => {
         createMockUpdateChecker(),
         createMockState(),
         tmpDir,
-        { autoApply: true, autoRestart: false },
+        { autoApply: true, autoRestart: false, applyDelayMinutes: 0 },
         null as any, // No telegram adapter
       );
 
@@ -305,7 +305,7 @@ describe('AutoUpdater — failure paths', () => {
         mockChecker,
         createMockState(),
         tmpDir,
-        { autoApply: true, autoRestart: false },
+        { autoApply: true, autoRestart: false, applyDelayMinutes: 0 },
       );
 
       // Start first tick (will block on applyUpdate)
@@ -366,7 +366,7 @@ describe('AutoUpdater — failure paths', () => {
         mockChecker,
         createMockState(),
         tmpDir,
-        { autoApply: true, autoRestart: false },
+        { autoApply: true, autoRestart: false, applyDelayMinutes: 0 },
       );
 
       // Should not throw — 0.0.0 is a valid (degraded) state
