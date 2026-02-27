@@ -871,6 +871,27 @@ export async function startServer(options: StartOptions): Promise<void> {
     // Set up file logging for observability
     setupServerLog(config.stateDir);
 
+    // ── Shadow installation detection (v0.9.72) ────────────────────────
+    // The Luna Incident: a local `npm install instar` created node_modules/
+    // in the project directory, shadowing the global binary. AutoUpdater
+    // updated the global, but the server kept loading the stale local copy.
+    // Detect this at startup and warn loudly.
+    const localInstarBin = path.join(process.cwd(), 'node_modules', '.bin', 'instar');
+    const localInstarPkg = path.join(process.cwd(), 'node_modules', 'instar', 'package.json');
+    if (fs.existsSync(localInstarBin) || fs.existsSync(localInstarPkg)) {
+      const localVersion = (() => {
+        try {
+          const pkg = JSON.parse(fs.readFileSync(path.join(process.cwd(), 'node_modules', 'instar', 'package.json'), 'utf-8'));
+          return pkg.version || 'unknown';
+        } catch { return 'unknown'; }
+      })();
+      console.warn(pc.red(pc.bold('  ⚠ SHADOW INSTALLATION DETECTED')));
+      console.warn(pc.red(`  Local node_modules/instar (v${localVersion}) shadows the global binary.`));
+      console.warn(pc.red('  Auto-updates will NOT take effect. Remove with:'));
+      console.warn(pc.red(`  rm -rf ${path.join(process.cwd(), 'node_modules')} ${path.join(process.cwd(), 'package.json')} ${path.join(process.cwd(), 'package-lock.json')}`));
+      console.warn();
+    }
+
     // ── ProcessIntegrity: freeze the running version at startup ────────
     // This MUST happen before any version reporting. The version is captured
     // from the code loaded into memory, NOT from disk (which changes after

@@ -123,6 +123,7 @@ export class CoherenceMonitor extends EventEmitter {
 
     // Run all check categories
     checks.push(...this.checkProcessIntegrity());
+    checks.push(...this.checkShadowInstallation());
     checks.push(...this.checkConfigCoherence());
     checks.push(...this.checkStateDurability());
     checks.push(...this.checkOutputSanity());
@@ -252,6 +253,38 @@ export class CoherenceMonitor extends EventEmitter {
     }
 
     return results;
+  }
+
+  /**
+   * Check 0b: Shadow Installation Detection
+   * Is there a local node_modules/instar that shadows the global binary?
+   * The Luna Incident (v0.9.70): a local `npm install instar` created a shadow
+   * that prevented auto-updates from taking effect. Detect this at runtime.
+   */
+  private checkShadowInstallation(): CoherenceCheckResult[] {
+    const localBin = path.join(process.cwd(), 'node_modules', '.bin', 'instar');
+    const localPkg = path.join(process.cwd(), 'node_modules', 'instar', 'package.json');
+
+    if (fs.existsSync(localBin) || fs.existsSync(localPkg)) {
+      let localVersion = 'unknown';
+      try {
+        const pkg = JSON.parse(fs.readFileSync(
+          path.join(process.cwd(), 'node_modules', 'instar', 'package.json'), 'utf-8'));
+        localVersion = pkg.version || 'unknown';
+      } catch { /* ignore */ }
+
+      return [{
+        name: 'shadow-installation',
+        passed: false,
+        message: `Local node_modules/instar v${localVersion} shadows global binary — auto-updates won't take effect. Remove: rm -rf node_modules package.json package-lock.json`,
+      }];
+    }
+
+    return [{
+      name: 'shadow-installation',
+      passed: true,
+      message: 'No local shadow installation detected',
+    }];
   }
 
   /**

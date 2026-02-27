@@ -311,3 +311,49 @@ describe('META: Foreground restart gap prevention', () => {
     expect(restartBlock![0]).toContain("'IMMEDIATE'");
   });
 });
+
+// ── META: Shadow installation prevention ──────────────────────────
+//
+// The Luna Incident (deeper layer): a local `npm install instar` in the
+// project directory created node_modules/ that shadowed the global binary.
+// Auto-updates went to the global, but the server loaded the stale local.
+//
+// These tests ensure shadow installations are detected both at startup
+// and at runtime via CoherenceMonitor.
+
+describe('META: Shadow installation prevention', () => {
+
+  // ── Rule 1: Server startup detects shadow installations ──
+
+  it('server.ts checks for local node_modules/instar at startup', () => {
+    const serverSrc = fs.readFileSync(
+      path.join(SRC_DIR, 'commands/server.ts'),
+      'utf-8',
+    );
+    expect(serverSrc).toContain('SHADOW INSTALLATION DETECTED');
+    expect(serverSrc).toContain('node_modules');
+  });
+
+  // ── Rule 2: CoherenceMonitor checks for shadow installations ──
+
+  it('CoherenceMonitor has shadow installation check', () => {
+    const coherenceSrc = fs.readFileSync(
+      path.join(SRC_DIR, 'monitoring/CoherenceMonitor.ts'),
+      'utf-8',
+    );
+    expect(coherenceSrc).toContain('checkShadowInstallation');
+    expect(coherenceSrc).toContain('shadow-installation');
+  });
+
+  it('CoherenceMonitor runs shadow check during runCheck()', () => {
+    const coherenceSrc = fs.readFileSync(
+      path.join(SRC_DIR, 'monitoring/CoherenceMonitor.ts'),
+      'utf-8',
+    );
+
+    // Find the runCheck method and verify shadow check is called
+    const runCheckBlock = coherenceSrc.match(/runCheck\(\)[\s\S]*?return report;/);
+    expect(runCheckBlock).toBeTruthy();
+    expect(runCheckBlock![0]).toContain('checkShadowInstallation');
+  });
+});
