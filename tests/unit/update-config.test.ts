@@ -65,14 +65,14 @@ describe('Update config route', () => {
       project.cleanup();
     });
 
-    it('returns autoApply: false by default when updates config is not set', async () => {
+    it('returns autoApply: true by default when updates config is not set', async () => {
       const app = createServer(project);
       const res = await request(app)
         .get('/updates/config')
         .set('Authorization', `Bearer ${AUTH_TOKEN}`);
 
       expect(res.status).toBe(200);
-      expect(res.body.autoApply).toBe(false);
+      expect(res.body.autoApply).toBe(true);
     });
 
     it('returns autoApply: false when explicitly set to false', async () => {
