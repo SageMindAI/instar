@@ -1066,7 +1066,7 @@ All `/memory/*` endpoints require a Bearer token (`INTERNAL_API_KEY`). This is a
 
 5. **Dynamic token budgets**: The fixed allocations (identity: 200, knowledge: 800, episodes: 400, relationships: 300, topic: 300) may need to be dynamic. What happens when one source dominates (e.g., 20 highly relevant knowledge entities competing for 800 tokens)?
 
-6. **Other SQLite systems**: Instar uses SQLite in multiple places (TopicMemory, MemoryIndex, etc.). Should the sqlite-vec + embedding infrastructure be shared across all SQLite-backed systems? Audit needed for vector search upgrade potential across the codebase.
+6. ~~**Other SQLite systems**~~ → **Audited.** See "SQLite Vector Search Audit" appendix below.
 
 ---
 
@@ -1105,4 +1105,65 @@ This revision (v3.0) incorporates findings from independent reviews by GPT 5.2, 
 
 **New addition (v3.0):**
 - Phase 5: Hybrid Search (FTS5 + sqlite-vec vector search) — addresses the "semantic gap" consensus finding
+
+---
+
+## Appendix: SQLite Vector Search Audit
+
+> Audit conducted 2026-02-28. All three SQLite databases in Instar assessed for vector search upgrade potential.
+
+### Current SQLite Systems
+
+Instar has **three production SQLite databases**, all using `better-sqlite3` v12.6.2 with WAL mode and FTS5 (`porter unicode61` tokenizer):
+
+| System | DB File | What it Stores | Current Search | Vector ROI |
+|--------|---------|---------------|----------------|------------|
+| **SemanticMemory** | `semantic.db` | Typed entities + edges (knowledge graph) | FTS5 + confidence + recency + graph traversal | **HIGHEST** |
+| **MemoryIndex** | `memory.db` | Chunks from agent memory files (MEMORY.md, relationships, knowledge base) | FTS5 + temporal decay | **HIGH** |
+| **TopicMemory** | `topic-memory.db` | Telegram conversation messages + LLM summaries | FTS5 + topic scope + highlights | **MEDIUM** |
+
+### Analysis
+
+**SemanticMemory** (HIGHEST priority — already planned as Phase 5):
+- Stores the richest structured knowledge with the most diverse query patterns
+- Multi-signal scoring formula already has a `vector_score` slot for embedding similarity
+- "How do I ship code?" → cannot find "Deployment Protocols" via FTS5 alone
+- Graph traversal partially compensates but initial search is purely lexical
+
+**MemoryIndex** (HIGH priority — should be Phase 5b):
+- Indexes all agent memory files and knowledge base content
+- Classic "vocabulary mismatch" problem: file about "Vercel hosting" won't match query about "deployment infrastructure"
+- Already has a `vectorSearchAvailable: boolean` field in `MemoryIndexStats` (currently hardcoded `false`) — the hook point is pre-built
+- Shares the same `better-sqlite3` dependency, so sqlite-vec loading is trivial to add
+
+**TopicMemory** (MEDIUM priority — defer):
+- LLM-generated rolling summaries already perform semantic compression
+- Most conversation search is temporal ("what did we talk about recently?") not conceptual
+- Cross-topic semantic search ("find all conversations about architecture decisions") would benefit from embeddings, but the summary layer handles the 80% case
+- Recommend deferring until Phase 5 proves the pattern, then retrofitting
+
+### Recommendation
+
+Phase 5 should implement a **shared `EmbeddingProvider`** (`src/memory/EmbeddingProvider.ts`) that any SQLite system can use:
+
+```typescript
+class EmbeddingProvider {
+  /** Generate embedding for text using local ONNX model */
+  embed(text: string): Promise<Float32Array>;
+
+  /** Batch embed multiple texts (more efficient) */
+  embedBatch(texts: string[]): Promise<Float32Array[]>;
+
+  /** Load sqlite-vec extension into a better-sqlite3 connection */
+  loadVecExtension(db: Database): void;
+}
+```
+
+This provider is initialized once at server startup and shared across SemanticMemory, MemoryIndex, and (eventually) TopicMemory. The embedding model (~80MB) is downloaded once and cached locally. Each system adds its own `vec0` virtual table but shares the same embedding pipeline.
+
+**Implementation order:**
+1. `EmbeddingProvider` (shared infrastructure)
+2. SemanticMemory hybrid search (highest ROI, most complex scoring)
+3. MemoryIndex hybrid search (hook point exists, straightforward addition)
+4. TopicMemory (deferred — evaluate after 1-2 months of usage data)
 
