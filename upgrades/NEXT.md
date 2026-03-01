@@ -8,19 +8,16 @@
 
 ## What Changed
 
-<!-- Describe what changed technically. What new features, APIs, behavioral changes? -->
-<!-- Write this for the AGENT — they need to understand the system deeply. -->
+Setup wizard UX fix: strengthened the AskUserQuestion anti-pattern enforcement for password collection in the secret-setup micro-session. The skill instructions now explicitly prevent Claude Code from using multi-choice prompts when collecting free-text input (passwords, emails, tokens). Previously, entering a Bitwarden password would trigger a confusing multi-choice menu with escape-hatch options. Now the password prompt is a plain conversational question.
+
+Also fixed a flaky integration test (intent journal timestamp ordering race condition).
 
 ## What to Tell Your User
 
-<!-- Write talking points the agent should relay to their user. -->
-<!-- This should be warm, conversational, user-facing — not a changelog. -->
-<!-- Focus on what THEY can now do, not internal plumbing. -->
-
-- **[Feature name]**: "[Brief, friendly description of what this means for the user]"
+- **Smoother setup experience**: "The setup wizard password prompt is now cleaner — just type your password and go, no confusing menu options."
 
 ## Summary of New Capabilities
 
 | Capability | How to Use |
 |-----------|-----------|
-| [Capability] | [Endpoint, command, or "automatic"] |
+| Improved password prompt UX | Automatic — setup wizard handles it |
