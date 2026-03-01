@@ -343,10 +343,12 @@ describe('Intent Journal Routes (integration)', () => {
 
   describe('POST then GET round-trip', () => {
     it('entries logged via POST appear in GET', async () => {
-      // Log two entries via POST
+      // Log two entries via POST (small delay ensures distinct timestamps for sort order)
       await request(app)
         .post('/intent/journal')
         .send({ sessionId: 's1', decision: 'First decision', principle: 'accuracy' });
+
+      await new Promise(r => setTimeout(r, 10));
 
       await request(app)
         .post('/intent/journal')
