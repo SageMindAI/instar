@@ -231,8 +231,9 @@ describe('intent reflect', () => {
   it('respects the --limit option', async () => {
     fs.writeFileSync(path.join(stateDir, 'AGENT.md'), '## Intent\n### Mission\nTest.\n');
 
+    const now = Date.now();
     const entries = Array.from({ length: 5 }, (_, i) => ({
-      timestamp: new Date(2026, 1, 20 + i).toISOString(),
+      timestamp: new Date(now - (i + 1) * 60 * 60 * 1000).toISOString(), // 1-5 hours ago
       sessionId: `s${i}`,
       decision: `Decision number ${i}`,
     }));
