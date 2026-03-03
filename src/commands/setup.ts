@@ -357,6 +357,9 @@ async function ensureSecretBackend(claudePath: string, instarRoot: string): Prom
  * Build a pre-formatted agent summary from discovery data.
  * This is deterministic — the wizard displays it verbatim instead of
  * trying to enumerate agents from JSON (which LLMs do unreliably).
+ *
+ * Includes inline numbered options so the user can type their choice.
+ * AskUserQuestion is NOT used — its overlay hides the summary text.
  */
 function buildAgentSummary(discovery: SetupDiscoveryContext): string {
   const lines: string[] = [];
@@ -364,8 +367,13 @@ function buildAgentSummary(discovery: SetupDiscoveryContext): string {
   const localAgents = discovery.merged_agents.filter(a => a.source === 'local' || a.source === 'both');
   const githubOnly = discovery.merged_agents.filter(a => a.source === 'github');
 
+  // Restorable = github-only agents + 'both' agents not in current directory
+  const restorable = discovery.merged_agents.filter(a =>
+    a.source === 'github' || (a.source === 'both' && !discovery.current_dir_agent?.exists)
+  );
+
   if (localAgents.length === 0 && githubOnly.length === 0) {
-    lines.push('No existing agents found.');
+    lines.push('No existing agents found. Let\'s set up a new one.');
     return lines.join('\n');
   }
 
@@ -393,6 +401,20 @@ function buildAgentSummary(discovery: SetupDiscoveryContext): string {
     }
     lines.push('');
   }
+
+  // Build inline numbered options
+  lines.push('What would you like to do?');
+  lines.push('');
+
+  let optNum = 1;
+  for (const agent of restorable) {
+    const repoStr = agent.repo ? ` from ${agent.repo}` : '';
+    lines.push(`${optNum}. Restore ${agent.name} — clone${repoStr} and set it up here`);
+    optNum++;
+  }
+  lines.push(`${optNum}. Start fresh — create a brand new agent`);
+  lines.push('');
+  lines.push('Type a number or describe what you\'d like to do.');
 
   return lines.join('\n');
 }

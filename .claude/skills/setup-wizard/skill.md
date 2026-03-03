@@ -117,17 +117,13 @@ Present:
 
 ### Entry Point B: No Agent in CWD (existingAgentInCWD=false)
 
-**CRITICAL: Display the AGENT SUMMARY block verbatim.** The prompt includes a `--- BEGIN AGENT SUMMARY ---` block with a pre-formatted listing of all discovered agents. Display this text exactly as-is. Do NOT generate your own agent listing from the JSON — LLMs unreliably enumerate lists from structured data.
+**CRITICAL: Display the AGENT SUMMARY block verbatim as plain text.** The prompt includes a `--- BEGIN AGENT SUMMARY ---` block with a pre-formatted listing of all discovered agents AND numbered options. Display this text exactly as-is. Do NOT generate your own agent listing from the JSON — LLMs unreliably enumerate lists from structured data.
 
-Then offer `AskUserQuestion` options. Build the options list from `merged_agents` in the JSON:
-- One "Restore [name]" option for each GitHub-only agent (source='github')
-- One "Restore [name]" option for each agent with source='both' that isn't in the current directory
-- "Start fresh" as the last option
-
-**Every agent with a "Restore" option MUST also appear in the AGENT SUMMARY.** The summary is pre-built to ensure this — just display it verbatim.
+**DO NOT use AskUserQuestion here.** The multichoice overlay hides the summary text in the terminal, causing truncation. Instead, the summary already includes numbered options. Just display the summary and wait for the user to type their choice (a number or free-text response). Parse their response to determine the route.
 
 If user picks a restore option → Go to [Restore Flow](#restore-flow)
 If "Start fresh" → continue to fresh install.
+If they type something else → interpret conversationally and route.
 
 #### If gh_status="auth-needed"
 
