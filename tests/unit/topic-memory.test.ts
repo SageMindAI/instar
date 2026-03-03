@@ -193,6 +193,278 @@ describe('TopicMemory', () => {
     });
   });
 
+  // ── Sender Identity (Phase 1C — User-Agent Topology Spec) ──
+
+  describe('sender identity storage', () => {
+    it('stores and retrieves sender identity fields', () => {
+      topicMemory.insertMessage({
+        messageId: 1,
+        topicId: 100,
+        text: 'Hello from Justin',
+        fromUser: true,
+        timestamp: '2026-03-01T12:00:00Z',
+        sessionName: null,
+        senderName: 'Justin',
+        senderUsername: 'justinheadley',
+        telegramUserId: 12345,
+      });
+
+      const messages = topicMemory.getRecentMessages(100);
+      expect(messages).toHaveLength(1);
+      expect(messages[0].senderName).toBe('Justin');
+      expect(messages[0].senderUsername).toBe('justinheadley');
+      expect(messages[0].telegramUserId).toBe(12345);
+    });
+
+    it('stores messages without sender identity (backward compat)', () => {
+      topicMemory.insertMessage({
+        messageId: 1,
+        topicId: 100,
+        text: 'Hello',
+        fromUser: true,
+        timestamp: '2026-03-01T12:00:00Z',
+        sessionName: null,
+        // No sender fields — pre-Phase 1C messages
+      });
+
+      const messages = topicMemory.getRecentMessages(100);
+      expect(messages).toHaveLength(1);
+      expect(messages[0].senderName).toBeUndefined();
+      expect(messages[0].senderUsername).toBeUndefined();
+      expect(messages[0].telegramUserId).toBeUndefined();
+    });
+
+    it('stores partial sender identity (username optional)', () => {
+      topicMemory.insertMessage({
+        messageId: 1,
+        topicId: 100,
+        text: 'Hello',
+        fromUser: true,
+        timestamp: '2026-03-01T12:00:00Z',
+        sessionName: null,
+        senderName: 'Alice',
+        telegramUserId: 67890,
+        // No senderUsername — not all Telegram users have one
+      });
+
+      const messages = topicMemory.getRecentMessages(100);
+      expect(messages[0].senderName).toBe('Alice');
+      expect(messages[0].senderUsername).toBeUndefined();
+      expect(messages[0].telegramUserId).toBe(67890);
+    });
+
+    it('batch-inserts messages with sender identity', () => {
+      const messages: TopicMessage[] = [
+        {
+          messageId: 1, topicId: 100, text: 'From Alice', fromUser: true,
+          timestamp: '2026-03-01T12:00:00Z', sessionName: null,
+          senderName: 'Alice', telegramUserId: 111,
+        },
+        {
+          messageId: 2, topicId: 100, text: 'From Bob', fromUser: true,
+          timestamp: '2026-03-01T12:01:00Z', sessionName: null,
+          senderName: 'Bob', senderUsername: 'bob_dev', telegramUserId: 222,
+        },
+      ];
+
+      const count = topicMemory.insertMessages(messages);
+      expect(count).toBe(2);
+
+      const recent = topicMemory.getRecentMessages(100);
+      expect(recent[0].senderName).toBe('Alice');
+      expect(recent[0].telegramUserId).toBe(111);
+      expect(recent[1].senderName).toBe('Bob');
+      expect(recent[1].senderUsername).toBe('bob_dev');
+      expect(recent[1].telegramUserId).toBe(222);
+    });
+
+    it('getMessagesSinceSummary includes sender identity', () => {
+      topicMemory.insertMessage({
+        messageId: 1, topicId: 100, text: 'Before summary', fromUser: true,
+        timestamp: '2026-03-01T12:00:00Z', sessionName: null,
+        senderName: 'Justin', telegramUserId: 12345,
+      });
+      topicMemory.saveTopicSummary(100, 'Summary', 1, 1);
+      topicMemory.insertMessage({
+        messageId: 2, topicId: 100, text: 'After summary', fromUser: true,
+        timestamp: '2026-03-01T12:01:00Z', sessionName: null,
+        senderName: 'Alice', telegramUserId: 67890,
+      });
+
+      const since = topicMemory.getMessagesSinceSummary(100);
+      expect(since).toHaveLength(1);
+      expect(since[0].senderName).toBe('Alice');
+      expect(since[0].telegramUserId).toBe(67890);
+    });
+
+    it('multi-user messages in same topic preserve distinct identities', () => {
+      topicMemory.insertMessage({
+        messageId: 1, topicId: 100, text: 'Hello from Alice', fromUser: true,
+        timestamp: '2026-03-01T12:00:00Z', sessionName: null,
+        senderName: 'Alice', telegramUserId: 111,
+      });
+      topicMemory.insertMessage({
+        messageId: 2, topicId: 100, text: 'Hello from Bob', fromUser: true,
+        timestamp: '2026-03-01T12:01:00Z', sessionName: null,
+        senderName: 'Bob', telegramUserId: 222,
+      });
+      topicMemory.insertMessage({
+        messageId: 3, topicId: 100, text: 'Agent reply', fromUser: false,
+        timestamp: '2026-03-01T12:02:00Z', sessionName: 'session-1',
+      });
+      topicMemory.insertMessage({
+        messageId: 4, topicId: 100, text: 'Alice again', fromUser: true,
+        timestamp: '2026-03-01T12:03:00Z', sessionName: null,
+        senderName: 'Alice', telegramUserId: 111,
+      });
+
+      const messages = topicMemory.getRecentMessages(100);
+      expect(messages).toHaveLength(4);
+      expect(messages[0].senderName).toBe('Alice');
+      expect(messages[0].telegramUserId).toBe(111);
+      expect(messages[1].senderName).toBe('Bob');
+      expect(messages[1].telegramUserId).toBe(222);
+      expect(messages[2].senderName).toBeUndefined(); // Agent message
+      expect(messages[3].senderName).toBe('Alice');
+      expect(messages[3].telegramUserId).toBe(111);
+    });
+  });
+
+  describe('formatContextForSession with sender names', () => {
+    it('uses sender name instead of generic "User"', () => {
+      topicMemory.insertMessage({
+        messageId: 1, topicId: 100, text: 'Hello agent',
+        fromUser: true, timestamp: '2026-03-01T12:00:00Z', sessionName: null,
+        senderName: 'Justin',
+      });
+
+      const context = topicMemory.formatContextForSession(100);
+      expect(context).toContain('Justin: Hello agent');
+      expect(context).not.toContain('User: Hello agent');
+    });
+
+    it('falls back to "User" when sender name is missing', () => {
+      topicMemory.insertMessage({
+        messageId: 1, topicId: 100, text: 'Hello agent',
+        fromUser: true, timestamp: '2026-03-01T12:00:00Z', sessionName: null,
+        // No senderName
+      });
+
+      const context = topicMemory.formatContextForSession(100);
+      expect(context).toContain('User: Hello agent');
+    });
+
+    it('shows "Agent" for non-user messages regardless of sender name', () => {
+      topicMemory.insertMessage({
+        messageId: 1, topicId: 100, text: 'I am the agent',
+        fromUser: false, timestamp: '2026-03-01T12:00:00Z', sessionName: 'session-1',
+      });
+
+      const context = topicMemory.formatContextForSession(100);
+      expect(context).toContain('Agent: I am the agent');
+    });
+
+    it('shows multiple distinct senders in context', () => {
+      topicMemory.insertMessage({
+        messageId: 1, topicId: 100, text: 'Question from Alice',
+        fromUser: true, timestamp: '2026-03-01T12:00:00Z', sessionName: null,
+        senderName: 'Alice',
+      });
+      topicMemory.insertMessage({
+        messageId: 2, topicId: 100, text: 'Agent response',
+        fromUser: false, timestamp: '2026-03-01T12:01:00Z', sessionName: 'session-1',
+      });
+      topicMemory.insertMessage({
+        messageId: 3, topicId: 100, text: 'Question from Bob',
+        fromUser: true, timestamp: '2026-03-01T12:02:00Z', sessionName: null,
+        senderName: 'Bob',
+      });
+
+      const context = topicMemory.formatContextForSession(100);
+      expect(context).toContain('Alice: Question from Alice');
+      expect(context).toContain('Agent: Agent response');
+      expect(context).toContain('Bob: Question from Bob');
+    });
+  });
+
+  describe('JSONL import with sender identity', () => {
+    it('imports sender identity from JSONL entries', () => {
+      const jsonlPath = path.join(tmpDir, 'messages-with-sender.jsonl');
+      const lines = [
+        JSON.stringify({
+          messageId: 1, topicId: 100, text: 'Hello', fromUser: true,
+          timestamp: '2026-03-01T12:00:00Z', sessionName: null,
+          senderName: 'Justin', senderUsername: 'justinheadley', telegramUserId: 12345,
+        }),
+        JSON.stringify({
+          messageId: 2, topicId: 100, text: 'Reply', fromUser: false,
+          timestamp: '2026-03-01T12:01:00Z', sessionName: 'session-1',
+        }),
+      ];
+      fs.writeFileSync(jsonlPath, lines.join('\n'));
+
+      const count = topicMemory.importFromJsonl(jsonlPath);
+      expect(count).toBe(2);
+
+      const messages = topicMemory.getRecentMessages(100);
+      expect(messages[0].senderName).toBe('Justin');
+      expect(messages[0].senderUsername).toBe('justinheadley');
+      expect(messages[0].telegramUserId).toBe(12345);
+      expect(messages[1].senderName).toBeUndefined(); // Agent message
+    });
+
+    it('imports JSONL entries without sender identity (pre-migration)', () => {
+      const jsonlPath = path.join(tmpDir, 'messages-old.jsonl');
+      const lines = [
+        JSON.stringify({
+          messageId: 1, topicId: 100, text: 'Old message', fromUser: true,
+          timestamp: '2026-02-24T12:00:00Z', sessionName: null,
+          // No sender fields — old JSONL format
+        }),
+      ];
+      fs.writeFileSync(jsonlPath, lines.join('\n'));
+
+      const count = topicMemory.importFromJsonl(jsonlPath);
+      expect(count).toBe(1);
+
+      const messages = topicMemory.getRecentMessages(100);
+      expect(messages[0].senderName).toBeUndefined();
+      expect(messages[0].telegramUserId).toBeUndefined();
+    });
+  });
+
+  describe('schema migration (v1 → v2)', () => {
+    it('opens a fresh database with sender columns in schema', () => {
+      // The database created in beforeEach() already has the v2 schema.
+      // Verify the columns exist by inserting a message with sender fields.
+      topicMemory.insertMessage({
+        messageId: 1, topicId: 100, text: 'Test',
+        fromUser: true, timestamp: '2026-03-01T12:00:00Z', sessionName: null,
+        senderName: 'Test', telegramUserId: 999,
+      });
+
+      const messages = topicMemory.getRecentMessages(100);
+      expect(messages[0].senderName).toBe('Test');
+      expect(messages[0].telegramUserId).toBe(999);
+    });
+
+    it('migration is idempotent (re-open with same schema version)', async () => {
+      topicMemory.close();
+      // Re-open the same database — should not error
+      topicMemory = new TopicMemory(tmpDir);
+      await topicMemory.open();
+
+      topicMemory.insertMessage({
+        messageId: 1, topicId: 100, text: 'After re-open',
+        fromUser: true, timestamp: '2026-03-01T12:00:00Z', sessionName: null,
+        senderName: 'Justin', telegramUserId: 12345,
+      });
+
+      const messages = topicMemory.getRecentMessages(100);
+      expect(messages[0].senderName).toBe('Justin');
+    });
+  });
+
   // ── Search ──────────────────────────────────────────────────
 
   describe('search', () => {

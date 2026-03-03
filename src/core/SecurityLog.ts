@@ -12,6 +12,7 @@
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
+import { maybeRotateJsonl } from '../utils/jsonl-rotation.js';
 
 // ── Types ────────────────────────────────────────────────────────────
 
@@ -83,6 +84,12 @@ export class SecurityLog {
    */
   append(eventData: Omit<SecurityEvent, 'timestamp' | 'prevHash'>): SecurityEvent {
     this.initialize();
+
+    // Rotate before building the entry — rotation changes the last hash
+    if (maybeRotateJsonl(this.logPath)) {
+      this.initialized = false;
+      this.initialize();
+    }
 
     const entry = {
       timestamp: new Date().toISOString(),

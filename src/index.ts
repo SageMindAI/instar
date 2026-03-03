@@ -62,6 +62,7 @@ export {
 } from './core/PairingProtocol.js';
 export type { PairingSession, EphemeralKeyPair } from './core/PairingProtocol.js';
 export { NonceStore } from './core/NonceStore.js';
+export type { NonceStoreConfig } from './core/NonceStore.js';
 export { HeartbeatManager } from './core/HeartbeatManager.js';
 export type { Heartbeat, FailoverConfig, FailoverState, HeartbeatCheckResult } from './core/HeartbeatManager.js';
 export { MultiMachineCoordinator } from './core/MultiMachineCoordinator.js';
@@ -165,7 +166,7 @@ export type {
 export { AgentBus } from './core/AgentBus.js';
 export type {
   MessageType, DeliveryStatus, AgentMessage, TransportAdapter,
-  AgentBusConfig, AgentBusEvents,
+  AgentBusConfig, AgentBusEvents, ReplayProtectionConfig,
 } from './core/AgentBus.js';
 export { CoordinationProtocol } from './core/CoordinationProtocol.js';
 export type {
@@ -215,10 +216,20 @@ export {
   getDefaultAutonomyConfig,
 } from './users/UserOnboarding.js';
 
+export { UserPropagator } from './users/UserPropagator.js';
+export type {
+  UserPropagationPayload, UserPropagatorConfig, UserPropagatorEvents,
+} from './users/UserPropagator.js';
+
 // Scheduler
 export { JobScheduler } from './scheduler/JobScheduler.js';
 export { SkipLedger } from './scheduler/SkipLedger.js';
 export { loadJobs, validateJob } from './scheduler/JobLoader.js';
+export { JobClaimManager } from './scheduler/JobClaimManager.js';
+export type {
+  JobClaimPayload, JobCompletePayload, JobClaim,
+  JobClaimManagerConfig, JobClaimManagerEvents,
+} from './scheduler/JobClaimManager.js';
 
 // Server
 export { AgentServer } from './server/AgentServer.js';
@@ -266,6 +277,8 @@ export { SleepWakeDetector } from './core/SleepWakeDetector.js';
 // Messaging — Telegram & Notifications
 export { TelegramAdapter, TOPIC_STYLE, selectTopicEmoji } from './messaging/TelegramAdapter.js';
 export type { TelegramConfig } from './messaging/TelegramAdapter.js';
+export { classifyContent, validateTopicContent, getTopicPurpose } from './messaging/TopicContentValidator.js';
+export type { ContentValidationConfig, CategoryKeywords, ClassificationResult, ValidationResult } from './messaging/TopicContentValidator.js';
 export { NotificationBatcher } from './messaging/NotificationBatcher.js';
 export type { NotificationTier, BatchedNotification, BatcherConfig, BatcherStats } from './messaging/NotificationBatcher.js';
 
@@ -356,7 +369,11 @@ export type {
   InjectionPayload,
   PipelineLogEntry,
 } from './types/pipeline.js';
-export { toInbound, toPipeline, toInjection, toLogEntry, formatHistoryLine } from './types/pipeline.js';
+export { toInbound, toPipeline, toInjection, toLogEntry, formatHistoryLine, buildInjectionTag } from './types/pipeline.js';
+
+// Utils
+export { maybeRotateJsonl } from './utils/jsonl-rotation.js';
+export type { RotationOptions } from './utils/jsonl-rotation.js';
 
 // Types
 export type {
@@ -421,6 +438,7 @@ export type {
   MachineRole,
   MachineCapability,
   MultiMachineConfig,
+  CoordinationMode,
   AgentAutonomyLevel,
   UserRegistrationPolicy,
   AgentAutonomyCapabilities,

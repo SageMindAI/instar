@@ -14,9 +14,24 @@ import { DegradationReporter } from '../monitoring/DegradationReporter.js';
 export class StateManager {
   private stateDir: string;
   private _readOnly: boolean = false;
+  private _machineId: string | null = null;
 
   constructor(stateDir: string) {
     this.stateDir = stateDir;
+  }
+
+  /**
+   * Set the machine ID for this StateManager instance.
+   * When set, all activity events are automatically stamped with the originating machineId
+   * (Phase 4D — Gap 6: machine-prefixed state).
+   */
+  setMachineId(machineId: string): void {
+    this._machineId = machineId;
+  }
+
+  /** Get the configured machine ID (null if not set). */
+  get machineId(): string | null {
+    return this._machineId;
   }
 
   /** Whether this StateManager is in read-only mode (standby machine). */
@@ -134,11 +149,16 @@ export class StateManager {
   appendEvent(event: ActivityEvent): void {
     this.guardWrite('appendEvent');
     try {
+      // Auto-stamp machineId if configured (Phase 4D — Gap 6)
+      const stamped = this._machineId && !event.machineId
+        ? { ...event, machineId: this._machineId }
+        : event;
+
       const date = new Date().toISOString().slice(0, 10);
       const dir = path.join(this.stateDir, 'logs');
       fs.mkdirSync(dir, { recursive: true });
       const filePath = path.join(dir, `activity-${date}.jsonl`);
-      fs.appendFileSync(filePath, JSON.stringify(event) + '\n');
+      fs.appendFileSync(filePath, JSON.stringify(stamped) + '\n');
     } catch (err) {
       // @silent-fallback-ok — activity log write non-critical
       console.error(`[StateManager] Failed to append event: ${err instanceof Error ? err.message : String(err)}`);

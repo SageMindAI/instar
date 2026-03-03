@@ -35,8 +35,10 @@ import type {
   EntityType,
   RelationType,
 } from '../core/types.js';
+import type { PrivacyScopeType } from '../core/types.js';
 import type { EmbeddingProvider } from './EmbeddingProvider.js';
 import { VectorSearch } from './VectorSearch.js';
+import { buildPrivacySqlFilter } from '../utils/privacy.js';
 
 // Dynamic import for better-sqlite3 (optional dependency)
 type Database = import('better-sqlite3').Database;
@@ -141,6 +143,7 @@ export class SemanticMemory {
     this.db!.pragma('foreign_keys = ON');
 
     this.createSchema();
+    this.migrateIfNeeded();
 
     // Initialize vector search if embedding provider is attached
     this.initVectorSearch();
@@ -177,7 +180,9 @@ export class SemanticMemory {
         source TEXT NOT NULL,
         source_session TEXT,
         tags TEXT NOT NULL DEFAULT '[]',
-        domain TEXT
+        domain TEXT,
+        owner_id TEXT,
+        privacy_scope TEXT DEFAULT 'shared-project'
       );
 
       CREATE TABLE IF NOT EXISTS edges (
@@ -227,6 +232,31 @@ export class SemanticMemory {
     `);
   }
 
+  /**
+   * Migrate existing databases to add privacy columns.
+   * Safe to call repeatedly — checks for column existence first.
+   */
+  private migrateIfNeeded(): void {
+    const db = this.ensureOpen();
+
+    // Check if owner_id column exists
+    const columns = db.prepare("PRAGMA table_info(entities)").all() as { name: string }[];
+    const columnNames = columns.map(c => c.name);
+
+    if (!columnNames.includes('owner_id')) {
+      db.exec(`
+        ALTER TABLE entities ADD COLUMN owner_id TEXT;
+        ALTER TABLE entities ADD COLUMN privacy_scope TEXT DEFAULT 'shared-project';
+      `);
+    }
+
+    // Always ensure indexes exist (safe for both fresh and migrated DBs)
+    db.exec(`
+      CREATE INDEX IF NOT EXISTS idx_entities_owner ON entities(owner_id);
+      CREATE INDEX IF NOT EXISTS idx_entities_privacy ON entities(privacy_scope);
+    `);
+  }
+
   // ─── Entity CRUD ────────────────────────────────────────────────
 
   /**
@@ -243,14 +273,16 @@ export class SemanticMemory {
     tags: string[];
     domain?: string;
     expiresAt?: string;
+    ownerId?: string;
+    privacyScope?: PrivacyScopeType;
   }): string {
     const db = this.ensureOpen();
     const id = crypto.randomUUID();
     const now = new Date().toISOString();
 
     db.prepare(`
-      INSERT INTO entities (id, type, name, content, confidence, created_at, last_verified, last_accessed, expires_at, source, source_session, tags, domain)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO entities (id, type, name, content, confidence, created_at, last_verified, last_accessed, expires_at, source, source_session, tags, domain, owner_id, privacy_scope)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       id,
       input.type,
@@ -265,6 +297,8 @@ export class SemanticMemory {
       input.sourceSession ?? null,
       JSON.stringify(input.tags),
       input.domain ?? null,
+      input.ownerId ?? null,
+      input.privacyScope ?? 'shared-project',
     );
 
     // Generate embedding asynchronously (fire-and-forget for write performance)
@@ -297,6 +331,8 @@ export class SemanticMemory {
     tags: string[];
     domain?: string;
     expiresAt?: string;
+    ownerId?: string;
+    privacyScope?: PrivacyScopeType;
   }): Promise<string> {
     const id = this.remember(input);
 
@@ -347,6 +383,48 @@ export class SemanticMemory {
     }
     // Delete entity
     db.prepare('DELETE FROM entities WHERE id = ?').run(id);
+  }
+
+  // ─── User-Scoped Queries ────────────────────────────────────────
+
+  /**
+   * Get all entities owned by a specific user.
+   * Used for GDPR data export (/mydata).
+   */
+  getEntitiesByUser(userId: string): MemoryEntity[] {
+    const db = this.ensureOpen();
+    const rows = db.prepare('SELECT * FROM entities WHERE owner_id = ?').all(userId) as EntityRow[];
+    return rows.map(rowToEntity);
+  }
+
+  /**
+   * Delete all entities owned by a specific user and their associated edges.
+   * Used for GDPR data erasure (/forget).
+   * Returns the number of entities deleted.
+   */
+  deleteEntitiesByUser(userId: string): number {
+    const db = this.ensureOpen();
+
+    // Get IDs of entities to delete
+    const ids = db.prepare('SELECT id FROM entities WHERE owner_id = ?').all(userId) as { id: string }[];
+
+    if (ids.length === 0) return 0;
+
+    const deleteEdges = db.prepare('DELETE FROM edges WHERE from_id = ? OR to_id = ?');
+    const deleteEntity = db.prepare('DELETE FROM entities WHERE id = ?');
+
+    const runDeletion = db.transaction(() => {
+      for (const { id } of ids) {
+        deleteEdges.run(id, id);
+        if (this._vectorAvailable && this.vectorSearch) {
+          this.vectorSearch.delete(db, id);
+        }
+        deleteEntity.run(id);
+      }
+    });
+
+    runDeletion();
+    return ids.length;
   }
 
   // ─── Edge CRUD ──────────────────────────────────────────────────
@@ -437,6 +515,16 @@ export class SemanticMemory {
     if (options?.minConfidence !== undefined) {
       sql += ` AND e.confidence >= ?`;
       params.push(options.minConfidence);
+    }
+
+    // Privacy filtering: if userId is provided, filter by visibility
+    if (options?.userId) {
+      const privacyFilter = buildPrivacySqlFilter(options.userId, {
+        ownerColumn: 'e.owner_id',
+        scopeColumn: 'e.privacy_scope',
+      });
+      sql += ` AND ${privacyFilter.clause}`;
+      params.push(...privacyFilter.params);
     }
 
     sql += ` ORDER BY entities_fts.rank LIMIT ?`;
@@ -849,8 +937,8 @@ export class SemanticMemory {
     let edgesSkipped = 0;
 
     const insertEntity = db.prepare(`
-      INSERT INTO entities (id, type, name, content, confidence, created_at, last_verified, last_accessed, expires_at, source, source_session, tags, domain)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO entities (id, type, name, content, confidence, created_at, last_verified, last_accessed, expires_at, source, source_session, tags, domain, owner_id, privacy_scope)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
 
     const insertEdge = db.prepare(`
@@ -882,6 +970,8 @@ export class SemanticMemory {
           entity.sourceSession ?? null,
           JSON.stringify(entity.tags),
           entity.domain ?? null,
+          entity.ownerId ?? null,
+          entity.privacyScope ?? 'shared-project',
         );
         entitiesImported++;
       }
@@ -972,12 +1062,12 @@ export class SemanticMemory {
    */
   getRelevantContext(
     query: string,
-    options?: { maxTokens?: number; limit?: number },
+    options?: { maxTokens?: number; limit?: number; userId?: string },
   ): string {
     const maxTokens = options?.maxTokens ?? 2000;
     const limit = options?.limit ?? 10;
 
-    const results = this.search(query, { limit });
+    const results = this.search(query, { limit, userId: options?.userId });
     if (results.length === 0) return '';
 
     const lines: string[] = [];
@@ -1009,7 +1099,8 @@ export class SemanticMemory {
         e.context as edge_context, e.created_at as edge_created_at,
         ent.id as ent_id, ent.type, ent.name, ent.content, ent.confidence,
         ent.created_at as ent_created_at, ent.last_verified, ent.last_accessed,
-        ent.expires_at, ent.source, ent.source_session, ent.tags, ent.domain
+        ent.expires_at, ent.source, ent.source_session, ent.tags, ent.domain,
+        ent.owner_id, ent.privacy_scope
       FROM edges e
       JOIN entities ent ON ent.id = e.to_id
       WHERE e.from_id = ?
@@ -1030,7 +1121,8 @@ export class SemanticMemory {
         e.context as edge_context, e.created_at as edge_created_at,
         ent.id as ent_id, ent.type, ent.name, ent.content, ent.confidence,
         ent.created_at as ent_created_at, ent.last_verified, ent.last_accessed,
-        ent.expires_at, ent.source, ent.source_session, ent.tags, ent.domain
+        ent.expires_at, ent.source, ent.source_session, ent.tags, ent.domain,
+        ent.owner_id, ent.privacy_scope
       FROM edges e
       JOIN entities ent ON ent.id = e.from_id
       WHERE e.to_id = ?
@@ -1064,6 +1156,8 @@ interface EntityRow {
   source_session: string | null;
   tags: string;
   domain: string | null;
+  owner_id: string | null;
+  privacy_scope: string | null;
   rowid?: number;
 }
 
@@ -1099,6 +1193,8 @@ interface JoinRow {
   source_session: string | null;
   tags: string;
   domain: string | null;
+  owner_id: string | null;
+  privacy_scope: string | null;
 }
 
 // ─── Converters ─────────────────────────────────────────────────
@@ -1118,6 +1214,8 @@ function rowToEntity(row: EntityRow): MemoryEntity {
     sourceSession: row.source_session ?? undefined,
     tags: JSON.parse(row.tags),
     domain: row.domain ?? undefined,
+    ownerId: row.owner_id ?? undefined,
+    privacyScope: (row.privacy_scope as PrivacyScopeType) ?? undefined,
   };
 }
 
@@ -1149,6 +1247,8 @@ function joinRowToEntity(row: JoinRow): MemoryEntity {
     sourceSession: row.source_session ?? undefined,
     tags: JSON.parse(row.tags),
     domain: row.domain ?? undefined,
+    ownerId: row.owner_id ?? undefined,
+    privacyScope: (row.privacy_scope as PrivacyScopeType) ?? undefined,
   };
 }
 

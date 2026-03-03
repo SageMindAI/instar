@@ -14,6 +14,8 @@ import path from 'node:path';
 import type { MessagingAdapter, Message, OutgoingMessage, UserChannel, IntelligenceProvider } from '../core/types.js';
 import { DegradationReporter } from '../monitoring/DegradationReporter.js';
 import { NotificationBatcher, NotificationTier } from './NotificationBatcher.js';
+import type { ContentValidationConfig } from './TopicContentValidator.js';
+import { validateTopicContent, getTopicPurpose, classifyContent } from './TopicContentValidator.js';
 
 export interface TelegramConfig {
   /** Bot token from @BotFather */
@@ -36,6 +38,8 @@ export interface TelegramConfig {
   dashboardTopicId?: number;
   /** Dashboard PIN (for including in broadcast messages). */
   dashboardPin?: string;
+  /** Content validation configuration — validates outbound messages against topic purpose */
+  contentValidation?: ContentValidationConfig;
 }
 
 export interface SendResult {
@@ -226,6 +230,7 @@ export class TelegramAdapter implements MessagingAdapter {
   private topicToSession: Map<number, string> = new Map();
   private sessionToTopic: Map<string, number> = new Map();
   private topicToName: Map<number, string> = new Map();
+  private topicToPurpose: Map<number, string> = new Map();
   private registryPath: string;
   private messageLogPath: string;
   private offsetPath: string;
@@ -256,7 +261,8 @@ export class TelegramAdapter implements MessagingAdapter {
 
   // Message log callback — fires on every message logged (inbound and outbound).
   // Used by TopicMemory to dual-write to SQLite for search and summarization.
-  public onMessageLogged: ((entry: { messageId: number; topicId: number | null; text: string; fromUser: boolean; timestamp: string; sessionName: string | null }) => void) | null = null;
+  // Includes sender identity fields (Phase 1C/1D — User-Agent Topology Spec).
+  public onMessageLogged: ((entry: { messageId: number; topicId: number | null; text: string; fromUser: boolean; timestamp: string; sessionName: string | null; senderName?: string; senderUsername?: string; telegramUserId?: number }) => void) | null = null;
 
   // Sentinel interceptor — fires BEFORE the message handler for real-time interrupt detection.
   // Returns the sentinel classification. If category is 'emergency-stop' or 'pause',
@@ -1034,6 +1040,83 @@ export class TelegramAdapter implements MessagingAdapter {
 
   getTopicName(topicId: number): string | null {
     return this.topicToName.get(topicId) ?? null;
+  }
+
+  // ── Topic Purpose Management ─────────────────────────────────
+
+  /**
+   * Set the purpose for a topic (e.g., "billing", "technical").
+   * Purpose is used for outbound content validation.
+   */
+  setTopicPurpose(topicId: number, purpose: string): void {
+    this.topicToPurpose.set(topicId, purpose.toLowerCase());
+    this.saveRegistry();
+  }
+
+  /**
+   * Get the purpose for a topic. Checks runtime map first, then config.
+   * Returns null if no purpose is set (permissive — all content allowed).
+   */
+  getTopicPurpose(topicId: number): string | null {
+    // Runtime map takes precedence over config
+    const runtimePurpose = this.topicToPurpose.get(topicId);
+    if (runtimePurpose) return runtimePurpose;
+
+    // Fall back to config
+    const validationConfig = this.config.contentValidation;
+    if (validationConfig) {
+      return getTopicPurpose(topicId, validationConfig);
+    }
+    return null;
+  }
+
+  /**
+   * Get all topic purposes (runtime + config merged).
+   */
+  getAllTopicPurposes(): Record<number, string> {
+    const result: Record<number, string> = {};
+    // Config purposes first
+    const validationConfig = this.config.contentValidation;
+    if (validationConfig) {
+      for (const [id, purpose] of Object.entries(validationConfig.topicPurposes)) {
+        result[Number(id)] = purpose.toLowerCase();
+      }
+    }
+    // Runtime overrides
+    for (const [topicId, purpose] of this.topicToPurpose) {
+      result[topicId] = purpose;
+    }
+    return result;
+  }
+
+  /**
+   * Validate outbound content against topic purpose.
+   * Returns the validation result. Callers decide how to handle rejection.
+   */
+  validateOutboundContent(
+    topicId: number,
+    text: string,
+    options?: { bypass?: boolean },
+  ): { allowed: boolean; reason: string | null; detectedCategory: string | null; topicPurpose: string | null; suggestion: string | null } {
+    const validationConfig = this.config.contentValidation;
+    if (!validationConfig?.enabled) {
+      return { allowed: true, reason: null, detectedCategory: null, topicPurpose: null, suggestion: null };
+    }
+
+    const purpose = this.getTopicPurpose(topicId);
+    return validateTopicContent(text, purpose, validationConfig, options);
+  }
+
+  /**
+   * Classify content using the configured categories.
+   * Useful for debugging and API endpoints.
+   */
+  classifyContent(text: string): { category: string | null; confidence: string; matchedKeywords: string[] } {
+    const validationConfig = this.config.contentValidation;
+    if (!validationConfig) {
+      return { category: null, confidence: 'low', matchedKeywords: [] };
+    }
+    return classifyContent(text, validationConfig.categories);
   }
 
   /**
@@ -2115,6 +2198,11 @@ export class TelegramAdapter implements MessagingAdapter {
           this.topicToName.set(Number(k), v as string);
         }
       }
+      if (data.topicToPurpose) {
+        for (const [k, v] of Object.entries(data.topicToPurpose)) {
+          this.topicToPurpose.set(Number(k), v as string);
+        }
+      }
       console.log(`[telegram] Loaded ${this.topicToSession.size} topic-session mappings from disk`);
     } catch {
       // File doesn't exist yet — start fresh
@@ -2126,6 +2214,7 @@ export class TelegramAdapter implements MessagingAdapter {
       const data = {
         topicToSession: Object.fromEntries(this.topicToSession),
         topicToName: Object.fromEntries(this.topicToName),
+        topicToPurpose: Object.fromEntries(this.topicToPurpose),
       };
       // Atomic write: unique temp filename to prevent concurrent corruption
       const tmpPath = this.registryPath + `.${process.pid}.${Math.random().toString(36).slice(2)}.tmp`;

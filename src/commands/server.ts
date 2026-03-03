@@ -81,7 +81,9 @@ import { createMessagingProbes } from '../monitoring/probes/MessagingProbe.js';
 import { createLifelineProbes } from '../monitoring/probes/LifelineProbe.js';
 import type { PipelineMessage } from '../types/pipeline.js';
 import { toPipeline, toInjection, toLogEntry, formatHistoryLine } from '../types/pipeline.js';
-import type { Message, IntelligenceProvider } from '../core/types.js';
+import type { Message, IntelligenceProvider, UserProfile } from '../core/types.js';
+import { UserManager } from '../users/UserManager.js';
+import { formatUserContextForSession, hasUserContext } from '../users/UserContextBuilder.js';
 // setup.ts uses @inquirer/prompts which requires Node 20.12+
 // Dynamic import to avoid breaking the server on older Node versions
 // import { installAutoStart } from './setup.js';
@@ -136,6 +138,7 @@ async function spawnSessionForTopic(
   topicId: number,
   latestMessage?: string,
   topicMemory?: TopicMemory,
+  userProfile?: UserProfile,
 ): Promise<string> {
   const msg = latestMessage || 'Session started — send a message to continue.';
 
@@ -209,6 +212,15 @@ async function spawnSessionForTopic(
     });
   }
 
+  // ── User Context Injection (Gap 8) ──────────────────────────────
+  // If we have a resolved UserProfile with meaningful context, format it
+  // for injection into the bootstrap message. This gives the agent awareness
+  // of who it's talking to: permissions, preferences, relationship history.
+  let userContextBlock = '';
+  if (userProfile && hasUserContext(userProfile)) {
+    userContextBlock = formatUserContextForSession(userProfile);
+  }
+
   // Build the bootstrap message with inline context.
   // CRITICAL: Context must be BEFORE the user's message and inline (not a file reference).
   // Previous approach used a parenthetical file reference after the user's message:
@@ -238,18 +250,40 @@ async function spawnSessionForTopic(
       ? contextContent.slice(0, MAX_INLINE_CHARS) + `\n... (full history: ${filepath})`
       : contextContent;
 
-    bootstrapMessage = [
+    const parts = [
       `CONTINUATION — You are resuming an EXISTING conversation. Read the context below before responding.`,
       ``,
+    ];
+
+    // User context comes FIRST — before conversation history.
+    // The agent needs to know WHO it's talking to before reading WHAT was said.
+    if (userContextBlock) {
+      parts.push(userContextBlock);
+      parts.push(``);
+    }
+
+    parts.push(
       inlineContext,
       ``,
       `IMPORTANT: Your response MUST acknowledge and continue the conversation above. Do NOT introduce yourself or ask "how can I help" — the user has been talking to you. Pick up where the conversation left off.`,
       ``,
       `The user's latest message:`,
       `[telegram:${topicId}] ${msg}`,
-    ].join('\n');
+    );
+
+    bootstrapMessage = parts.join('\n');
   } else {
-    bootstrapMessage = `[telegram:${topicId}] ${msg}`;
+    // No conversation history — new session.
+    // Still inject user context if available.
+    if (userContextBlock) {
+      bootstrapMessage = [
+        userContextBlock,
+        ``,
+        `[telegram:${topicId}] ${msg}`,
+      ].join('\n');
+    } else {
+      bootstrapMessage = `[telegram:${topicId}] ${msg}`;
+    }
   }
 
   const newSessionName = await sessionManager.spawnInteractiveSession(bootstrapMessage, sessionName, { telegramTopicId: topicId });
@@ -267,6 +301,7 @@ async function respawnSessionForTopic(
   topicId: number,
   latestMessage?: string,
   topicMemory?: TopicMemory,
+  userProfile?: UserProfile,
 ): Promise<void> {
   console.log(`[telegram→session] Session "${targetSession}" needs respawn for topic ${topicId}`);
 
@@ -275,7 +310,7 @@ async function respawnSessionForTopic(
   // which causes cascading names like ai-guy-ai-guy-ai-guy-topic-1 on each respawn.
   const topicName = storedName || `topic-${topicId}`;
 
-  const newSessionName = await spawnSessionForTopic(sessionManager, telegram, topicName, topicId, latestMessage, topicMemory);
+  const newSessionName = await spawnSessionForTopic(sessionManager, telegram, topicName, topicId, latestMessage, topicMemory, userProfile);
 
   telegram.registerTopicSession(topicId, newSessionName, topicName);
   await telegram.sendToTopic(topicId, `Session respawned.`);
@@ -555,12 +590,19 @@ function wireTelegramRouting(
   sessionManager: SessionManager,
   quotaTracker?: QuotaTracker,
   topicMemory?: TopicMemory,
+  userManager?: UserManager,
 ): void {
   telegram.onTopicMessage = (msg: Message) => {
     const topicId = (msg.metadata?.messageThreadId as number) ?? null;
     if (!topicId) return;
 
     const text = msg.content;
+
+    // Resolve user profile for context injection (Gap 8)
+    const telegramUserId = (msg.metadata?.telegramUserId as number) ?? 0;
+    const resolvedUser = telegramUserId && userManager
+      ? userManager.resolveFromTelegramUserId(telegramUserId)
+      : null;
 
     // Most commands are handled inside TelegramAdapter.handleCommand().
     // /new is handled here because it needs sessionManager access.
@@ -606,7 +648,7 @@ function wireTelegramRouting(
         const injection = toInjection(pipeline, targetSession);
         console.log(`[telegram→session] Injecting into ${targetSession}: "${text.slice(0, 80)}"`);
         sessionManager.injectTelegramMessage(
-          targetSession, topicId, text, pipeline.topicName, pipeline.sender.firstName,
+          targetSession, topicId, text, pipeline.topicName, pipeline.sender.firstName, pipeline.sender.telegramUserId,
         );
         // Delivery confirmation — let the user know the message reached the session
         telegram.sendToTopic(topicId, `✓ Delivered`).catch(() => {});
@@ -632,7 +674,7 @@ function wireTelegramRouting(
 
         if (!isQuotaDeath) {
           telegram.sendToTopic(topicId, `🔄 Session restarting — message queued.`).catch(() => {});
-          respawnSessionForTopic(sessionManager, telegram, targetSession, topicId, text, topicMemory).catch(err => {
+          respawnSessionForTopic(sessionManager, telegram, targetSession, topicId, text, topicMemory, resolvedUser ?? undefined).catch(err => {
             console.error(`[telegram→session] Respawn failed:`, err);
           });
         }
@@ -643,8 +685,8 @@ function wireTelegramRouting(
       console.log(`[telegram→session] No session for topic ${topicId}, auto-spawning with history...`);
       const spawnName = storedTopicName || `topic-${topicId}`;
 
-      // Use the shared spawn helper that includes topic history
-      spawnSessionForTopic(sessionManager, telegram, spawnName, topicId, text, topicMemory).then((newSessionName) => {
+      // Use the shared spawn helper that includes topic history + user context
+      spawnSessionForTopic(sessionManager, telegram, spawnName, topicId, text, topicMemory, resolvedUser ?? undefined).then((newSessionName) => {
         telegram.registerTopicSession(topicId, newSessionName, spawnName);
         telegram.sendToTopic(topicId, `Session starting up — reading your message now. One moment.`).catch(() => {});
         console.log(`[telegram→session] Auto-spawned "${newSessionName}" for topic ${topicId}`);
@@ -1259,8 +1301,11 @@ export async function startServer(options: StartOptions): Promise<void> {
         console.log(pc.yellow('  QuotaManager skipped (no quota tracker)'));
       }
 
+      // Initialize persistent UserManager for user identity resolution (Gap 8)
+      const userManager = new UserManager(config.stateDir, config.users);
+
       // Wire up topic → session routing and session management callbacks
-      wireTelegramRouting(telegram, sessionManager, quotaTracker, topicMemory);
+      wireTelegramRouting(telegram, sessionManager, quotaTracker, topicMemory, userManager);
       wireTelegramCallbacks(telegram, sessionManager, state, quotaTracker, accountSwitcher, config.sessions.claudePath, topicMemory);
 
       // Wire up unknown-user handling (Multi-User Setup Wizard Phase 4.5)
@@ -1304,9 +1349,7 @@ export async function startServer(options: StartOptions): Promise<void> {
           telegramUserId,
         });
 
-        // Add to users via UserManager
-        const { UserManager } = await import('../users/UserManager.js');
-        const userManager = new UserManager(config.stateDir, config.users);
+        // Add to persistent UserManager (reuses the instance created above)
         userManager.upsertUser(profile);
 
         // Add to authorized user IDs so future messages are accepted
@@ -1380,7 +1423,8 @@ export async function startServer(options: StartOptions): Promise<void> {
         const tmStats = topicMemory.stats();
         console.log(pc.green(`  TopicMemory: ${tmStats.totalMessages} messages, ${tmStats.totalTopics} topics, ${tmStats.topicsWithSummaries} summaries`));
 
-        // Wire dual-write: every message logged to JSONL also goes to SQLite
+        // Wire dual-write: every message logged to JSONL also goes to SQLite.
+        // Includes sender identity for multi-user topic context (Phase 1D — User-Agent Topology Spec).
         const tm = topicMemory;
         telegram.onMessageLogged = (entry) => {
           if (entry.topicId != null && tm) {
@@ -1391,6 +1435,9 @@ export async function startServer(options: StartOptions): Promise<void> {
               fromUser: entry.fromUser,
               timestamp: entry.timestamp,
               sessionName: entry.sessionName,
+              senderName: entry.senderName,
+              senderUsername: entry.senderUsername,
+              telegramUserId: entry.telegramUserId,
             });
           }
         };

@@ -14,6 +14,8 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { EventEmitter } from 'node:events';
+import { maybeRotateJsonl } from '../utils/jsonl-rotation.js';
+import { NonceStore } from './NonceStore.js';
 
 // ── Types ────────────────────────────────────────────────────────────
 
@@ -50,6 +52,10 @@ export interface AgentMessage<T = unknown> {
   replyTo?: string;
   /** Delivery status (local tracking). */
   status: DeliveryStatus;
+  /** Anti-replay nonce (16+ bytes hex). Present when replay protection enabled. */
+  nonce?: string;
+  /** Monotonic sequence number per sender. Present when replay protection enabled. */
+  sequence?: number;
 }
 
 export interface TransportAdapter {
@@ -59,6 +65,15 @@ export interface TransportAdapter {
   receive(): Promise<AgentMessage[]>;
   /** Mark a message as delivered. */
   acknowledge(messageId: string): Promise<void>;
+}
+
+export interface ReplayProtectionConfig {
+  /** Enable anti-replay validation on incoming messages (default: false). */
+  enabled: boolean;
+  /** Timestamp freshness window in ms (default: 5 min per spec). */
+  timestampWindowMs?: number;
+  /** Custom directory for nonce persistence. Defaults to stateDir + '/nonce-store'. */
+  nonceStoreDir?: string;
 }
 
 export interface AgentBusConfig {
@@ -76,12 +91,15 @@ export interface AgentBusConfig {
   defaultTtlMs?: number;
   /** Poll interval for JSONL transport in ms (default: 5000). */
   pollIntervalMs?: number;
+  /** Anti-replay protection via NonceStore (Gap 1 — Replay Attack Defense). */
+  replayProtection?: ReplayProtectionConfig;
 }
 
 export interface AgentBusEvents {
   message: (message: AgentMessage) => void;
   sent: (message: AgentMessage) => void;
   expired: (message: AgentMessage) => void;
+  'replay-rejected': (message: AgentMessage, reason: string) => void;
   error: (error: Error) => void;
 }
 
@@ -92,6 +110,7 @@ const DEFAULT_POLL_INTERVAL = 5000;
 const MESSAGES_DIR = 'messages';
 const OUTBOX_FILE = 'outbox.jsonl';
 const INBOX_FILE = 'inbox.jsonl';
+const AGENTBUS_TIMESTAMP_WINDOW = 5 * 60 * 1000; // 5 minutes per spec
 
 // ── AgentBus ─────────────────────────────────────────────────────────
 
@@ -106,6 +125,9 @@ export class AgentBus extends EventEmitter {
   private messagesDir: string;
   private pollTimer?: ReturnType<typeof setInterval>;
   private handlers: Map<MessageType, Array<(msg: AgentMessage) => void>>;
+  private nonceStore: NonceStore | null;
+  private replayProtectionEnabled: boolean;
+  private outgoingSequence: number;
 
   constructor(config: AgentBusConfig) {
     super();
@@ -117,10 +139,28 @@ export class AgentBus extends EventEmitter {
     this.defaultTtlMs = config.defaultTtlMs ?? DEFAULT_TTL;
     this.pollIntervalMs = config.pollIntervalMs ?? DEFAULT_POLL_INTERVAL;
     this.handlers = new Map();
+    this.outgoingSequence = 0;
 
     this.messagesDir = path.join(config.stateDir, 'state', MESSAGES_DIR);
     if (!fs.existsSync(this.messagesDir)) {
       fs.mkdirSync(this.messagesDir, { recursive: true });
+    }
+
+    // ── Replay Protection (Gap 1) ────────────────────────────────
+    const rp = config.replayProtection;
+    this.replayProtectionEnabled = rp?.enabled ?? false;
+    if (this.replayProtectionEnabled) {
+      const nonceDir = rp?.nonceStoreDir ?? path.join(config.stateDir, 'nonce-store');
+      const timestampWindowMs = rp?.timestampWindowMs ?? AGENTBUS_TIMESTAMP_WINDOW;
+      this.nonceStore = new NonceStore(nonceDir, {
+        timestampWindowMs,
+        // Nonces must survive at least as long as the timestamp window
+        nonceMaxAgeMs: timestampWindowMs * 2,
+        pruneIntervalMs: 5 * 60_000,
+      });
+      this.nonceStore.initialize();
+    } else {
+      this.nonceStore = null;
     }
   }
 
@@ -147,6 +187,12 @@ export class AgentBus extends EventEmitter {
       replyTo: opts.replyTo,
       status: 'pending',
     };
+
+    // Attach anti-replay fields when replay protection is enabled
+    if (this.replayProtectionEnabled) {
+      message.nonce = crypto.randomBytes(16).toString('hex'); // 16 bytes = 32 hex chars
+      message.sequence = this.outgoingSequence++;
+    }
 
     if (this.transportMode === 'http' && opts.to !== '*') {
       // HTTP: send directly to target
@@ -229,6 +275,27 @@ export class AgentBus extends EventEmitter {
         if (now > expiresAt) {
           msg.status = 'expired';
           this.emit('expired', msg);
+          continue;
+        }
+      }
+
+      // ── Replay Protection Validation (Gap 1) ──────────────────
+      if (this.replayProtectionEnabled && this.nonceStore) {
+        // Reject messages without anti-replay fields (fail-closed)
+        if (!msg.nonce || msg.sequence === undefined || msg.sequence === null) {
+          this.emit('replay-rejected', msg, 'Missing nonce or sequence (replay protection required)');
+          continue;
+        }
+
+        const validation = this.nonceStore.validate(
+          msg.timestamp,
+          msg.nonce,
+          msg.sequence,
+          msg.from,
+        );
+
+        if (!validation.valid) {
+          this.emit('replay-rejected', msg, validation.reason);
           continue;
         }
       }
@@ -364,6 +431,18 @@ export class AgentBus extends EventEmitter {
     return expired;
   }
 
+  // ── Lifecycle ─────────────────────────────────────────────────────
+
+  /**
+   * Clean up resources (NonceStore timers, poll timers).
+   */
+  destroy(): void {
+    this.stopPolling();
+    if (this.nonceStore) {
+      this.nonceStore.destroy();
+    }
+  }
+
   // ── Accessors ─────────────────────────────────────────────────────
 
   getMachineId(): string {
@@ -374,6 +453,14 @@ export class AgentBus extends EventEmitter {
     return this.transportMode;
   }
 
+  isReplayProtectionEnabled(): boolean {
+    return this.replayProtectionEnabled;
+  }
+
+  getOutgoingSequence(): number {
+    return this.outgoingSequence;
+  }
+
   registerPeer(machineId: string, url: string): void {
     this.peerUrls[machineId] = url;
   }
@@ -382,11 +469,13 @@ export class AgentBus extends EventEmitter {
 
   private appendToOutbox(message: AgentMessage): void {
     const outboxPath = path.join(this.messagesDir, OUTBOX_FILE);
+    maybeRotateJsonl(outboxPath, { maxBytes: 5 * 1024 * 1024, keepRatio: 0.5 });
     fs.appendFileSync(outboxPath, JSON.stringify(message) + '\n');
   }
 
   private appendToInbox(message: AgentMessage): void {
     const inboxPath = path.join(this.messagesDir, INBOX_FILE);
+    maybeRotateJsonl(inboxPath, { maxBytes: 5 * 1024 * 1024, keepRatio: 0.5 });
     fs.appendFileSync(inboxPath, JSON.stringify(message) + '\n');
   }
 

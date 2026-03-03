@@ -163,8 +163,16 @@ export interface UserProfile {
   permissions: string[];
   /** How the agent should interact with this user */
   preferences: UserPreferences;
-  /** Interaction history summary */
+  /** Interaction history summary (auto-generated from conversations) */
   context?: string;
+  /** Short bio or description provided during onboarding */
+  bio?: string;
+  /** User's interests or topics they care about */
+  interests?: string[];
+  /** How this user relates to the agent/project (e.g., "project lead", "beta tester") */
+  relationshipContext?: string;
+  /** Custom profile fields defined by agent's onboarding config */
+  customFields?: Record<string, string>;
   /** Consent record (GDPR compliance) */
   consent?: ConsentRecord;
   /** What data categories are stored for this user */
@@ -191,6 +199,39 @@ export interface UserPreferences {
   autonomyLevel?: 'full' | 'confirm-destructive' | 'confirm-all';
   /** Timezone for scheduling */
   timezone?: string;
+}
+
+/**
+ * Structured user context block for session injection.
+ * This is what gets injected into the session prompt so the agent
+ * knows who it's talking to. Bounded by maxContextTokens.
+ *
+ * CRITICAL: permissions are injected as structured data that the
+ * LLM cannot override via social engineering (Gap 8 requirement).
+ */
+export interface UserContextBlock {
+  /** User's display name */
+  name: string;
+  /** User's unique ID */
+  userId: string;
+  /** Structured permissions (NOT natural language — cannot be overridden) */
+  permissions: string[];
+  /** Communication preferences */
+  preferences?: {
+    style?: string;
+    autonomyLevel?: string;
+    timezone?: string;
+  };
+  /** Short bio */
+  bio?: string;
+  /** Interests */
+  interests?: string[];
+  /** Relationship to agent/project */
+  relationshipContext?: string;
+  /** Interaction history summary */
+  context?: string;
+  /** Custom fields from agent-specific onboarding */
+  customFields?: Record<string, string>;
 }
 
 // ── Messaging ───────────────────────────────────────────────────────
@@ -389,7 +430,8 @@ export type SkipReason =
   | 'disabled'    // Job has enabled: false
   | 'paused'      // Scheduler is paused
   | 'quota'       // Quota constraints
-  | 'capacity';   // No available session slots (queued instead of skipped, but tracked)
+  | 'capacity'    // No available session slots (queued instead of skipped, but tracked)
+  | 'claimed';    // Another machine already claimed this job (Phase 4C — Gap 5)
 
 export interface SkipEvent {
   slug: string;
@@ -429,6 +471,8 @@ export interface ActivityEvent {
   sessionId?: string;
   /** Which user triggered this, if any */
   userId?: string;
+  /** Originating machine ID (Phase 4D — Gap 6: machine-prefixed state) */
+  machineId?: string;
   timestamp: string;
   metadata?: Record<string, unknown>;
 }
@@ -763,6 +807,13 @@ export type MachineCapability = 'telegram' | 'jobs' | 'tunnel' | 'sessions';
 export type MachineStatus = 'active' | 'revoked' | 'pending';
 export type MachineRole = 'awake' | 'standby';
 
+/**
+ * Coordination mode for multi-machine setups.
+ * - 'primary-standby': One awake, others standby with failover (default)
+ * - 'independent': Both machines active with separate Telegram groups (Gap 1)
+ */
+export type CoordinationMode = 'primary-standby' | 'independent';
+
 export interface MachineRegistryEntry {
   /** Human-friendly machine name */
   name: string;
@@ -800,6 +851,12 @@ export interface MultiMachineConfig {
   failoverTimeoutMinutes: number;
   /** Whether to require human confirmation before auto-failover */
   autoFailoverConfirm: boolean;
+  /**
+   * Coordination mode (Gap 1 — Active/Active support).
+   * - 'primary-standby': One awake, others standby with failover (default)
+   * - 'independent': Both machines active with separate Telegram groups
+   */
+  coordinationMode?: CoordinationMode;
 }
 
 // ── Agent Autonomy ──────────────────────────────────────────────────
@@ -857,6 +914,48 @@ export interface DataCollectedManifest {
   conversationHistory: boolean;
   memoryEntries: boolean;
   machineIdentities: boolean;
+}
+
+// ── Onboarding Configuration ────────────────────────────────────────
+
+/**
+ * Agent-configurable onboarding settings.
+ * Controls what data is collected during user registration beyond the minimum
+ * (name + consent). All fields are optional — agents can progressively enhance
+ * onboarding depth.
+ */
+export interface OnboardingConfig {
+  /** Whether to collect a short bio during onboarding (default: false) */
+  collectBio?: boolean;
+  /** Whether to collect interests/topics (default: false) */
+  collectInterests?: boolean;
+  /** Whether to collect timezone (default: false) */
+  collectTimezone?: boolean;
+  /** Whether to collect communication style preference (default: false) */
+  collectStyle?: boolean;
+  /** Whether to collect relationship context — how the user relates to the agent/project (default: false) */
+  collectRelationshipContext?: boolean;
+  /** Custom onboarding questions defined by the agent operator */
+  customQuestions?: OnboardingQuestion[];
+  /** Custom consent disclosure text (overrides default) */
+  consentDisclosure?: string;
+  /** Max tokens for per-user context injection into sessions (default: 500) */
+  maxContextTokens?: number;
+}
+
+/**
+ * A custom onboarding question defined by the agent operator.
+ * Answers are stored in UserProfile.customFields keyed by `fieldName`.
+ */
+export interface OnboardingQuestion {
+  /** Storage key in UserProfile.customFields */
+  fieldName: string;
+  /** Human-readable prompt shown to the user */
+  prompt: string;
+  /** Whether this question is required (default: false) */
+  required?: boolean;
+  /** Placeholder text / example answer */
+  placeholder?: string;
 }
 
 export interface VerificationCode {
@@ -1007,6 +1106,8 @@ export interface InstarConfig {
   recoveryKey?: RecoveryKeyConfig;
   /** Registration contact hint for rejected users */
   registrationContactHint?: string;
+  /** Onboarding configuration — controls what data is collected during user registration */
+  onboarding?: OnboardingConfig;
 }
 
 /**
@@ -1373,6 +1474,12 @@ export interface MemoryEntity {
   tags: string[];
   /** Domain grouping ('infrastructure', 'relationships', 'business') */
   domain?: string;
+
+  // Privacy (Phase 2 — User-Agent Topology Spec)
+  /** User who owns this entity (null = agent-owned / shared) */
+  ownerId?: string;
+  /** Privacy scope controlling visibility (default: 'shared-project' for backward compat) */
+  privacyScope?: PrivacyScopeType;
 }
 
 /**
@@ -1466,6 +1573,9 @@ export interface SemanticSearchOptions {
   domain?: string;
   minConfidence?: number;
   limit?: number;
+  /** Filter to entities visible to this user (includes shared-project + user's private).
+   *  If not set, returns all entities (backward-compatible for single-user). */
+  userId?: string;
 }
 
 /**
@@ -1475,4 +1585,119 @@ export interface ExploreOptions {
   maxDepth?: number;
   relations?: RelationType[];
   minWeight?: number;
+}
+
+// ── Privacy Scoping (User-Agent Topology Spec, Phase 2) ──────────────
+
+/**
+ * Privacy scope for data items (memories, messages, entities).
+ *
+ * Controls who can see what:
+ *   - private: Only the owning user (identified by userId)
+ *   - shared-topic: All participants of a specific Telegram topic
+ *   - shared-project: All users of the agent (project-wide visibility)
+ *
+ * Default for new data: 'private' (fail-closed).
+ * Agent-generated shared knowledge (tool docs, project facts): 'shared-project'.
+ */
+export type PrivacyScopeType = 'private' | 'shared-topic' | 'shared-project';
+
+export interface PrivacyScope {
+  /** Scope type */
+  type: PrivacyScopeType;
+  /** Owner user ID (required for 'private', optional for shared scopes) */
+  ownerId?: string;
+  /** Topic ID (required for 'shared-topic') */
+  topicId?: number;
+}
+
+/**
+ * Onboarding state for a user who is in the process of registering.
+ * Gates messages during onboarding to prevent consent bypass (Gap 13).
+ *
+ * State machine:
+ *   unknown → pending → consented → authorized
+ *                    ↘ rejected
+ *   unknown → authorized (admin pre-approved)
+ */
+export type OnboardingState = 'unknown' | 'pending' | 'consented' | 'rejected' | 'authorized';
+
+/**
+ * Tracks the onboarding process for a Telegram user.
+ * Stored in-memory (not persisted — onboarding is transient).
+ */
+export interface OnboardingSession {
+  /** Telegram user ID */
+  telegramUserId: number;
+  /** Display name */
+  name: string;
+  /** Current onboarding state */
+  state: OnboardingState;
+  /** When onboarding started */
+  startedAt: string;
+  /** When the state last changed */
+  updatedAt: string;
+  /** Topic where onboarding is happening */
+  topicId: number;
+  /** Number of messages received while in pending state (for rate limiting) */
+  pendingMessageCount: number;
+}
+
+/**
+ * User data export for /mydata command (GDPR Article 15).
+ */
+export interface UserDataExport {
+  /** Export metadata */
+  exportedAt: string;
+  exportVersion: string;
+  userId: string;
+  /** User profile */
+  profile: UserProfile;
+  /** Conversation messages (from TopicMemory) */
+  messages: {
+    topicId: number;
+    messageCount: number;
+    messages: Array<{
+      text: string;
+      fromUser: boolean;
+      timestamp: string;
+      topicId: number;
+    }>;
+  }[];
+  /** Semantic memory entities owned by this user */
+  knowledgeEntities: Array<{
+    name: string;
+    type: string;
+    content: string;
+    createdAt: string;
+  }>;
+  /** Episodic memory digests from this user's sessions */
+  activityDigests: Array<{
+    summary: string;
+    startedAt: string;
+    endedAt: string;
+    themes: string[];
+  }>;
+}
+
+/**
+ * Result of a /forget (erasure) operation (GDPR Article 17).
+ */
+export interface UserErasureResult {
+  userId: string;
+  erasedAt: string;
+  /** Number of messages deleted from TopicMemory */
+  messagesDeleted: number;
+  /** Number of semantic entities deleted */
+  entitiesDeleted: number;
+  /** Number of episodic digests deleted */
+  digestsDeleted: number;
+  /** Whether the user profile was removed */
+  profileRemoved: boolean;
+  /** Items that could not be erased (e.g., shared-project entities) */
+  retainedItems: Array<{
+    type: string;
+    reason: string;
+    count: number;
+  }>;
 }

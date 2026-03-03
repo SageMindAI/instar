@@ -44,6 +44,8 @@ import { DegradationReporter } from '../monitoring/DegradationReporter.js';
 const execFileAsync = promisify(execFile);
 import type { Session, SessionManagerConfig, SessionStatus, ModelTier } from './types.js';
 import { StateManager } from './StateManager.js';
+import { buildInjectionTag } from '../types/pipeline.js';
+import { sanitizeSenderName, sanitizeTopicName } from '../utils/sanitize.js';
 
 /** Absolute maximum session duration (4 hours) — safety net for sessions without explicit timeout */
 const DEFAULT_MAX_DURATION_MINUTES = 240;
@@ -654,7 +656,7 @@ export class SessionManager extends EventEmitter {
    * transformed into explicit instructions so Claude Code knows to read the
    * image file (it can natively view images via the Read tool).
    */
-  injectTelegramMessage(tmuxSession: string, topicId: number, text: string, topicName?: string, senderName?: string): void {
+  injectTelegramMessage(tmuxSession: string, topicId: number, text: string, topicName?: string, senderName?: string, telegramUserId?: number): void {
     const FILE_THRESHOLD = 500;
 
     // Transform [image:path] tags into explicit read instructions.
@@ -670,20 +672,14 @@ export class SessionManager extends EventEmitter {
       }
     );
 
-    // Include topic name AND sender identity in the tag so the session knows:
-    // 1. Which conversation it's in (even after compaction)
-    // 2. WHO is speaking (critical for multi-user topics)
-    // Format: [telegram:42 "Agent Updates" from Justin] or [telegram:42 from Justin]
-    let topicTag: string;
-    if (topicName && senderName) {
-      topicTag = `[telegram:${topicId} "${topicName}" from ${senderName}]`;
-    } else if (topicName) {
-      topicTag = `[telegram:${topicId} "${topicName}"]`;
-    } else if (senderName) {
-      topicTag = `[telegram:${topicId} from ${senderName}]`;
-    } else {
-      topicTag = `[telegram:${topicId}]`;
-    }
+    // Sanitize user-controlled content at the injection boundary
+    // (User-Agent Topology Spec, Gap 12)
+    const safeName = senderName ? sanitizeSenderName(senderName) : undefined;
+    const safeTopic = topicName ? sanitizeTopicName(topicName) : undefined;
+
+    // Build tag using the shared builder — includes UID when available
+    // Format: [telegram:42 "Agent Updates" from Justin (uid:12345)]
+    const topicTag = buildInjectionTag(topicId, safeTopic, safeName, telegramUserId);
     const taggedText = `${topicTag} ${transformed}`;
 
     if (taggedText.length <= FILE_THRESHOLD) {

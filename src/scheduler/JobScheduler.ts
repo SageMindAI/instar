@@ -21,6 +21,7 @@ import type { MessagingAdapter, SkipReason } from '../core/types.js';
 import { TOPIC_STYLE } from '../messaging/TelegramAdapter.js';
 import type { JobDefinition, JobSchedulerConfig, JobState, JobPriority } from '../core/types.js';
 import type { TelegramAdapter } from '../messaging/TelegramAdapter.js';
+import type { JobClaimManager } from './JobClaimManager.js';
 
 interface QueuedJob {
   slug: string;
@@ -67,6 +68,9 @@ export class JobScheduler {
   /** Optional quota tracker for death classification cross-reference */
   private quotaTracker: QuotaTracker | null = null;
 
+  /** Optional job claim manager for multi-machine deduplication (Phase 4C) */
+  private claimManager: JobClaimManager | null = null;
+
   constructor(
     config: JobSchedulerConfig,
     sessionManager: SessionManager,
@@ -110,6 +114,15 @@ export class JobScheduler {
    */
   setQuotaTracker(tracker: QuotaTracker): void {
     this.quotaTracker = tracker;
+  }
+
+  /**
+   * Set the job claim manager for multi-machine deduplication.
+   * When set, the scheduler will broadcast claims before executing jobs
+   * and skip jobs already claimed by other machines.
+   */
+  setJobClaimManager(manager: JobClaimManager): void {
+    this.claimManager = manager;
   }
 
   /**
@@ -171,7 +184,7 @@ export class JobScheduler {
   }
 
   /**
-   * Trigger a job by slug. Checks quota, session limits, queues if at capacity.
+   * Trigger a job by slug. Checks claims, quota, session limits, queues if at capacity.
    */
   triggerJob(slug: string, reason: string): 'triggered' | 'queued' | 'skipped' {
     const job = this.jobs.find(j => j.slug === slug);
@@ -181,6 +194,19 @@ export class JobScheduler {
 
     if (this.paused) {
       this.skipLedger.recordSkip(slug, 'paused');
+      return 'skipped';
+    }
+
+    // Multi-machine claim check (Phase 4C — Gap 5)
+    // If another machine already claimed this job, skip it.
+    if (this.claimManager?.hasRemoteClaim(slug)) {
+      this.skipLedger.recordSkip(slug, 'claimed');
+      this.state.appendEvent({
+        type: 'job_skipped',
+        summary: `Job "${slug}" skipped — claimed by another machine`,
+        timestamp: new Date().toISOString(),
+        metadata: { slug, reason, claimedBy: this.claimManager.getClaim(slug)?.machineId },
+      });
       return 'skipped';
     }
 
@@ -208,6 +234,14 @@ export class JobScheduler {
     if (jobSessions.length >= this.config.maxParallelJobs) {
       this.enqueue(slug, reason);
       return 'queued';
+    }
+
+    // Broadcast claim before spawning (async, best-effort)
+    if (this.claimManager) {
+      const timeoutMs = (job.expectedDurationMinutes ?? 30) * 2 * 60_000;
+      this.claimManager.tryClaim(slug, timeoutMs).catch(err => {
+        console.error(`[scheduler] Failed to broadcast claim for "${slug}": ${err}`);
+      });
     }
 
     this.spawnJobSession(job, reason);
@@ -436,14 +470,21 @@ export class JobScheduler {
     const job = this.jobs.find(j => j.slug === session.jobSlug);
     if (!job) return;
 
+    // Update job state with completion result
+    const failed = session.status === 'failed' || session.status === 'killed';
+
+    // Signal claim completion (Phase 4C — Gap 5)
+    if (this.claimManager) {
+      this.claimManager.completeClaim(job.slug, failed ? 'failure' : 'success').catch(err => {
+        console.error(`[scheduler] Failed to broadcast claim completion for "${job.slug}": ${err}`);
+      });
+    }
+
     // Clear active-job.json now that the job is done
     const activeJob = this.state.get<{ slug: string }>('active-job');
     if (activeJob?.slug === job.slug) {
       this.state.delete('active-job');
     }
-
-    // Update job state with completion result
-    const failed = session.status === 'failed' || session.status === 'killed';
     const existingState = this.state.getJobState(job.slug);
     const jobState: JobState = {
       slug: job.slug,

@@ -14,6 +14,7 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import type { MachineIdentity, AgentAutonomyConfig } from './types.js';
+import { maybeRotateJsonl } from '../utils/jsonl-rotation.js';
 
 // ── Types ────────────────────────────────────────────────────────────
 
@@ -151,6 +152,7 @@ export class OfflineQueue {
       sourceMachineId: machineId,
     };
 
+    maybeRotateJsonl(this.queueFile, { maxBytes: 5 * 1024 * 1024, keepRatio: 0.5 });
     fs.appendFileSync(this.queueFile, JSON.stringify(entry) + '\n');
     return true;
   }

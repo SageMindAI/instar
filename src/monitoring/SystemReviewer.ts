@@ -811,6 +811,22 @@ export class SystemReviewer extends EventEmitter {
    */
   private writeDeadLetter(type: string, message: string, stack?: string): void {
     try {
+      // Inline size-based rotation — no imports, sync fs only (by design).
+      // 10MB cap, keep last 25% (error log — aggressive trim is fine).
+      try {
+        const stat = fs.statSync(this.deadLetterFile);
+        if (stat.size > 10 * 1024 * 1024) {
+          const content = fs.readFileSync(this.deadLetterFile, 'utf-8');
+          const lines = content.split('\n').filter(Boolean);
+          const keep = lines.slice(-Math.max(1, Math.ceil(lines.length * 0.25)));
+          const tmp = this.deadLetterFile + '.rotation-tmp';
+          fs.writeFileSync(tmp, keep.join('\n') + '\n');
+          fs.renameSync(tmp, this.deadLetterFile);
+        }
+      } catch {
+        // Rotation failure is non-fatal — continue to append
+      }
+
       const entry = JSON.stringify({
         timestamp: new Date().toISOString(),
         type,

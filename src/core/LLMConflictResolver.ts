@@ -20,6 +20,7 @@ import { createHash } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import type { IntelligenceProvider, IntelligenceOptions } from './types.js';
+import { maybeRotateJsonl } from '../utils/jsonl-rotation.js';
 
 // ── Types ────────────────────────────────────────────────────────────
 
@@ -493,6 +494,7 @@ export class LLMConflictResolver {
 
   private logEvent(event: ResolutionEvent): void {
     try {
+      maybeRotateJsonl(this.logPath, { maxBytes: 5 * 1024 * 1024, keepRatio: 0.5 });
       fs.appendFileSync(this.logPath, JSON.stringify(event) + '\n');
     } catch {
       // @silent-fallback-ok — event logging is best-effort; resolution must not fail due to log write errors

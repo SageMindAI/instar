@@ -20,6 +20,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import type { IntelligenceProvider } from './types.js';
+import { maybeRotateJsonl } from '../utils/jsonl-rotation.js';
 
 // ── Types ────────────────────────────────────────────────────────────
 
@@ -519,6 +520,7 @@ export class ExternalOperationGate {
       if (!fs.existsSync(dir)) {
         fs.mkdirSync(dir, { recursive: true });
       }
+      maybeRotateJsonl(this.logPath, { maxBytes: 5 * 1024 * 1024, keepRatio: 0.5 });
       fs.appendFileSync(this.logPath, JSON.stringify(entry) + '\n');
     } catch {
       // @silent-fallback-ok — logging non-critical

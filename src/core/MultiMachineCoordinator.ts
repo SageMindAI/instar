@@ -22,7 +22,7 @@ import { HeartbeatManager } from './HeartbeatManager.js';
 import { SecurityLog } from './SecurityLog.js';
 import { NonceStore } from './NonceStore.js';
 import type { StateManager } from './StateManager.js';
-import type { MachineRole, MachineIdentity, MultiMachineConfig } from './types.js';
+import type { MachineRole, MachineIdentity, MultiMachineConfig, CoordinationMode } from './types.js';
 
 // ── Constants ────────────────────────────────────────────────────────
 
@@ -91,6 +91,11 @@ export class MultiMachineCoordinator extends EventEmitter {
   /** Whether this machine is the awake (primary) machine. */
   get isAwake(): boolean { return this._role === 'awake'; }
 
+  /** The coordination mode (default: 'primary-standby'). */
+  get coordinationMode(): CoordinationMode {
+    return this.config.multiMachine?.coordinationMode ?? 'primary-standby';
+  }
+
   /** The underlying managers (for route wiring). */
   get managers() {
     return {
@@ -127,6 +132,29 @@ export class MultiMachineCoordinator extends EventEmitter {
       timeoutMs,
     });
 
+    const mode = this.coordinationMode;
+
+    // ── Independent Mode (Gap 1) ─────────────────────────────────
+    // Both machines are always awake. No failover, no demotion.
+    // Each machine has its own Telegram group — no polling conflict.
+    if (mode === 'independent') {
+      this._role = 'awake';
+      this.identityManager.updateRole(this._identity.machineId, 'awake');
+      this.startHeartbeatWriter(); // For diagnostics, not failover
+      // Do NOT start heartbeat monitor (no failover logic in independent mode)
+
+      this.securityLog.append({
+        event: 'coordinator_started',
+        machineId: this._identity.machineId,
+        role: this._role,
+        coordinationMode: 'independent',
+      });
+
+      console.log(`[MultiMachine] Independent mode — machine ${this._identity.machineId} always awake`);
+      return this._role;
+    }
+
+    // ── Primary-Standby Mode (default) ───────────────────────────
     // Determine initial role from registry
     const registry = this.identityManager.loadRegistry();
     const myEntry = registry.machines[this._identity.machineId];
@@ -267,6 +295,8 @@ export class MultiMachineCoordinator extends EventEmitter {
    */
   shouldSkipProcessing(): boolean {
     if (!this._enabled) return false; // Single machine = always process
+    // Independent mode: both machines always process
+    if (this.coordinationMode === 'independent') return false;
     if (this._role !== 'awake') return true; // Standby = skip
 
     // Even if we think we're awake, check the heartbeat file
@@ -328,6 +358,8 @@ export class MultiMachineCoordinator extends EventEmitter {
    */
   private checkHeartbeatAndAct(): void {
     if (!this._identity) return;
+    // Independent mode: no failover/demotion logic
+    if (this.coordinationMode === 'independent') return;
 
     if (this._role === 'awake') {
       // Awake machine: check if someone else took over

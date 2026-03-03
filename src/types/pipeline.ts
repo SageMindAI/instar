@@ -21,7 +21,14 @@
  *   toPipeline()    → PipelineMessage     (from TelegramInbound)
  *   toInjection()   → InjectionPayload   (from PipelineMessage)
  *   toLogEntry()    → PipelineLogEntry    (from PipelineMessage)
+ *
+ * Security: Input sanitization (User-Agent Topology Spec, Gap 12)
+ *   toInjection() applies sanitizeSenderName() and sanitizeTopicName() at
+ *   the injection boundary — the point where untrusted user-controlled
+ *   content enters the LLM session context.
  */
+
+import { sanitizeSenderName, sanitizeTopicName } from '../utils/sanitize.js';
 
 // ── Stage 1: Telegram Inbound ─────────────────────────────────────
 
@@ -102,7 +109,10 @@ export interface PipelineMessage {
  * What gets injected into a Claude tmux session.
  * The final transformation — all context must be embedded in the text.
  *
- * Format: [telegram:42 "Topic Name" from Justin] message text
+ * Format: [telegram:42 "Topic Name" from Justin (uid:12345)] message text
+ *
+ * The UID is the authoritative identity — display names are for readability.
+ * Sanitization is applied at this boundary (see toInjection()).
  */
 export interface InjectionPayload {
   /** Target tmux session name */
@@ -110,10 +120,12 @@ export interface InjectionPayload {
   /** Topic ID (for tracking/stall detection) */
   topicId: number;
   /** Fully tagged text ready for injection.
-   * Includes topic name and sender identity in the tag. */
+   * Includes topic name, sender identity, and UID in the tag. */
   taggedText: string;
   /** Sender name (for delivery confirmation, stall tracking) */
   senderName?: string;
+  /** Telegram user ID (for identity tracking) */
+  telegramUserId?: number;
 }
 
 // ── Stage 4: Log Entry ────────────────────────────────────────────
@@ -194,7 +206,14 @@ export function toPipeline(inbound: TelegramInbound): PipelineMessage {
  * Convert a PipelineMessage to an InjectionPayload.
  * This is where identity becomes embedded in the text tag.
  *
- * Format: [telegram:42 "Topic Name" from Justin] message text
+ * Format: [telegram:42 "Topic Name" from Justin (uid:12345)] message text
+ *
+ * Security: This is the injection boundary — user-controlled content (display
+ * names, topic names) enters the LLM session context here. Sanitization is
+ * applied per User-Agent Topology Spec, Gap 12.
+ *
+ * The UID is the authoritative identity. Display names are for readability
+ * but MUST NOT be trusted for authorization decisions.
  */
 export function toInjection(
   pipeline: PipelineMessage,
@@ -202,24 +221,53 @@ export function toInjection(
 ): InjectionPayload {
   const { topicId, topicName, sender, content } = pipeline;
 
-  // Build the tag — always includes sender when available
-  let topicTag: string;
-  if (topicName && sender.firstName) {
-    topicTag = `[telegram:${topicId} "${topicName}" from ${sender.firstName}]`;
-  } else if (topicName) {
-    topicTag = `[telegram:${topicId} "${topicName}"]`;
-  } else if (sender.firstName) {
-    topicTag = `[telegram:${topicId} from ${sender.firstName}]`;
-  } else {
-    topicTag = `[telegram:${topicId}]`;
-  }
+  // Sanitize user-controlled content at the injection boundary
+  const safeName = sanitizeSenderName(sender.firstName);
+  const safeTopic = topicName ? sanitizeTopicName(topicName) : undefined;
+  const uid = sender.telegramUserId;
+
+  // Build the tag — always includes sender when available, UID when known
+  const topicTag = buildInjectionTag(topicId, safeTopic, safeName, uid);
 
   return {
     tmuxSession,
     topicId,
     taggedText: `${topicTag} ${content}`,
-    senderName: sender.firstName,
+    senderName: safeName !== 'Unknown' ? safeName : sender.firstName,
+    telegramUserId: uid,
   };
+}
+
+/**
+ * Build the injection tag string.
+ *
+ * Exported for use by SessionManager.injectTelegramMessage() to avoid
+ * duplicating the tag-building logic.
+ *
+ * Tag format variants:
+ *   [telegram:42 "Topic Name" from Justin (uid:12345)]
+ *   [telegram:42 "Topic Name" from Justin]           — when UID unknown
+ *   [telegram:42 "Topic Name"]                       — when sender unknown
+ *   [telegram:42 from Justin (uid:12345)]             — when no topic name
+ *   [telegram:42]                                     — bare minimum
+ */
+export function buildInjectionTag(
+  topicId: number,
+  topicName?: string,
+  senderName?: string,
+  telegramUserId?: number,
+): string {
+  const uidSuffix = telegramUserId ? ` (uid:${telegramUserId})` : '';
+
+  if (topicName && senderName) {
+    return `[telegram:${topicId} "${topicName}" from ${senderName}${uidSuffix}]`;
+  } else if (topicName) {
+    return `[telegram:${topicId} "${topicName}"]`;
+  } else if (senderName) {
+    return `[telegram:${topicId} from ${senderName}${uidSuffix}]`;
+  } else {
+    return `[telegram:${topicId}]`;
+  }
 }
 
 /**

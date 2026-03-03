@@ -39,6 +39,22 @@ export class UserManager {
   }
 
   /**
+   * Resolve a user by their Telegram numeric user ID.
+   * Scans all profiles for matching telegramUserId field.
+   *
+   * This is the primary resolution path for incoming Telegram messages,
+   * since telegramUserId is stored as a direct field on UserProfile
+   * (not a channel — channels use topic IDs).
+   */
+  resolveFromTelegramUserId(telegramUserId: number): UserProfile | null {
+    if (!telegramUserId) return null;
+    for (const user of this.users.values()) {
+      if (user.telegramUserId === telegramUserId) return user;
+    }
+    return null;
+  }
+
+  /**
    * Get a user by ID.
    */
   getUser(userId: string): UserProfile | null {

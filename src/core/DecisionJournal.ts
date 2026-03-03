@@ -14,6 +14,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import type { DecisionJournalEntry } from './types.js';
 import { DegradationReporter } from '../monitoring/DegradationReporter.js';
+import { maybeRotateJsonl } from '../utils/jsonl-rotation.js';
 
 export interface DecisionJournalStats {
   /** Total number of entries */
@@ -51,6 +52,7 @@ export class DecisionJournal {
       fs.mkdirSync(dir, { recursive: true });
     }
 
+    maybeRotateJsonl(this.journalFile);
     fs.appendFileSync(this.journalFile, JSON.stringify(full) + '\n');
     return full;
   }

@@ -3035,7 +3035,7 @@ export function createRoutes(ctx: RouteContext): Router {
           }
         } catch { /* fall through without name */ }
         console.log(`[telegram-forward] Injecting into ${targetSession}: "${text.slice(0, 80)}"`);
-        ctx.sessionManager.injectTelegramMessage(targetSession, topicId, text, injectedTopicName);
+        ctx.sessionManager.injectTelegramMessage(targetSession, topicId, text, injectedTopicName, fromFirstName, fromUserId);
         res.json({ ok: true, forwarded: true, method: 'registry-inject', session: targetSession });
       } else {
         // No session or session dead — auto-spawn a new one

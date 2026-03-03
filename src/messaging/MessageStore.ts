@@ -28,6 +28,7 @@ import type {
   MessageFilter,
   MessagingStats,
 } from './types.js';
+import { maybeRotateJsonl } from '../utils/jsonl-rotation.js';
 
 const DIRS = ['store', 'index', 'dead-letter', 'pending', 'threads', 'threads/archive', 'drop', 'outbound'];
 
@@ -417,6 +418,8 @@ export class MessageStore implements IMessageStore {
     const inboxPath = path.join(this.basePath, 'index', 'inbox.jsonl');
     const outboxPath = path.join(this.basePath, 'index', 'outbox.jsonl');
 
+    maybeRotateJsonl(outboxPath, { maxBytes: 5 * 1024 * 1024, keepRatio: 0.5 });
+    maybeRotateJsonl(inboxPath, { maxBytes: 5 * 1024 * 1024, keepRatio: 0.5 });
     fs.appendFileSync(outboxPath, JSON.stringify(indexEntry) + '\n');
     fs.appendFileSync(inboxPath, JSON.stringify(indexEntry) + '\n');
   }

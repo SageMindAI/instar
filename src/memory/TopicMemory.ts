@@ -31,6 +31,16 @@ export interface TopicMessage {
   fromUser: boolean;
   timestamp: string;
   sessionName: string | null;
+  /** Sender display name (from Telegram first_name) */
+  senderName?: string;
+  /** Sender @username (optional — not all Telegram users have one) */
+  senderUsername?: string;
+  /** Telegram numeric user ID — authoritative identity */
+  telegramUserId?: number;
+  /** User ID from UserManager (resolved identity) */
+  userId?: string;
+  /** Privacy scope for this message (default: private to the sender) */
+  privacyScope?: import('../core/types.js').PrivacyScopeType;
 }
 
 export interface TopicSummary {
@@ -70,7 +80,22 @@ export interface TopicContext {
   topicName: string | null;
 }
 
-const SCHEMA_VERSION = '1';
+const SCHEMA_VERSION = '3';
+
+/**
+ * Map a raw SQLite row to a TopicMessage with proper type coercion.
+ */
+function mapRow(row: any): TopicMessage {
+  return {
+    ...row,
+    fromUser: !!row.fromUser,
+    senderName: row.senderName ?? undefined,
+    senderUsername: row.senderUsername ?? undefined,
+    telegramUserId: row.telegramUserId ?? undefined,
+    userId: row.userId ?? undefined,
+    privacyScope: row.privacyScope ?? undefined,
+  };
+}
 
 /**
  * Strip FTS5 special syntax characters from a query.
@@ -130,7 +155,7 @@ export class TopicMemory {
   }
 
   /**
-   * Create the schema if it doesn't exist.
+   * Create the schema if it doesn't exist, and run migrations.
    */
   private createSchema(): void {
     if (!this.db) throw new Error('Database not open');
@@ -151,6 +176,11 @@ export class TopicMemory {
         from_user INTEGER NOT NULL DEFAULT 0,
         timestamp TEXT NOT NULL,
         session_name TEXT,
+        sender_name TEXT,
+        sender_username TEXT,
+        telegram_user_id INTEGER,
+        user_id TEXT,
+        privacy_scope TEXT DEFAULT 'private',
         UNIQUE(message_id, topic_id)
       );
 
@@ -196,8 +226,72 @@ export class TopicMemory {
       );
     `);
 
+    // Run migrations for existing databases
+    this.migrateSchema();
+
+    // Ensure indexes exist (safe for both new and migrated databases)
+    this.db.exec('CREATE INDEX IF NOT EXISTS idx_messages_sender ON messages(telegram_user_id)');
+    this.db.exec('CREATE INDEX IF NOT EXISTS idx_messages_user ON messages(user_id)');
+    this.db.exec('CREATE INDEX IF NOT EXISTS idx_messages_privacy ON messages(privacy_scope)');
+
     // Set schema version
     this.db.prepare('INSERT OR REPLACE INTO meta (key, value) VALUES (?, ?)').run('schema_version', SCHEMA_VERSION);
+  }
+
+  /**
+   * Run schema migrations for existing databases.
+   * SQLite ALTER TABLE ADD COLUMN is safe — new columns default to NULL
+   * for existing rows.
+   */
+  private migrateSchema(): void {
+    if (!this.db) return;
+
+    const versionRow = this.db.prepare('SELECT value FROM meta WHERE key = ?').get('schema_version') as { value: string } | undefined;
+    const currentVersion = versionRow?.value ?? '0';
+
+    if (currentVersion < '2') {
+      // Migration v1 → v2: Add sender identity columns
+      // (User-Agent Topology Spec, Phase 1C)
+      const columns = this.db.prepare("PRAGMA table_info(messages)").all() as Array<{ name: string }>;
+      const columnNames = new Set(columns.map(c => c.name));
+
+      if (!columnNames.has('sender_name')) {
+        this.db.exec('ALTER TABLE messages ADD COLUMN sender_name TEXT');
+      }
+      if (!columnNames.has('sender_username')) {
+        this.db.exec('ALTER TABLE messages ADD COLUMN sender_username TEXT');
+      }
+      if (!columnNames.has('telegram_user_id')) {
+        this.db.exec('ALTER TABLE messages ADD COLUMN telegram_user_id INTEGER');
+      }
+
+      // Add sender index if missing
+      try {
+        this.db.exec('CREATE INDEX IF NOT EXISTS idx_messages_sender ON messages(telegram_user_id)');
+      } catch { /* index may already exist */ }
+    }
+
+    if (currentVersion < '3') {
+      // Migration v2 → v3: Add privacy scoping columns
+      // (User-Agent Topology Spec, Phase 2B)
+      const columns = this.db.prepare("PRAGMA table_info(messages)").all() as Array<{ name: string }>;
+      const columnNames = new Set(columns.map(c => c.name));
+
+      if (!columnNames.has('user_id')) {
+        this.db.exec("ALTER TABLE messages ADD COLUMN user_id TEXT");
+      }
+      if (!columnNames.has('privacy_scope')) {
+        this.db.exec("ALTER TABLE messages ADD COLUMN privacy_scope TEXT DEFAULT 'private'");
+      }
+
+      // Add user_id index for privacy-filtered queries
+      try {
+        this.db.exec('CREATE INDEX IF NOT EXISTS idx_messages_user ON messages(user_id)');
+      } catch { /* index may already exist */ }
+      try {
+        this.db.exec('CREATE INDEX IF NOT EXISTS idx_messages_privacy ON messages(privacy_scope)');
+      } catch { /* index may already exist */ }
+    }
   }
 
   // ── Message Operations ──────────────────────────────────────
@@ -210,10 +304,15 @@ export class TopicMemory {
     if (!this.db) return;
 
     const stmt = this.db.prepare(`
-      INSERT OR IGNORE INTO messages (message_id, topic_id, text, from_user, timestamp, session_name)
-      VALUES (?, ?, ?, ?, ?, ?)
+      INSERT OR IGNORE INTO messages (message_id, topic_id, text, from_user, timestamp, session_name, sender_name, sender_username, telegram_user_id, user_id, privacy_scope)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
-    stmt.run(msg.messageId, msg.topicId, msg.text, msg.fromUser ? 1 : 0, msg.timestamp, msg.sessionName);
+    stmt.run(
+      msg.messageId, msg.topicId, msg.text, msg.fromUser ? 1 : 0,
+      msg.timestamp, msg.sessionName,
+      msg.senderName ?? null, msg.senderUsername ?? null, msg.telegramUserId ?? null,
+      msg.userId ?? null, msg.privacyScope ?? 'private',
+    );
 
     // Update topic metadata
     this.db.prepare(`
@@ -232,14 +331,19 @@ export class TopicMemory {
     if (!this.db) return 0;
 
     const insert = this.db.prepare(`
-      INSERT OR IGNORE INTO messages (message_id, topic_id, text, from_user, timestamp, session_name)
-      VALUES (?, ?, ?, ?, ?, ?)
+      INSERT OR IGNORE INTO messages (message_id, topic_id, text, from_user, timestamp, session_name, sender_name, sender_username, telegram_user_id, user_id, privacy_scope)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
 
     let count = 0;
     const tx = this.db.transaction(() => {
       for (const msg of messages) {
-        const result = insert.run(msg.messageId, msg.topicId, msg.text, msg.fromUser ? 1 : 0, msg.timestamp, msg.sessionName);
+        const result = insert.run(
+          msg.messageId, msg.topicId, msg.text, msg.fromUser ? 1 : 0,
+          msg.timestamp, msg.sessionName,
+          msg.senderName ?? null, msg.senderUsername ?? null, msg.telegramUserId ?? null,
+          msg.userId ?? null, msg.privacyScope ?? 'private',
+        );
         if (result.changes > 0) count++;
       }
     });
@@ -258,15 +362,48 @@ export class TopicMemory {
     if (!this.db) return [];
 
     return this.db.prepare(`
-      SELECT message_id AS messageId, topic_id AS topicId, text, from_user AS fromUser, timestamp, session_name AS sessionName
+      SELECT message_id AS messageId, topic_id AS topicId, text, from_user AS fromUser,
+             timestamp, session_name AS sessionName,
+             sender_name AS senderName, sender_username AS senderUsername, telegram_user_id AS telegramUserId,
+             user_id AS userId, privacy_scope AS privacyScope
       FROM messages
       WHERE topic_id = ?
       ORDER BY timestamp DESC, id DESC
       LIMIT ?
-    `).all(topicId, limit).reverse().map((row: any) => ({
-      ...row,
-      fromUser: !!row.fromUser,
-    })) as TopicMessage[];
+    `).all(topicId, limit).reverse().map(mapRow) as TopicMessage[];
+  }
+
+  /**
+   * Get recent messages for a topic, filtered by user visibility.
+   * Returns only messages the specified user is allowed to see.
+   *
+   * Visibility rules:
+   *   - Messages with scope 'shared-project' or NULL are visible to everyone
+   *   - Messages with scope 'private' are visible only to the owner
+   *   - Messages with scope 'shared-topic' are visible to all users in that topic
+   *
+   * Phase 2B — User-Agent Topology Spec, Gap 9
+   */
+  getRecentMessagesForUser(topicId: number, userId: string, limit: number = 20): TopicMessage[] {
+    if (!this.db) return [];
+
+    return this.db.prepare(`
+      SELECT message_id AS messageId, topic_id AS topicId, text, from_user AS fromUser,
+             timestamp, session_name AS sessionName,
+             sender_name AS senderName, sender_username AS senderUsername, telegram_user_id AS telegramUserId,
+             user_id AS userId, privacy_scope AS privacyScope
+      FROM messages
+      WHERE topic_id = ?
+        AND (
+          privacy_scope IS NULL
+          OR privacy_scope = 'shared-project'
+          OR privacy_scope = 'shared-topic'
+          OR (privacy_scope = 'private' AND user_id = ?)
+          OR user_id IS NULL
+        )
+      ORDER BY timestamp DESC, id DESC
+      LIMIT ?
+    `).all(topicId, userId, limit).reverse().map(mapRow) as TopicMessage[];
   }
 
   /**
@@ -295,6 +432,37 @@ export class TopicMemory {
     if (!this.db) return 0;
     const row = this.db.prepare('SELECT COUNT(*) AS count FROM messages WHERE topic_id = ?').get(topicId) as any;
     return row?.count ?? 0;
+  }
+
+  /**
+   * Get all messages by a specific user across all topics.
+   * Used by /mydata export (GDPR Article 15).
+   */
+  getMessagesByUser(userId: string): TopicMessage[] {
+    if (!this.db) return [];
+
+    return this.db.prepare(`
+      SELECT message_id AS messageId, topic_id AS topicId, text, from_user AS fromUser,
+             timestamp, session_name AS sessionName,
+             sender_name AS senderName, sender_username AS senderUsername, telegram_user_id AS telegramUserId,
+             user_id AS userId, privacy_scope AS privacyScope
+      FROM messages
+      WHERE user_id = ?
+      ORDER BY timestamp ASC
+    `).all(userId).map(mapRow) as TopicMessage[];
+  }
+
+  /**
+   * Delete all messages by a specific user.
+   * Used by /forget erasure (GDPR Article 17).
+   * Returns the number of messages deleted.
+   */
+  deleteMessagesByUser(userId: string): number {
+    if (!this.db) return 0;
+
+    const result = this.db.prepare('DELETE FROM messages WHERE user_id = ?').run(userId);
+    this.rebuildTopicMeta();
+    return result.changes;
   }
 
   // ── Search ──────────────────────────────────────────────────
@@ -393,14 +561,14 @@ export class TopicMemory {
     const lastMessageId = summary?.lastMessageId ?? -1;
 
     return this.db.prepare(`
-      SELECT message_id AS messageId, topic_id AS topicId, text, from_user AS fromUser, timestamp, session_name AS sessionName
+      SELECT message_id AS messageId, topic_id AS topicId, text, from_user AS fromUser,
+             timestamp, session_name AS sessionName,
+             sender_name AS senderName, sender_username AS senderUsername, telegram_user_id AS telegramUserId,
+             user_id AS userId, privacy_scope AS privacyScope
       FROM messages
       WHERE topic_id = ? AND message_id > ?
       ORDER BY timestamp ASC
-    `).all(topicId, lastMessageId).map((row: any) => ({
-      ...row,
-      fromUser: !!row.fromUser,
-    })) as TopicMessage[];
+    `).all(topicId, lastMessageId).map(mapRow) as TopicMessage[];
   }
 
   /**
@@ -499,6 +667,11 @@ export class TopicMemory {
             fromUser: entry.fromUser ?? false,
             timestamp: entry.timestamp,
             sessionName: entry.sessionName ?? null,
+            senderName: entry.senderName ?? undefined,
+            senderUsername: entry.senderUsername ?? undefined,
+            telegramUserId: entry.telegramUserId ?? undefined,
+            userId: entry.userId ?? undefined,
+            privacyScope: entry.privacyScope ?? undefined,
           });
         }
       } catch { /* @silent-fallback-ok — JSONL parse, skip corrupted */ }
@@ -570,6 +743,56 @@ export class TopicMemory {
   }
 
   /**
+   * Format topic context as readable text for session injection, filtered by user.
+   * Returns only messages the specified user is allowed to see.
+   *
+   * Phase 2B — User-Agent Topology Spec, Gap 9
+   */
+  formatContextForUser(topicId: number, userId: string, recentLimit: number = 30): string {
+    if (!this.db) return '';
+
+    const recentMessages = this.getRecentMessagesForUser(topicId, userId, recentLimit);
+    const summary = this.getTopicSummary(topicId);
+    const meta = this.getTopicMeta(topicId);
+
+    if (recentMessages.length === 0 && !summary) return '';
+
+    const totalMessages = meta?.messageCount ?? 0;
+    const topicName = meta?.topicName ?? null;
+
+    const lines: string[] = [];
+    lines.push(`--- TOPIC CONTEXT (${totalMessages} total messages) ---`);
+
+    if (topicName) {
+      lines.push(`Topic: ${topicName}`);
+    }
+
+    if (summary) {
+      lines.push('');
+      lines.push('CONVERSATION SUMMARY:');
+      lines.push(summary.summary);
+    }
+
+    if (recentMessages.length > 0) {
+      lines.push('');
+      lines.push(`RECENT MESSAGES (last ${recentMessages.length}${summary ? ', since last summary' : ''}):`);
+      lines.push('');
+      for (const m of recentMessages) {
+        const sender = m.fromUser
+          ? (m.senderName || 'User')
+          : 'Agent';
+        const ts = m.timestamp ? new Date(m.timestamp).toISOString().slice(11, 19) : '??:??';
+        const text = (m.text || '').slice(0, 500);
+        lines.push(`[${ts}] ${sender}: ${text}`);
+      }
+    }
+
+    lines.push('');
+    lines.push('--- END TOPIC CONTEXT ---');
+    return lines.join('\n');
+  }
+
+  /**
    * Format topic context as readable text for session injection.
    * This is the primary interface for loading topic context into a session.
    */
@@ -604,7 +827,10 @@ export class TopicMemory {
       lines.push(`RECENT MESSAGES (last ${ctx.recentMessages.length}${ctx.summary ? ', since last summary' : ''}):`);
       lines.push('');
       for (const m of ctx.recentMessages) {
-        const sender = m.fromUser ? 'User' : 'Agent';
+        // Use sender name when available, fall back to generic "User"
+        const sender = m.fromUser
+          ? (m.senderName || 'User')
+          : 'Agent';
         const ts = m.timestamp ? new Date(m.timestamp).toISOString().slice(11, 19) : '??:??';
         const text = (m.text || '').slice(0, 500);
         lines.push(`[${ts}] ${sender}: ${text}`);

@@ -21,6 +21,8 @@ import type {
   DataCollectedManifest,
   VerificationCode,
   JoinRequest,
+  OnboardingConfig,
+  OnboardingQuestion,
 } from '../core/types.js';
 import { UserManager } from './UserManager.js';
 
@@ -91,8 +93,13 @@ export function hashRecoveryKey(key: string): string {
 
 /**
  * Build the consent disclosure text for a given agent name.
+ * If onboardingConfig.consentDisclosure is provided, uses that instead.
  */
-export function buildConsentDisclosure(agentName: string): string {
+export function buildConsentDisclosure(agentName: string, onboardingConfig?: OnboardingConfig): string {
+  if (onboardingConfig?.consentDisclosure) {
+    return onboardingConfig.consentDisclosure;
+  }
+
   return [
     `Before we get started, here's what ${agentName} stores about you:`,
     `- Your name and communication preferences`,
@@ -339,6 +346,8 @@ export class JoinRequestManager {
 
 /**
  * Build a new user profile from onboarding data.
+ * Supports both minimal onboarding (name + consent) and rich onboarding
+ * (bio, interests, timezone, relationship context, custom fields).
  */
 export function buildUserProfile(opts: {
   name: string;
@@ -350,6 +359,12 @@ export function buildUserProfile(opts: {
   style?: string;
   autonomyLevel?: 'full' | 'confirm-destructive' | 'confirm-all';
   consent?: ConsentRecord;
+  // ── Rich onboarding fields (Phase 3) ──
+  bio?: string;
+  interests?: string[];
+  timezone?: string;
+  relationshipContext?: string;
+  customFields?: Record<string, string>;
 }): UserProfile {
   // Generate a URL-safe user ID from the name if not provided
   const userId = opts.userId || opts.name.toLowerCase().replace(/[^a-z0-9]/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, '').slice(0, 32) || `user-${crypto.randomBytes(4).toString('hex')}`;
@@ -370,18 +385,159 @@ export function buildUserProfile(opts: {
     preferences: {
       style: opts.style,
       autonomyLevel: opts.autonomyLevel || 'confirm-destructive',
+      timezone: opts.timezone,
     },
     consent: opts.consent,
     dataCollected: createDataManifest({
       telegramId: !!opts.telegramTopicId || !!opts.telegramUserId,
       conversationHistory: !!opts.telegramTopicId,
+      communicationPreferences: !!(opts.style || opts.timezone),
     }),
     pendingTelegramTopic: false,
     createdAt: new Date().toISOString(),
     telegramUserId: opts.telegramUserId,
   };
 
+  // Rich onboarding fields — only set if provided
+  if (opts.bio !== undefined) profile.bio = opts.bio;
+  if (opts.interests !== undefined) profile.interests = opts.interests;
+  if (opts.relationshipContext !== undefined) profile.relationshipContext = opts.relationshipContext;
+  if (opts.customFields !== undefined) profile.customFields = opts.customFields;
+
   return profile;
+}
+
+/**
+ * Get the list of onboarding prompts for a given OnboardingConfig.
+ * Returns an ordered list of questions the onboarding flow should ask.
+ * Only includes questions for fields the agent has configured.
+ */
+export function getOnboardingPrompts(config: OnboardingConfig): Array<{
+  fieldName: string;
+  prompt: string;
+  required: boolean;
+  type: 'builtin' | 'custom';
+}> {
+  const prompts: Array<{
+    fieldName: string;
+    prompt: string;
+    required: boolean;
+    type: 'builtin' | 'custom';
+  }> = [];
+
+  if (config.collectBio) {
+    prompts.push({
+      fieldName: 'bio',
+      prompt: 'Tell me a bit about yourself (optional — a sentence or two is fine):',
+      required: false,
+      type: 'builtin',
+    });
+  }
+
+  if (config.collectInterests) {
+    prompts.push({
+      fieldName: 'interests',
+      prompt: 'What topics or areas are you interested in? (comma-separated, optional):',
+      required: false,
+      type: 'builtin',
+    });
+  }
+
+  if (config.collectTimezone) {
+    prompts.push({
+      fieldName: 'timezone',
+      prompt: 'What timezone are you in? (e.g., America/New_York, Europe/London):',
+      required: false,
+      type: 'builtin',
+    });
+  }
+
+  if (config.collectStyle) {
+    prompts.push({
+      fieldName: 'style',
+      prompt: 'How do you prefer communication? (e.g., "technical and direct", "friendly and detailed"):',
+      required: false,
+      type: 'builtin',
+    });
+  }
+
+  if (config.collectRelationshipContext) {
+    prompts.push({
+      fieldName: 'relationshipContext',
+      prompt: 'How do you relate to this project? (e.g., "developer", "beta tester", "curious observer"):',
+      required: false,
+      type: 'builtin',
+    });
+  }
+
+  // Custom questions from agent config
+  if (config.customQuestions) {
+    for (const q of config.customQuestions) {
+      prompts.push({
+        fieldName: q.fieldName,
+        prompt: q.prompt,
+        required: q.required ?? false,
+        type: 'custom',
+      });
+    }
+  }
+
+  return prompts;
+}
+
+/**
+ * Parse a comma-separated interest string into an array.
+ * Trims whitespace, removes empty entries.
+ */
+export function parseInterests(input: string): string[] {
+  return input
+    .split(',')
+    .map(s => s.trim())
+    .filter(s => s.length > 0);
+}
+
+/**
+ * Apply rich onboarding answers to an existing UserProfile.
+ * Used when onboarding is collected in stages (e.g., Telegram multi-step flow).
+ */
+export function applyOnboardingAnswers(
+  profile: UserProfile,
+  answers: Record<string, string>,
+  config: OnboardingConfig,
+): UserProfile {
+  const updated = { ...profile };
+
+  // Built-in fields
+  if ('bio' in answers && config.collectBio) {
+    updated.bio = answers.bio;
+  }
+  if ('interests' in answers && config.collectInterests) {
+    updated.interests = parseInterests(answers.interests);
+  }
+  if ('timezone' in answers && config.collectTimezone) {
+    updated.preferences = { ...updated.preferences, timezone: answers.timezone };
+  }
+  if ('style' in answers && config.collectStyle) {
+    updated.preferences = { ...updated.preferences, style: answers.style };
+  }
+  if ('relationshipContext' in answers && config.collectRelationshipContext) {
+    updated.relationshipContext = answers.relationshipContext;
+  }
+
+  // Custom fields — only accept fields defined in config
+  if (config.customQuestions) {
+    const customFields = { ...updated.customFields };
+    for (const q of config.customQuestions) {
+      if (q.fieldName in answers) {
+        customFields[q.fieldName] = answers[q.fieldName];
+      }
+    }
+    if (Object.keys(customFields).length > 0) {
+      updated.customFields = customFields;
+    }
+  }
+
+  return updated;
 }
 
 /**

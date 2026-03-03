@@ -14,12 +14,12 @@
 import fs from 'node:fs';
 import path from 'node:path';
 
-// ── Constants ────────────────────────────────────────────────────────
+// ── Constants (defaults) ─────────────────────────────────────────────
 
 const NONCE_FILE = 'nonces.jsonl';
-const NONCE_MAX_AGE_MS = 60_000; // 60 seconds
-const TIMESTAMP_WINDOW_MS = 30_000; // 30-second window
-const PRUNE_INTERVAL_MS = 5 * 60_000; // 5 minutes
+const DEFAULT_NONCE_MAX_AGE_MS = 60_000; // 60 seconds
+const DEFAULT_TIMESTAMP_WINDOW_MS = 30_000; // 30-second window
+const DEFAULT_PRUNE_INTERVAL_MS = 5 * 60_000; // 5 minutes
 
 // ── Types ────────────────────────────────────────────────────────────
 
@@ -32,6 +32,15 @@ interface SequenceState {
   [peerId: string]: number;
 }
 
+export interface NonceStoreConfig {
+  /** Timestamp window for freshness validation (default: 30s). */
+  timestampWindowMs?: number;
+  /** Max age for nonce retention before pruning (default: 60s). */
+  nonceMaxAgeMs?: number;
+  /** Interval between automatic prune runs (default: 5 min). */
+  pruneIntervalMs?: number;
+}
+
 // ── NonceStore ───────────────────────────────────────────────────────
 
 export class NonceStore {
@@ -40,9 +49,15 @@ export class NonceStore {
   private sequences: SequenceState = {};
   private pruneTimer: ReturnType<typeof setInterval> | null = null;
   private initialized: boolean = false;
+  private timestampWindowMs: number;
+  private nonceMaxAgeMs: number;
+  private pruneIntervalMs: number;
 
-  constructor(stateDir: string) {
+  constructor(stateDir: string, config?: NonceStoreConfig) {
     this.stateDir = stateDir;
+    this.timestampWindowMs = config?.timestampWindowMs ?? DEFAULT_TIMESTAMP_WINDOW_MS;
+    this.nonceMaxAgeMs = config?.nonceMaxAgeMs ?? DEFAULT_NONCE_MAX_AGE_MS;
+    this.pruneIntervalMs = config?.pruneIntervalMs ?? DEFAULT_PRUNE_INTERVAL_MS;
   }
 
   /**
@@ -57,7 +72,7 @@ export class NonceStore {
     this.prune();
 
     // Start continuous pruning
-    this.pruneTimer = setInterval(() => this.prune(), PRUNE_INTERVAL_MS);
+    this.pruneTimer = setInterval(() => this.prune(), this.pruneIntervalMs);
     if (this.pruneTimer.unref) this.pruneTimer.unref(); // Don't keep process alive
 
     this.initialized = true;
@@ -93,8 +108,8 @@ export class NonceStore {
     // 1. Timestamp window
     const ts = typeof timestamp === 'string' ? new Date(timestamp).getTime() : timestamp;
     const age = Math.abs(Date.now() - ts);
-    if (age > TIMESTAMP_WINDOW_MS) {
-      return { valid: false, reason: `Timestamp outside ${TIMESTAMP_WINDOW_MS / 1000}s window (age: ${Math.round(age / 1000)}s)` };
+    if (age > this.timestampWindowMs) {
+      return { valid: false, reason: `Timestamp outside ${this.timestampWindowMs / 1000}s window (age: ${Math.round(age / 1000)}s)` };
     }
 
     // 2. Nonce uniqueness
@@ -136,7 +151,7 @@ export class NonceStore {
    * Prune expired nonces from memory and rewrite the file.
    */
   prune(): void {
-    const cutoff = Date.now() - NONCE_MAX_AGE_MS;
+    const cutoff = Date.now() - this.nonceMaxAgeMs;
     const filePath = this.noncePath;
 
     if (!fs.existsSync(filePath)) return;
