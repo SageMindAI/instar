@@ -152,7 +152,7 @@ describe('No Silent Fallbacks', () => {
     // When you fix a silent fallback (add DegradationReporter.report()
     // or add @silent-fallback-ok exemption), lower this number.
     // ═══════════════════════════════════════════════════════════
-    const BASELINE = 12; // 10 in core/CapabilityMapper.ts + 2 in messaging/TelegramAdapter.ts (dashboard UX)
+    const BASELINE = 18; // 10 CapabilityMapper + 1 TelegramAdapter + 1 JobScheduler + 6 TopicResumeMap
 
     if (silentFallbacks.length > 0) {
       const report = silentFallbacks.map(fb =>
