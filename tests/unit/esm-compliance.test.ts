@@ -30,12 +30,17 @@ describe('ESM compliance', () => {
       const content = fs.readFileSync(file, 'utf-8');
       // Match require('...') but exclude template strings and comments
       const lines = content.split('\n');
+      let inTemplateLiteral = false;
       for (let i = 0; i < lines.length; i++) {
         const line = lines[i].trim();
+        // Track template literal boundaries (rough: toggle on lines with odd backtick count)
+        const backtickCount = (line.match(/`/g) || []).length;
+        if (backtickCount % 2 === 1) inTemplateLiteral = !inTemplateLiteral;
+        if (inTemplateLiteral) continue;
         // Skip comments
         if (line.startsWith('//') || line.startsWith('*')) continue;
-        // Skip lines in template literals (rough heuristic)
-        if (line.includes('`')) continue;
+        // Skip lines with backticks (inline templates)
+        if (backtickCount > 0) continue;
 
         if (/\brequire\s*\(/.test(line)) {
           const relPath = path.relative(process.cwd(), file);

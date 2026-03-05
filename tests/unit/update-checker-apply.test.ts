@@ -36,6 +36,7 @@ describe('UpdateChecker.applyUpdate()', () => {
       updateAvailable: false,
       checkedAt: new Date().toISOString(),
     });
+    vi.spyOn(checker, 'getInstalledVersion').mockReturnValue('0.1.12');
 
     const result = await checker.applyUpdate();
 

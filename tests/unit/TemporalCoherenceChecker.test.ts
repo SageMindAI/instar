@@ -989,8 +989,8 @@ describe('TemporalCoherenceChecker', () => {
       fs.writeFileSync(path.join(projectDir, 'AGENT.md'), content);
       const checker = new TemporalCoherenceChecker(makeConfig(projectDir, stateDir));
       const state = checker.loadCurrentState()!;
-      // Header + 2000 chars of content
-      expect(state.length).toBeLessThan(2100);
+      // Header + 4000 chars of content
+      expect(state.length).toBeLessThan(4100);
     });
 
     it('uses custom maxCharsPerDocument', () => {

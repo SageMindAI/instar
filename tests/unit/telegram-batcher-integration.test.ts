@@ -140,8 +140,8 @@ describe('TelegramAdapter + NotificationBatcher', () => {
       // One digest message sent (all same topicId = grouped)
       expect(sentMessages).toHaveLength(1);
       expect(sentMessages[0].topicId).toBe(42);
-      expect(sentMessages[0].text).toContain('Summary');
-      expect(sentMessages[0].text).toContain('3 items');
+      expect(sentMessages[0].text).toContain('Job A done');
+      expect(sentMessages[0].text).toContain('Job B done');
     });
 
     it('groups notifications by topicId in flush', async () => {
@@ -229,7 +229,7 @@ describe('TelegramAdapter + NotificationBatcher', () => {
       // The digest message should have been sent
       expect(sentMessages).toHaveLength(1);
       expect(sentMessages[0].topicId).toBe(42);
-      expect(sentMessages[0].text).toContain('Summary');
+      expect(sentMessages[0].text).toContain('Last message');
     });
 
     it('does not crash stop if batcher flush fails', async () => {

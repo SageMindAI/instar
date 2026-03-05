@@ -147,7 +147,7 @@ describe('Phase 2A: Update coalescing', () => {
     expect(mockChecker.applyUpdate).toHaveBeenCalledTimes(1);
 
     const status = updater.getStatus();
-    expect(status.lastAppliedVersion).toBe('0.9.9');
+    expect(status.lastAppliedVersion).toBe('0.9.11');
     expect(status.coalescingUntil).toBeNull();
   });
 

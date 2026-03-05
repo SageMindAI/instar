@@ -635,6 +635,9 @@ describe('Setup Lock File', () => {
   beforeEach(() => {
     tmpHome = createTempDir();
     origHomedir = os.homedir;
+    // Clean up any real setup lock that might interfere (LOCK_PATH is computed at module load)
+    const realLockPath = path.join(origHomedir(), '.instar', 'setup-lock.json');
+    if (fs.existsSync(realLockPath)) fs.unlinkSync(realLockPath);
     (os as any).homedir = () => tmpHome.dir;
   });
 
