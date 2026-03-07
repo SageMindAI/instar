@@ -8,24 +8,19 @@
 
 ## What Changed
 
-Three-layer defense against post-compaction incoherent Telegram responses:
-
-1. **compaction-recovery.sh** now detects unanswered user messages in topic history after compaction. Uses `INSTAR_TELEGRAM_TOPIC` env var (set at spawn) with fallback to lifeline topic. Unanswered messages are surfaced with hard directives requiring substantive responses.
-
-2. **New `telegram-topic-context.sh` UserPromptSubmit hook** fires on every incoming `[telegram:N]` message. Fetches recent topic history from the Instar server API, formats it as conversation context, and detects unanswered user messages — preventing the "Hey! What's up?" failure after compaction or session restart.
-
-3. **PostUpdateMigrator** now installs the `telegram-topic-context.sh` hook and wires `UserPromptSubmit` into `.claude/settings.json` during migration. Idempotent — safe to run multiple times.
-
-The unanswered detection algorithm: walk messages chronologically, track consecutive user messages. Any agent response resets the queue. Whatever remains pending at end = unanswered messages that need substantive responses.
+<!-- Describe what changed technically. What new features, APIs, behavioral changes? -->
+<!-- Write this for the AGENT — they need to understand the system deeply. -->
 
 ## What to Tell Your User
 
-- **Smarter Telegram responses**: "Your agent now automatically reads recent conversation history before responding to Telegram messages. No more generic greetings after context compaction — the agent will address what you actually said."
+<!-- Write talking points the agent should relay to their user. -->
+<!-- This should be warm, conversational, user-facing — not a changelog. -->
+<!-- Focus on what THEY can now do, not internal plumbing. -->
+
+- **[Feature name]**: "[Brief, friendly description of what this means for the user]"
 
 ## Summary of New Capabilities
 
 | Capability | How to Use |
 |-----------|-----------|
-| Unanswered message detection (compaction) | Automatic — fires on compaction recovery |
-| Per-message Telegram context injection | Automatic — UserPromptSubmit hook on `[telegram:N]` messages |
-| UserPromptSubmit settings migration | Automatic — PostUpdateMigrator adds hook on next update |
+| [Capability] | [Endpoint, command, or "automatic"] |
