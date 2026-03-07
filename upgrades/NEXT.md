@@ -1,23 +1,26 @@
 # Upgrade Guide — vNEXT
 
 <!-- bump: patch -->
+<!-- Valid values: patch, minor, major -->
+<!-- patch = bug fixes, refactors, test additions, doc updates -->
+<!-- minor = new features, new APIs, new capabilities (backwards-compatible) -->
+<!-- major = breaking changes to existing APIs or behavior -->
 
 ## What Changed
 
-Fixed WhatsApp QR pairing flow in the setup wizard:
-
-- **Dashboard-first approach**: The wizard now navigates to the dashboard UI, authenticates with the PIN, and clicks the WhatsApp button to render the QR — instead of trying to hit `/whatsapp/qr` directly in the browser (which fails because that API requires Bearer auth headers that browsers can't pass via URL).
-- **QR initialization retry**: Added retry loop (up to 30 seconds) for when the WhatsApp adapter hasn't generated its first QR code yet after server start.
-- **Removed WhatsApp Web fallback**: WhatsApp Web creates a competing linked device session that conflicts with the Baileys adapter. The wizard no longer suggests opening web.whatsapp.com.
-- **API QR fallback**: If dashboard rendering fails, the wizard fetches QR data via curl with auth and renders it in the browser via JavaScript.
+<!-- Describe what changed technically. What new features, APIs, behavioral changes? -->
+<!-- Write this for the AGENT — they need to understand the system deeply. -->
 
 ## What to Tell Your User
 
-- **Smoother WhatsApp setup**: "The QR code pairing flow is more reliable now — it properly uses the dashboard to display the QR code."
+<!-- Write talking points the agent should relay to their user. -->
+<!-- This should be warm, conversational, user-facing — not a changelog. -->
+<!-- Focus on what THEY can now do, not internal plumbing. -->
+
+- **[Feature name]**: "[Brief, friendly description of what this means for the user]"
 
 ## Summary of New Capabilities
 
 | Capability | How to Use |
 |-----------|-----------|
-| Dashboard-based QR pairing | Automatic during setup — navigates to dashboard, authenticates, opens QR panel |
-| QR initialization retry | Automatic — waits up to 30s for adapter to generate first QR |
+| [Capability] | [Endpoint, command, or "automatic"] |
