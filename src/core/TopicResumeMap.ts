@@ -13,6 +13,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
+import { spawnSync } from 'node:child_process';
 
 interface ResumeEntry {
   uuid: string;
@@ -30,10 +31,12 @@ const MAX_AGE_MS = 24 * 60 * 60 * 1000;
 export class TopicResumeMap {
   private filePath: string;
   private projectDir: string;
+  private tmuxPath: string;
 
-  constructor(stateDir: string, projectDir: string) {
+  constructor(stateDir: string, projectDir: string, tmuxPath?: string) {
     this.filePath = path.join(stateDir, 'topic-resume-map.json');
     this.projectDir = projectDir;
+    this.tmuxPath = tmuxPath || 'tmux';
   }
 
   /**
@@ -162,6 +165,88 @@ export class TopicResumeMap {
       fs.writeFileSync(this.filePath, JSON.stringify(map, null, 2));
     } catch {
       // Best effort
+    }
+  }
+
+  /**
+   * Proactive resume heartbeat: scan all active topic-linked tmux sessions and
+   * update the topic→UUID mapping. Should be called periodically (e.g., every 60s).
+   *
+   * This ensures that even if a session crashes unexpectedly, we already have
+   * its UUID on file for --resume. Previously, UUIDs were only persisted at kill
+   * time — if a session died naturally, the UUID was lost.
+   */
+  refreshResumeMappings(topicSessions: Map<number, string>): void {
+    try {
+      if (!topicSessions || topicSessions.size === 0) return;
+
+      const projectHash = this.projectDir.replace(/\//g, '-');
+      const projectJsonlDir = path.join(os.homedir(), '.claude', 'projects', projectHash);
+
+      if (!fs.existsSync(projectJsonlDir)) return;
+
+      // Get all JSONL files with their stats
+      const jsonlFiles = fs.readdirSync(projectJsonlDir)
+        .filter(f => f.endsWith('.jsonl'))
+        .map(f => {
+          try {
+            const stat = fs.statSync(path.join(projectJsonlDir, f));
+            return { name: f, mtimeMs: stat.mtimeMs, uuid: f.replace('.jsonl', '') };
+          } catch { return null; }
+        })
+        .filter((f): f is { name: string; mtimeMs: number; uuid: string } => f !== null && f.uuid.length >= 30)
+        .sort((a, b) => b.mtimeMs - a.mtimeMs);
+
+      if (jsonlFiles.length === 0) return;
+
+      const map = this.load();
+      let updated = 0;
+      const claimedUuids = new Set<string>();
+
+      for (const [topicId, sessionName] of topicSessions) {
+        // Verify the tmux session is actually alive
+        const hasSession = spawnSync(this.tmuxPath, ['has-session', '-t', `=${sessionName}`]);
+        if (hasSession.status !== 0) continue;
+
+        // Find the JSONL for this session (most recently modified, not already claimed)
+        const availableJsonl = jsonlFiles.find(f => !claimedUuids.has(f.uuid));
+        if (!availableJsonl) continue;
+
+        claimedUuids.add(availableJsonl.uuid);
+
+        const topicKey = String(topicId);
+        const existingEntry = map[topicKey];
+
+        // Update if UUID changed, entry doesn't exist, or entry is stale (>2 hours)
+        const entryAge = existingEntry ? Date.now() - new Date(existingEntry.savedAt).getTime() : Infinity;
+        if (!existingEntry || existingEntry.uuid !== availableJsonl.uuid || entryAge > 2 * 60 * 60 * 1000) {
+          map[topicKey] = {
+            uuid: availableJsonl.uuid,
+            savedAt: new Date().toISOString(),
+            sessionName,
+          };
+          updated++;
+        }
+      }
+
+      if (updated > 0) {
+        // Prune entries older than 24 hours that aren't active
+        const cutoff = Date.now() - MAX_AGE_MS;
+        const activeTopicKeys = new Set([...topicSessions.keys()].map(String));
+        for (const key of Object.keys(map)) {
+          if (!activeTopicKeys.has(key) && Date.now() - new Date(map[key].savedAt).getTime() > MAX_AGE_MS) {
+            delete map[key];
+          }
+        }
+
+        try {
+          fs.writeFileSync(this.filePath, JSON.stringify(map, null, 2));
+        } catch (err) {
+          console.error(`[TopicResumeMap] Failed to save heartbeat: ${err}`);
+        }
+      }
+    } catch (err) {
+      console.error('[TopicResumeMap] Resume heartbeat error:', err);
     }
   }
 

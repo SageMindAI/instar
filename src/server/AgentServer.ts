@@ -37,6 +37,7 @@ import type { MultiMachineCoordinator } from '../core/MultiMachineCoordinator.js
 import type { TopicMemory } from '../memory/TopicMemory.js';
 import type { FeedbackAnomalyDetector } from '../monitoring/FeedbackAnomalyDetector.js';
 import { createRoutes } from './routes.js';
+import { mountWhatsAppWebhooks } from '../messaging/backends/WhatsAppWebhookRoutes.js';
 import { createMachineRoutes } from './machineRoutes.js';
 import { corsMiddleware, authMiddleware, requestTimeout, errorHandler } from './middleware.js';
 import { WebSocketManager } from './WebSocketManager.js';
@@ -97,6 +98,8 @@ export class AgentServer {
     autonomousEvolution?: import('../core/AutonomousEvolution.js').AutonomousEvolution;
     coordinator?: MultiMachineCoordinator;
     localSigningKeyPem?: string;
+    whatsapp?: import('../messaging/WhatsAppAdapter.js').WhatsAppAdapter;
+    whatsappBusinessBackend?: import('../messaging/backends/BusinessApiBackend.js').BusinessApiBackend;
   }) {
     this.config = options.config;
     this.startTime = new Date();
@@ -193,6 +196,16 @@ export class AgentServer {
       this.app.use(machineRoutes);
     }
 
+    // WhatsApp Business API webhook routes — mounted BEFORE auth middleware because
+    // Meta's webhook verification sends GET requests without Bearer tokens.
+    if (options.whatsappBusinessBackend) {
+      // Import is at top of file — mountWhatsAppWebhooks is synchronous
+      mountWhatsAppWebhooks({
+        app: this.app,
+        backend: options.whatsappBusinessBackend,
+      });
+    }
+
     this.app.use(authMiddleware(options.config.authToken));
     this.app.use(requestTimeout(options.config.requestTimeoutMs));
 
@@ -242,6 +255,7 @@ export class AgentServer {
       autonomyManager: options.autonomyManager ?? null,
       trustElevationTracker: options.trustElevationTracker ?? null,
       autonomousEvolution: options.autonomousEvolution ?? null,
+      whatsapp: options.whatsapp ?? null,
       startTime: this.startTime,
     });
     this.app.use(routes);

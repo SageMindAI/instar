@@ -63,6 +63,8 @@ import type { SpawnRequestManager } from '../messaging/SpawnRequestManager.js';
 import { getOutboundQueueStatus, cleanupDeliveredOutbound, buildAgentList } from '../messaging/GitSyncTransport.js';
 import type { CapabilityMapper } from '../core/CapabilityMapper.js';
 import type { TopicResumeMap } from '../core/TopicResumeMap.js';
+import { llmValidateResumeCoherence } from '../core/ResumeValidator.js';
+import { ClaudeCliIntelligenceProvider } from '../core/ClaudeCliIntelligenceProvider.js';
 import type { MessageType, MessagePriority, MessageFilter } from '../messaging/types.js';
 import { verifyAgentToken } from '../messaging/AgentTokenManager.js';
 import type { WorkingMemoryAssembler } from '../memory/WorkingMemoryAssembler.js';
@@ -115,6 +117,7 @@ export interface RouteContext {
   autonomyManager: AutonomyProfileManager | null;
   trustElevationTracker: TrustElevationTracker | null;
   autonomousEvolution: AutonomousEvolution | null;
+  whatsapp: import('../messaging/WhatsAppAdapter.js').WhatsAppAdapter | null;
   startTime: Date;
 }
 
@@ -298,6 +301,22 @@ export function createRoutes(ctx: RouteContext): Router {
         };
         // Contribute to overall degradation if critical
         if (latest?.status === 'critical') {
+          isDegraded = true;
+        }
+      }
+
+      // WhatsApp adapter status
+      if (ctx.whatsapp) {
+        const waStatus = ctx.whatsapp.getStatus();
+        base.whatsapp = {
+          state: waStatus.state,
+          phoneNumber: waStatus.phoneNumber,
+          registeredSessions: waStatus.registeredSessions,
+          pendingMessages: waStatus.pendingMessages,
+          stalledChannels: waStatus.stalledChannels,
+          totalMessagesLogged: waStatus.totalMessagesLogged,
+        };
+        if (waStatus.state === 'disconnected') {
           isDegraded = true;
         }
       }
@@ -2201,6 +2220,16 @@ export function createRoutes(ctx: RouteContext): Router {
     res.json(item);
   });
 
+  // ── WhatsApp ────────────────────────────────────────────────────
+
+  router.get('/whatsapp/status', (_req, res) => {
+    if (!ctx.whatsapp) {
+      res.status(503).json({ error: 'WhatsApp not configured' });
+      return;
+    }
+    res.json(ctx.whatsapp.getStatus());
+  });
+
   // ── Relationships ─────────────────────────────────────────────────
 
   router.get('/relationships', (req, res) => {
@@ -3294,10 +3323,21 @@ export function createRoutes(ctx: RouteContext): Router {
         const bootstrapMessage = `[telegram:${topicId}] ${text} (IMPORTANT: Read ${ctxPath} for thread history and Telegram relay instructions — you MUST relay your response back.)`;
 
         // Check for a resume UUID from a previously-killed session
-        const resumeSessionId = ctx.topicResumeMap?.get(topicId) ?? undefined;
+        let resumeSessionId = ctx.topicResumeMap?.get(topicId) ?? undefined;
         if (resumeSessionId) {
           console.log(`[telegram-forward] Found resume UUID for topic ${topicId}: ${resumeSessionId}`);
         }
+
+        // LLM-supervised coherence gate: validate resume UUID matches topic before using it
+        const coherencePromise = resumeSessionId
+          ? llmValidateResumeCoherence(resumeSessionId, topicId, topicName, ctx.config.sessions.projectDir, ctx.telegram, new ClaudeCliIntelligenceProvider(ctx.config.sessions.claudePath)).catch(() => false)
+          : Promise.resolve(true);
+
+        coherencePromise.then((coherent) => {
+          if (resumeSessionId && !coherent) {
+            console.warn(`[telegram-forward] LLM rejected resume ${resumeSessionId!.slice(0, 8)}... for topic ${topicId} — starting fresh`);
+            resumeSessionId = undefined;
+          }
 
         ctx.sessionManager.spawnInteractiveSession(bootstrapMessage, topicName, { telegramTopicId: topicId, resumeSessionId }).then((newSessionName) => {
           // Clear resume entry after successful spawn
@@ -3314,6 +3354,7 @@ export function createRoutes(ctx: RouteContext): Router {
         }).catch((err) => {
           console.error(`[telegram-forward] Spawn failed:`, err);
         });
+        }); // end coherencePromise.then()
 
         res.json({ ok: true, forwarded: true, method: 'spawn', topicName });
       }

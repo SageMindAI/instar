@@ -16,6 +16,13 @@ import { DegradationReporter } from '../monitoring/DegradationReporter.js';
 import { NotificationBatcher, NotificationTier } from './NotificationBatcher.js';
 import type { ContentValidationConfig } from './TopicContentValidator.js';
 import { validateTopicContent, getTopicPurpose, classifyContent } from './TopicContentValidator.js';
+import { SHARED_INFRA_FLAGS } from './shared/FeatureFlags.js';
+import { MessageLogger, type LogEntry as SharedLogEntry } from './shared/MessageLogger.js';
+import { SessionChannelRegistry } from './shared/SessionChannelRegistry.js';
+import { StallDetector, type StallEvent } from './shared/StallDetector.js';
+import { CommandRouter } from './shared/CommandRouter.js';
+import { AuthGate } from './shared/AuthGate.js';
+import { MessagingEventBus } from './shared/MessagingEventBus.js';
 
 export interface TelegramConfig {
   /** Bot token from @BotFather */
@@ -312,6 +319,19 @@ export class TelegramAdapter implements MessagingAdapter {
   // Flush notifications callback — fires when user sends /flush
   public onFlushNotifications: ((replyTopicId: number) => Promise<void>) | null = null;
 
+  // Shared infrastructure modules (Phase 1 extraction)
+  private sharedLogger: MessageLogger | null = null;
+  private sharedRegistry: SessionChannelRegistry | null = null;
+  private sharedStallDetector: StallDetector | null = null;
+  private sharedCommandRouter: CommandRouter | null = null;
+  private sharedAuthGate: AuthGate | null = null;
+  private eventBus: MessagingEventBus | null = null;
+
+  /** Get the event bus for external subscribers (Phase 1e). Returns null if flag is off. */
+  getEventBus(): MessagingEventBus | null {
+    return this.eventBus;
+  }
+
   constructor(config: TelegramConfig, stateDir: string) {
     this.config = config;
     this.stateDir = stateDir;
@@ -322,6 +342,226 @@ export class TelegramAdapter implements MessagingAdapter {
     this.loadRegistry();
     this.loadOffset();
     this.loadAttentionItems();
+
+    // Initialize shared modules when feature flags are enabled
+    if (SHARED_INFRA_FLAGS.useSharedMessageLogger) {
+      this.sharedLogger = new MessageLogger({ logPath: this.messageLogPath });
+    }
+    if (SHARED_INFRA_FLAGS.useSharedStallDetector) {
+      this.sharedStallDetector = new StallDetector({
+        stallTimeoutMinutes: config.stallTimeoutMinutes,
+        promiseTimeoutMinutes: config.promiseTimeoutMinutes,
+      });
+    }
+    if (SHARED_INFRA_FLAGS.useSharedCommandRouter) {
+      this.sharedCommandRouter = new CommandRouter('telegram');
+      this.registerSharedCommands();
+    }
+    if (SHARED_INFRA_FLAGS.useSharedAuthGate) {
+      this.sharedAuthGate = new AuthGate({
+        authorizedUsers: (config.authorizedUserIds ?? []).map(id => id.toString()),
+      });
+    }
+    if (SHARED_INFRA_FLAGS.useEventEmitterPattern) {
+      this.eventBus = new MessagingEventBus('telegram');
+    }
+  }
+
+  /**
+   * Register all Telegram commands with the shared CommandRouter (Phase 1a).
+   * Each command delegates back to the existing handler logic.
+   */
+  private registerSharedCommands(): void {
+    if (!this.sharedCommandRouter) return;
+
+    // Attention topic interceptor
+    this.sharedCommandRouter.addInterceptor(async (ctx) => {
+      const topicId = parseInt(ctx.channelId, 10);
+      if (this.isAttentionTopic(topicId)) {
+        return this.handleAttentionCommand(topicId, ctx.rawText);
+      }
+      return false;
+    });
+
+    this.sharedCommandRouter.register('flush', async (ctx) => {
+      const topicId = parseInt(ctx.channelId, 10);
+      if (this.batcher && this.batcher.isEnabled()) {
+        const flushed = await this.batcher.flushAll();
+        if (flushed > 0) {
+          await this.sendToTopic(topicId, `Flushed ${flushed} batched notification${flushed === 1 ? '' : 's'}.`).catch(() => {});
+        } else {
+          await this.sendToTopic(topicId, 'No batched notifications to flush.').catch(() => {});
+        }
+      } else if (this.onFlushNotifications) {
+        this.onFlushNotifications(topicId).catch(err => {
+          console.error('[telegram] Flush notifications failed:', err);
+          this.sendToTopic(topicId, 'Failed to flush notifications.').catch(() => {});
+        });
+      } else {
+        await this.sendToTopic(topicId, 'Notification batching is not enabled.').catch(() => {});
+      }
+      return true;
+    }, { description: 'Flush batched notifications' });
+
+    this.sharedCommandRouter.register('sessions', async (ctx) => {
+      const topicId = parseInt(ctx.channelId, 10);
+      const filterUnclaimed = ctx.args.includes('unclaimed');
+      if (!this.onListSessions) {
+        await this.sendToTopic(topicId, 'Session listing not available.').catch(() => {});
+        return true;
+      }
+      const sessions = this.onListSessions();
+      if (sessions.length === 0) {
+        await this.sendToTopic(topicId, 'No sessions running.').catch(() => {});
+        return true;
+      }
+      const lines: string[] = [];
+      for (const s of sessions) {
+        const linkedTopic = this.getTopicForSession(s.tmuxSession);
+        const claimed = linkedTopic !== null;
+        if (filterUnclaimed && claimed) continue;
+        const status = s.alive ? '\u2705' : '\u274c';
+        const claimTag = claimed ? ` (topic ${linkedTopic})` : ' \u{1f7e1} unclaimed';
+        lines.push(`${status} ${s.name}${claimTag}`);
+      }
+      if (lines.length === 0) {
+        await this.sendToTopic(topicId, filterUnclaimed ? 'No unclaimed sessions.' : 'No sessions.').catch(() => {});
+      } else {
+        await this.sendToTopic(topicId, lines.join('\n')).catch(() => {});
+      }
+      return true;
+    }, { description: 'List sessions', platforms: ['telegram'] });
+
+    this.sharedCommandRouter.register(['claim', 'link'], async (ctx) => {
+      const topicId = parseInt(ctx.channelId, 10);
+      const sessionName = ctx.args;
+      if (!sessionName) {
+        await this.sendToTopic(topicId, `Usage: /${ctx.command} <session-name>`).catch(() => {});
+        return true;
+      }
+      const existingSession = this.getSessionForTopic(topicId);
+      if (existingSession) {
+        await this.sendToTopic(topicId, `This topic is already linked to "${existingSession}". Use /unlink first.`).catch(() => {});
+        return true;
+      }
+      this.registerTopicSession(topicId, sessionName);
+      const verb = ctx.command === 'claim' ? 'Claimed' : 'Linked';
+      await this.sendToTopic(topicId, `${verb} session "${sessionName}" ${ctx.command === 'claim' ? 'into' : 'to'} this topic.`).catch(() => {});
+      return true;
+    }, { description: 'Link a session to this topic', platforms: ['telegram'] });
+
+    this.sharedCommandRouter.register('unlink', async (ctx) => {
+      const topicId = parseInt(ctx.channelId, 10);
+      const sessionName = this.getSessionForTopic(topicId);
+      if (!sessionName) {
+        await this.sendToTopic(topicId, 'No session linked to this topic.').catch(() => {});
+        return true;
+      }
+      this.unregisterTopic(topicId);
+      await this.sendToTopic(topicId, `Unlinked session "${sessionName}" from this topic.`).catch(() => {});
+      return true;
+    }, { description: 'Unlink session from topic', platforms: ['telegram'] });
+
+    this.sharedCommandRouter.register('interrupt', async (ctx) => {
+      const topicId = parseInt(ctx.channelId, 10);
+      const sessionName = this.getSessionForTopic(topicId);
+      if (!sessionName) {
+        await this.sendToTopic(topicId, 'No session linked to this topic.').catch(() => {});
+        return true;
+      }
+      if (!this.onInterruptSession) {
+        await this.sendToTopic(topicId, 'Interrupt not available (no handler registered).').catch(() => {});
+        return true;
+      }
+      try {
+        const success = await this.onInterruptSession(sessionName);
+        this.clearStallForTopic(topicId);
+        if (success) {
+          await this.sendToTopic(topicId, `Sent Escape to "${sessionName}" \u2014 it should resume processing.`).catch(() => {});
+        } else {
+          await this.sendToTopic(topicId, `Failed to interrupt "${sessionName}" \u2014 session may not exist.`).catch(() => {});
+        }
+      } catch (err) {
+        await this.sendToTopic(topicId, `Interrupt error: ${err instanceof Error ? err.message : String(err)}`).catch(() => {});
+      }
+      return true;
+    }, { description: 'Send Escape to unstick a stalled session' });
+
+    this.sharedCommandRouter.register('restart', async (ctx) => {
+      const topicId = parseInt(ctx.channelId, 10);
+      const sessionName = this.getSessionForTopic(topicId);
+      if (!sessionName) {
+        await this.sendToTopic(topicId, 'No session linked to this topic.').catch(() => {});
+        return true;
+      }
+      if (!this.onRestartSession) {
+        await this.sendToTopic(topicId, 'Restart not available (no handler registered).').catch(() => {});
+        return true;
+      }
+      this.clearStallForTopic(topicId);
+      await this.sendToTopic(topicId, `Restarting "${sessionName}"...`).catch(() => {});
+      try {
+        await this.onRestartSession(sessionName, topicId);
+        await this.sendToTopic(topicId, 'Session restarted.').catch(() => {});
+      } catch (err) {
+        await this.sendToTopic(topicId, `Restart failed: ${err instanceof Error ? err.message : String(err)}`).catch(() => {});
+      }
+      return true;
+    }, { description: 'Kill and respawn session' });
+
+    this.sharedCommandRouter.register('status', async (ctx) => {
+      const topicId = parseInt(ctx.channelId, 10);
+      const s = this.getStatus();
+      const lines = [
+        `Telegram adapter: ${s.started ? '\u2705 running' : '\u274c stopped'}`,
+        `Uptime: ${s.uptime ? Math.round(s.uptime / 60000) + 'm' : 'n/a'}`,
+        `Topic mappings: ${s.topicMappings}`,
+        `Pending stall alerts: ${s.pendingStalls}`,
+      ];
+      await this.sendToTopic(topicId, lines.join('\n')).catch(() => {});
+      return true;
+    }, { description: 'Show adapter status' });
+
+    this.sharedCommandRouter.register(['switch-account', 'sa'], async (ctx) => {
+      const topicId = parseInt(ctx.channelId, 10);
+      if (!ctx.args) return false;
+      if (this.onSwitchAccountRequest) {
+        this.onSwitchAccountRequest(ctx.args, topicId).catch(err => {
+          console.error('[telegram] Switch account failed:', err);
+          this.sendToTopic(topicId, `Switch failed: ${err instanceof Error ? err.message : String(err)}`).catch(() => {});
+        });
+      } else {
+        await this.sendToTopic(topicId, 'Account switching not available.').catch(() => {});
+      }
+      return true;
+    }, { description: 'Switch active Claude account' });
+
+    this.sharedCommandRouter.register(['quota', 'q'], async (ctx) => {
+      const topicId = parseInt(ctx.channelId, 10);
+      if (this.onQuotaStatusRequest) {
+        this.onQuotaStatusRequest(topicId).catch(err => {
+          console.error('[telegram] Quota status failed:', err);
+          this.sendToTopic(topicId, `Quota check failed: ${err instanceof Error ? err.message : String(err)}`).catch(() => {});
+        });
+      } else {
+        await this.sendToTopic(topicId, 'Quota status not available.').catch(() => {});
+      }
+      return true;
+    }, { description: 'Show multi-account quota summary' });
+
+    this.sharedCommandRouter.register('login', async (ctx) => {
+      const topicId = parseInt(ctx.channelId, 10);
+      const email = ctx.args || null;
+      if (this.onLoginRequest) {
+        this.onLoginRequest(email, topicId).catch(err => {
+          console.error('[telegram] Login flow failed:', err);
+          this.sendToTopic(topicId, `Login failed: ${err instanceof Error ? err.message : String(err)}`).catch(() => {});
+        });
+      } else {
+        await this.sendToTopic(topicId, 'Login not available.').catch(() => {});
+      }
+      return true;
+    }, { description: 'Seamless OAuth login from Telegram' });
   }
 
   async start(): Promise<void> {
@@ -343,9 +583,19 @@ export class TelegramAdapter implements MessagingAdapter {
     }
 
     // Start stall detection if configured
-    const stallMinutes = this.config.stallTimeoutMinutes ?? 5;
-    if (stallMinutes > 0) {
-      this.stallCheckInterval = setInterval(() => this.checkForStalls(), 30_000); // Check every 30s
+    if (this.sharedStallDetector) {
+      // Phase 1c: Wire shared stall detector callbacks and start
+      this.sharedStallDetector.setIsSessionAlive(this.onIsSessionAlive ? (name) => this.onIsSessionAlive!(name) : null);
+      this.sharedStallDetector.setIsSessionActive(this.onIsSessionActive ? (name) => this.onIsSessionActive!(name) : null);
+      this.sharedStallDetector.setOnStall(async (event, alive) => {
+        await this.handleSharedStallEvent(event, alive);
+      });
+      this.sharedStallDetector.start();
+    } else {
+      const stallMinutes = this.config.stallTimeoutMinutes ?? 5;
+      if (stallMinutes > 0) {
+        this.stallCheckInterval = setInterval(() => this.checkForStalls(), 30_000);
+      }
     }
   }
 
@@ -354,6 +604,9 @@ export class TelegramAdapter implements MessagingAdapter {
     if (this.pollTimeout) {
       clearTimeout(this.pollTimeout);
       this.pollTimeout = null;
+    }
+    if (this.sharedStallDetector) {
+      this.sharedStallDetector.stop();
     }
     if (this.stallCheckInterval) {
       clearInterval(this.stallCheckInterval);
@@ -436,18 +689,21 @@ export class TelegramAdapter implements MessagingAdapter {
     // Promise tracking — detect agent "working on it" messages that need follow-through
     const sessionName = this.topicToSession.get(topicId);
     if (sessionName) {
-      if (this.isPromiseMessage(text)) {
-        // Agent just promised to follow up — track it
-        this.pendingPromises.set(topicId, {
-          topicId,
-          sessionName,
-          promiseText: text.slice(0, 100),
-          promisedAt: Date.now(),
-          alerted: false,
-        });
-      } else if (this.pendingPromises.has(topicId) && this.isFollowThroughMessage(text)) {
-        // Agent delivered on its promise — clear it
-        this.pendingPromises.delete(topicId);
+      // Phase 1c: Delegate to shared StallDetector when flag is enabled
+      if (this.sharedStallDetector) {
+        this.sharedStallDetector.trackOutboundMessage(topicId.toString(), sessionName, text);
+      } else {
+        if (this.isPromiseMessage(text)) {
+          this.pendingPromises.set(topicId, {
+            topicId,
+            sessionName,
+            promiseText: text.slice(0, 100),
+            promisedAt: Date.now(),
+            alerted: false,
+          });
+        } else if (this.pendingPromises.has(topicId) && this.isFollowThroughMessage(text)) {
+          this.pendingPromises.delete(topicId);
+        }
       }
     }
 
@@ -953,6 +1209,11 @@ export class TelegramAdapter implements MessagingAdapter {
    * If no authorizedUserIds configured, all messages are accepted.
    */
   private isAuthorized(userId: number): boolean {
+    // Phase 1d: Delegate to shared AuthGate when flag is enabled
+    if (this.sharedAuthGate) {
+      return this.sharedAuthGate.isAuthorized(userId.toString());
+    }
+
     const authorized = this.config.authorizedUserIds;
     if (!authorized || authorized.length === 0) return true;
     return authorized.includes(userId);
@@ -1118,6 +1379,14 @@ export class TelegramAdapter implements MessagingAdapter {
     return this.topicToSession.get(topicId) ?? null;
   }
 
+  /**
+   * Get all active topic→session mappings.
+   * Used by TopicResumeMap heartbeat to proactively persist UUIDs.
+   */
+  getAllTopicSessions(): Map<number, string> {
+    return new Map(this.topicToSession);
+  }
+
   getTopicForSession(sessionName: string): number | null {
     return this.sessionToTopic.get(sessionName) ?? null;
   }
@@ -1225,6 +1494,12 @@ export class TelegramAdapter implements MessagingAdapter {
    * Used by stall detection to alert if no response comes back.
    */
   trackMessageInjection(topicId: number, sessionName: string, messageText: string): void {
+    // Phase 1c: Delegate to shared StallDetector when flag is enabled
+    if (this.sharedStallDetector) {
+      this.sharedStallDetector.trackMessageInjection(topicId.toString(), sessionName, messageText);
+      return;
+    }
+
     const key = `${topicId}-${Date.now()}`;
     this.pendingMessages.set(key, {
       topicId,
@@ -1236,6 +1511,12 @@ export class TelegramAdapter implements MessagingAdapter {
   }
 
   private clearStallForTopic(topicId: number): void {
+    // Phase 1c: Delegate to shared StallDetector when flag is enabled
+    if (this.sharedStallDetector) {
+      this.sharedStallDetector.clearStallForChannel(topicId.toString());
+      return;
+    }
+
     for (const [key, pending] of this.pendingMessages) {
       if (pending.topicId === topicId) {
         this.pendingMessages.delete(key);
@@ -1253,6 +1534,10 @@ export class TelegramAdapter implements MessagingAdapter {
 
   /** Clear promise tracking for a topic (e.g., after successful recovery) */
   clearPromiseTracking(topicId: number): void {
+    if (this.sharedStallDetector) {
+      this.sharedStallDetector.clearPromiseForChannel(topicId.toString());
+      return;
+    }
     this.pendingPromises.delete(topicId);
   }
 
@@ -1548,6 +1833,119 @@ export class TelegramAdapter implements MessagingAdapter {
     }
   }
 
+  /**
+   * Handle stall events from the shared StallDetector (Phase 1c).
+   * Bridges shared events back to Telegram-specific alert logic
+   * (triage nurse, quota classification, LLM gate, user notifications).
+   */
+  private async handleSharedStallEvent(event: StallEvent, alive: boolean): Promise<void> {
+    const topicId = parseInt(event.channelId, 10);
+
+    // Phase 1e: Emit to event bus
+    if (this.eventBus) {
+      if (event.type === 'stall') {
+        this.eventBus.emit('stall:detected', {
+          channelId: event.channelId,
+          sessionName: event.sessionName,
+          messageText: event.messageText,
+          injectedAt: event.injectedAt,
+          minutesElapsed: event.minutesElapsed,
+          alive,
+        }).catch(err => console.error(`[telegram] EventBus stall:detected error: ${err}`));
+      } else {
+        this.eventBus.emit('stall:promise-expired', {
+          channelId: event.channelId,
+          sessionName: event.sessionName,
+          promiseText: event.messageText,
+          promisedAt: event.injectedAt,
+          minutesElapsed: event.minutesElapsed,
+          alive,
+        }).catch(err => console.error(`[telegram] EventBus stall:promise-expired error: ${err}`));
+      }
+    }
+
+    if (event.type === 'stall') {
+      // Try LLM-powered triage first
+      if (this.onStallDetected) {
+        try {
+          const triageResult = await this.onStallDetected(
+            topicId, event.sessionName, event.messageText, event.injectedAt,
+          );
+          if (triageResult.resolved) return;
+        } catch (err) {
+          console.warn(`[telegram] Triage nurse error:`, err);
+        }
+      }
+
+      // Classify — check if it's a quota death
+      let isQuotaDeath = false;
+      if (this.onClassifySessionDeath) {
+        try {
+          const classification = await this.onClassifySessionDeath(event.sessionName);
+          if (classification && classification.cause === 'quota_exhaustion') {
+            isQuotaDeath = true;
+            this.sendToTopic(
+              topicId,
+              `\ud83d\udd34 Session hit quota limit \u2014 "${event.sessionName}" can't respond.\n\n` +
+              `${classification.detail}\n\n` +
+              `Use /quota to check accounts, /switch-account to switch, or /login to authenticate a new account.`,
+            ).catch(err => console.error(`[telegram] Quota stall alert failed: ${err}`));
+          }
+        } catch { /* Classification failed — fall through */ }
+      }
+
+      if (!isQuotaDeath) {
+        const shouldAlert = await this.confirmStallAlert({
+          type: 'stall',
+          sessionName: event.sessionName,
+          messageText: event.messageText,
+          minutesElapsed: event.minutesElapsed,
+          sessionAlive: alive,
+        });
+
+        if (shouldAlert) {
+          const status = alive ? 'running but not responding' : 'no longer running';
+          this.sendToTopic(
+            topicId,
+            `\u26a0\ufe0f No response after ${event.minutesElapsed} minutes. Session "${event.sessionName}" is ${status}.\n\nMessage: "${event.messageText}..."${alive ? '\n\nTry /interrupt to unstick, or /restart to respawn.' : '\n\nSend another message to auto-respawn.'}`,
+          ).catch(err => console.error(`[telegram] Stall alert failed: ${err}`));
+        }
+      }
+    } else if (event.type === 'promise-expired') {
+      // Try triage nurse first
+      if (this.onStallDetected) {
+        try {
+          const triageResult = await this.onStallDetected(
+            topicId, event.sessionName, `[promise expired] ${event.messageText}`, event.injectedAt,
+          );
+          if (triageResult.resolved) return;
+        } catch (err) {
+          console.warn(`[telegram] Promise triage error:`, err);
+        }
+      }
+
+      const shouldAlert = await this.confirmStallAlert({
+        type: 'promise-expired',
+        sessionName: event.sessionName,
+        messageText: event.messageText,
+        minutesElapsed: event.minutesElapsed,
+        sessionAlive: alive,
+      });
+
+      if (shouldAlert) {
+        if (!alive) {
+          await this.sendToTopic(topicId,
+            `The session stopped unexpectedly after saying "${event.messageText}". Sending a new message will auto-spawn a fresh session.`
+          ).catch(() => {});
+        } else {
+          await this.sendToTopic(topicId,
+            `It's been ${event.minutesElapsed} minutes since the session said "${event.messageText}" — checking on it now...`
+          ).catch(() => {});
+        }
+      }
+    }
+  }
+
   // ── Health Status ────────────────────────────────────────
 
   getStatus(): {
@@ -1557,11 +1955,15 @@ export class TelegramAdapter implements MessagingAdapter {
     pendingPromises: number;
     topicMappings: number;
   } {
+    const stallStatus = this.sharedStallDetector
+      ? this.sharedStallDetector.getStatus()
+      : { pendingStalls: this.pendingMessages.size, pendingPromises: this.pendingPromises.size };
+
     return {
       started: this.polling,
       uptime: this.startedAt ? Date.now() - this.startedAt.getTime() : null,
-      pendingStalls: this.pendingMessages.size,
-      pendingPromises: this.pendingPromises.size,
+      pendingStalls: stallStatus.pendingStalls,
+      pendingPromises: stallStatus.pendingPromises,
       topicMappings: this.topicToSession.size,
     };
   }
@@ -1704,6 +2106,16 @@ export class TelegramAdapter implements MessagingAdapter {
    * Process Telegram commands. Returns true if the message was a command.
    */
   private async handleCommand(text: string, topicId: number, userId: number): Promise<boolean> {
+    // Phase 1a: Delegate to shared CommandRouter when flag is enabled
+    if (this.sharedCommandRouter) {
+      return this.sharedCommandRouter.route(
+        text,
+        topicId.toString(),
+        userId.toString(),
+        { telegramUserId: userId, topicId },
+      );
+    }
+
     const cmd = text.trim().toLowerCase();
 
     // Attention topic commands — intercept before general commands
@@ -2007,11 +2419,54 @@ export class TelegramAdapter implements MessagingAdapter {
   }
 
   private appendToLog(entry: LogEntry): void {
+    // Phase 1b: Delegate to shared MessageLogger when flag is enabled
+    if (this.sharedLogger) {
+      this.sharedLogger.append({
+        messageId: entry.messageId,
+        channelId: entry.topicId,
+        text: entry.text,
+        fromUser: entry.fromUser,
+        timestamp: entry.timestamp,
+        sessionName: entry.sessionName,
+        senderName: entry.senderName,
+        senderUsername: entry.senderUsername,
+        platformUserId: entry.telegramUserId,
+        platform: 'telegram',
+      });
+      // Also notify the Telegram-specific callback for backward compatibility
+      if (this.onMessageLogged) {
+        try {
+          this.onMessageLogged(entry);
+        } catch (err) {
+          DegradationReporter.getInstance().report({
+            feature: 'TopicMemory.dualWrite',
+            primary: 'SQLite dual-write of messages for search and summaries',
+            fallback: 'Message only in JSONL log (no search, no summary updates)',
+            reason: `onMessageLogged callback failed: ${err instanceof Error ? err.message : String(err)}`,
+            impact: 'Message may be missing from topic search and context summaries.',
+          });
+        }
+      }
+      // Phase 1e: Emit to event bus
+      if (this.eventBus) {
+        this.eventBus.emit('message:logged', {
+          messageId: entry.messageId,
+          channelId: entry.topicId?.toString() ?? '',
+          text: entry.text,
+          fromUser: entry.fromUser,
+          timestamp: entry.timestamp,
+          sessionName: entry.sessionName,
+          senderName: entry.senderName,
+          senderUsername: entry.senderUsername,
+          platformUserId: entry.telegramUserId?.toString(),
+        }).catch(err => console.error(`[telegram] EventBus message:logged error: ${err}`));
+      }
+      return;
+    }
+
+    // Legacy path (flag disabled)
     try {
       fs.appendFileSync(this.messageLogPath, JSON.stringify(entry) + '\n');
-      // Rotate log if it exceeds 100,000 lines to prevent unbounded growth.
-      // Limit is intentionally high — message history is core memory for the agent.
-      // On a dedicated machine, text-only JSONL can safely grow to tens of MB.
       this.maybeRotateLog();
     } catch (err) {
       console.error(`[telegram] Failed to append to message log: ${err}`);
@@ -2037,6 +2492,20 @@ export class TelegramAdapter implements MessagingAdapter {
           impact: 'Message may be missing from topic search and context summaries.',
         });
       }
+    }
+    // Phase 1e: Emit to event bus
+    if (this.eventBus) {
+      this.eventBus.emit('message:logged', {
+        messageId: entry.messageId,
+        channelId: entry.topicId?.toString() ?? '',
+        text: entry.text,
+        fromUser: entry.fromUser,
+        timestamp: entry.timestamp,
+        sessionName: entry.sessionName,
+        senderName: entry.senderName,
+        senderUsername: entry.senderUsername,
+        platformUserId: entry.telegramUserId?.toString(),
+      }).catch(err => console.error(`[telegram] EventBus message:logged error: ${err}`));
     }
   }
 

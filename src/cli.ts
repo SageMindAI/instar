@@ -341,6 +341,23 @@ addCmd
   .action((opts) => addEmail(opts));
 
 addCmd
+  .command('whatsapp')
+  .description('Add WhatsApp messaging adapter')
+  .option('--backend <backend>', 'Backend: baileys (free, QR auth) or business-api (paid, Meta API)', 'baileys')
+  .option('--auth-method <method>', 'Auth method: qr (scan code) or pairing-code (8-digit code)', 'qr')
+  .option('--phone <number>', 'Phone number for pairing code auth (E.164 format: +1234567890)')
+  .option('--authorized <numbers>', 'Comma-separated authorized phone numbers (E.164). Empty = allow all.')
+  .option('--encrypt', 'Encrypt auth credentials at rest (recommended)')
+  .option('--phone-number-id <id>', 'Meta Phone Number ID (Business API)')
+  .option('--access-token <token>', 'Meta access token (Business API)')
+  .option('--webhook-verify-token <token>', 'Webhook verification token (Business API)')
+  .option('--webhook-port <port>', 'Webhook port if different from server port (Business API)', parseInt)
+  .action(async (opts) => {
+    const { addWhatsApp } = await import('./commands/whatsapp.js');
+    return addWhatsApp(opts);
+  });
+
+addCmd
   .command('sentry')
   .description('Add Sentry error monitoring')
   .option('--dsn <dsn>', 'Sentry DSN')
@@ -1250,6 +1267,41 @@ program
   .description('Diagnose multi-machine health and connectivity')
   .option('-d, --dir <path>', 'Project directory')
   .action(doctor);
+
+// ── Channels ─────────────────────────────────────────────────────
+
+const channelsCmd = program
+  .command('channels')
+  .description('Manage messaging channel adapters');
+
+channelsCmd
+  .command('login <adapter>')
+  .description('Authenticate a messaging adapter (e.g., whatsapp)')
+  .option('-d, --dir <path>', 'Project directory')
+  .option('--method <method>', 'Auth method: qr or pairing-code', 'qr')
+  .option('--phone <number>', 'Phone number for pairing code auth')
+  .action(async (adapter, opts) => {
+    const { channelLogin } = await import('./commands/whatsapp.js');
+    return channelLogin(adapter, opts);
+  });
+
+channelsCmd
+  .command('doctor [adapter]')
+  .description('Diagnose messaging adapter health')
+  .option('-d, --dir <path>', 'Project directory')
+  .action(async (adapter, opts) => {
+    const { channelDoctor } = await import('./commands/whatsapp.js');
+    return channelDoctor(adapter, opts);
+  });
+
+channelsCmd
+  .command('status')
+  .description('Show status of all configured messaging adapters')
+  .option('-d, --dir <path>', 'Project directory')
+  .action(async (opts) => {
+    const { channelStatus } = await import('./commands/whatsapp.js');
+    return channelStatus(opts);
+  });
 
 // ── System Review ────────────────────────────────────────────────
 

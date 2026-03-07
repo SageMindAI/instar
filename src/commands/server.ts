@@ -67,6 +67,7 @@ import { LiveConfig } from '../config/LiveConfig.js';
 import { CoherenceMonitor } from '../monitoring/CoherenceMonitor.js';
 import { ProcessIntegrity } from '../core/ProcessIntegrity.js';
 import { StaleProcessGuard } from '../core/StaleProcessGuard.js';
+import { llmValidateResumeCoherence } from '../core/ResumeValidator.js';
 import { ForegroundRestartWatcher } from '../core/ForegroundRestartWatcher.js';
 import { NotificationBatcher } from '../messaging/NotificationBatcher.js';
 import type { NotificationTier } from '../messaging/NotificationBatcher.js';
@@ -290,6 +291,8 @@ let _fixDeps: FixCommandDeps | null = null;
 // Module-level reference for session resume mapping.
 // Set once in startServer() and used by spawnSessionForTopic/respawnSessionForTopic.
 let _topicResumeMap: import('../core/TopicResumeMap.js').TopicResumeMap | null = null;
+let _projectDir: string = process.cwd();
+let _sharedIntelligence: import('../core/types.js').IntelligenceProvider | null = null;
 
 async function spawnSessionForTopic(
   sessionManager: SessionManager,
@@ -447,9 +450,17 @@ async function spawnSessionForTopic(
   }
 
   // Check for a resume UUID from a previously-killed session on this topic
-  const resumeSessionId = _topicResumeMap?.get(topicId) ?? undefined;
+  let resumeSessionId = _topicResumeMap?.get(topicId) ?? undefined;
   if (resumeSessionId) {
     console.log(`[spawnSessionForTopic] Found resume UUID for topic ${topicId}: ${resumeSessionId}`);
+
+    // LLM-supervised coherence gate: validate resume UUID matches topic before using it
+    const topicName = telegram.getTopicName(topicId) || sessionName;
+    const coherent = await llmValidateResumeCoherence(resumeSessionId, topicId, topicName, _projectDir, telegram, _sharedIntelligence);
+    if (!coherent) {
+      console.warn(`[spawnSessionForTopic] LLM rejected resume ${resumeSessionId.slice(0, 8)}... for topic ${topicId} — starting fresh`);
+      resumeSessionId = undefined;
+    }
   }
 
   const newSessionName = await sessionManager.spawnInteractiveSession(bootstrapMessage, sessionName, { telegramTopicId: topicId, resumeSessionId });
@@ -1381,7 +1392,8 @@ export async function startServer(options: StartOptions): Promise<void> {
     // When a session is killed/restarted, we save its UUID so the next spawn
     // can use --resume to reattach to the existing conversation context.
     const { TopicResumeMap } = await import('../core/TopicResumeMap.js');
-    _topicResumeMap = new TopicResumeMap(config.stateDir, config.sessions.projectDir);
+    _topicResumeMap = new TopicResumeMap(config.stateDir, config.sessions.projectDir, config.sessions.tmuxPath);
+    _projectDir = config.sessions.projectDir;
 
     // Shared intelligence provider — lightweight LLM for internal classification tasks.
     // Prefer Anthropic API (faster, no tmux) → Claude CLI fallback.
@@ -1398,6 +1410,8 @@ export async function startServer(options: StartOptions): Promise<void> {
         sharedIntelligence = new ClaudeCliIntelligenceProvider(config.sessions.claudePath);
       } catch { /* CLI not available */ }
     }
+
+    _sharedIntelligence = sharedIntelligence ?? null;
 
     // Wire intelligence into git sync for LLM conflict resolution (Tier 1 → 2)
     if (gitSync && sharedIntelligence) {
@@ -1734,6 +1748,95 @@ export async function startServer(options: StartOptions): Promise<void> {
       }
     }
 
+    // ── WhatsApp adapter initialization ──────────────────────────────
+    let whatsappAdapter: import('../messaging/WhatsAppAdapter.js').WhatsAppAdapter | undefined;
+    let whatsappBusinessBackend: import('../messaging/backends/BusinessApiBackend.js').BusinessApiBackend | undefined;
+
+    const whatsappConfig = config.messaging?.find(m => m.type === 'whatsapp' && m.enabled);
+    if (whatsappConfig) {
+      try {
+        const { WhatsAppAdapter } = await import('../messaging/WhatsAppAdapter.js');
+        whatsappAdapter = new WhatsAppAdapter(whatsappConfig.config as Record<string, unknown>, config.stateDir);
+        await whatsappAdapter.start();
+
+        const waConf = whatsappConfig.config as Record<string, unknown>;
+        const backendType = (waConf.backend as string) ?? 'baileys';
+
+        if (backendType === 'business-api') {
+          const { BusinessApiBackend } = await import('../messaging/backends/BusinessApiBackend.js');
+          const businessApiConf = waConf.businessApi as { phoneNumberId: string; accessToken: string; webhookVerifyToken: string; webhookPort?: number };
+          whatsappBusinessBackend = new BusinessApiBackend(
+            whatsappAdapter,
+            businessApiConf,
+            {
+              onConnected: (phone) => console.log(pc.green(`  WhatsApp Business API connected: ${phone}`)),
+              onMessage: async (jid, msgId, text, senderName, timestamp) => {
+                await whatsappAdapter!.handleIncomingMessage(jid, msgId, text, senderName, timestamp);
+              },
+              onButtonReply: (_jid, _msgId, buttonId, _title) => {
+                console.log(`[whatsapp] Button reply: ${buttonId}`);
+              },
+              onError: (err) => console.error(`[whatsapp] Business API error: ${err.message}`),
+              onStatusUpdate: (_msgId, status) => {
+                if (status === 'failed') console.warn(`[whatsapp] Message delivery failed`);
+              },
+            },
+          );
+          await whatsappBusinessBackend.connect();
+          console.log(pc.green(`  WhatsApp Business API: webhook routes at /webhooks/whatsapp`));
+        } else {
+          // Baileys backend
+          const { BaileysBackend } = await import('../messaging/backends/BaileysBackend.js');
+          const baileysConfig = whatsappAdapter.getBaileysConfig();
+          const baileysBackend = new BaileysBackend(
+            whatsappAdapter,
+            baileysConfig,
+            {
+              onQrCode: (qr) => console.log(`[whatsapp] QR code: ${qr.substring(0, 20)}...`),
+              onPairingCode: (code) => console.log(`[whatsapp] Pairing code: ${code}`),
+              onConnected: (phone) => console.log(pc.green(`  WhatsApp (Baileys) connected: ${phone}`)),
+              onDisconnected: (reason, shouldReconnect) => {
+                console.log(`[whatsapp] Disconnected: ${reason}${shouldReconnect ? ' (reconnecting)' : ''}`);
+              },
+              onMessage: async (jid, msgId, text, senderName, timestamp) => {
+                await whatsappAdapter!.handleIncomingMessage(jid, msgId, text, senderName, timestamp);
+              },
+              onError: (err) => console.error(`[whatsapp] Baileys error: ${err.message}`),
+            },
+          );
+          await baileysBackend.connect();
+        }
+
+        // Wire cross-platform alerts if both adapters are available
+        if (telegram && whatsappAdapter) {
+          const { CrossPlatformAlerts } = await import('../messaging/shared/CrossPlatformAlerts.js');
+          const crossAlerts = new CrossPlatformAlerts({
+            telegram,
+            whatsapp: whatsappAdapter,
+            businessApiBackend: whatsappBusinessBackend,
+            getAlertTopicId: () => state.get<number>('agent-attention-topic') ?? null,
+          });
+          crossAlerts.start();
+          console.log(pc.green('  Cross-platform alerts: WhatsApp <-> Telegram'));
+        }
+
+        console.log(pc.green(`  WhatsApp adapter: ${backendType} backend`));
+      } catch (err) {
+        const reason = err instanceof Error ? err.message : String(err);
+        console.error(pc.red(`  WhatsApp init failed: ${reason}`));
+        whatsappAdapter = undefined;
+        whatsappBusinessBackend = undefined;
+
+        degradationReporter.report({
+          feature: 'WhatsApp',
+          primary: 'WhatsApp messaging adapter',
+          fallback: 'Telegram only',
+          reason: `WhatsApp init failed: ${reason}`,
+          impact: 'WhatsApp messaging unavailable. Telegram continues working.',
+        });
+      }
+    }
+
     // Initialize SemanticMemory — the knowledge graph that unifies all memory systems.
     // Uses the same better-sqlite3 as TopicMemory; shares the rebuild path.
     let semanticMemory: SemanticMemory | undefined;
@@ -1793,6 +1896,23 @@ export async function startServer(options: StartOptions): Promise<void> {
     }
 
     sessionManager.startMonitoring();
+
+    // Proactive resume heartbeat: every 60s, update the topic→UUID mapping
+    // for all active topic-linked sessions. Ensures crash recovery via --resume.
+    if (_topicResumeMap && telegram) {
+      const resumeHeartbeatInterval = setInterval(() => {
+        try {
+          const topicSessions = telegram!.getAllTopicSessions();
+          _topicResumeMap?.refreshResumeMappings(topicSessions);
+        } catch (err) {
+          console.error('[server] Resume heartbeat error:', err);
+        }
+      }, 60_000);
+      // Don't prevent process exit
+      resumeHeartbeatInterval.unref();
+      console.log(pc.green('  Resume heartbeat: active (60s interval)'));
+    }
+
     if (scheduler) {
       sessionManager.on('sessionComplete', (session) => {
         scheduler!.processQueue();
@@ -2599,7 +2719,7 @@ export async function startServer(options: StartOptions): Promise<void> {
       console.log(pc.green(`  System Reviewer: ${probes.length} probes registered`));
     }
 
-    const server = new AgentServer({ config, sessionManager, state, scheduler, telegram, relationships, feedback, feedbackAnomalyDetector, dispatches, updateChecker, autoUpdater, autoDispatcher, quotaTracker, quotaManager, publisher, viewer, tunnel, evolution, watchdog, topicMemory, triageNurse, projectMapper, coherenceGate, contextHierarchy, canonicalState, operationGate, sentinel, adaptiveTrust, memoryMonitor, orphanReaper, coherenceMonitor, commitmentTracker, semanticMemory, activitySentinel, messageRouter, summarySentinel, spawnManager, systemReviewer, capabilityMapper, topicResumeMap: _topicResumeMap ?? undefined, autonomyManager, trustElevationTracker, autonomousEvolution, coordinator: coordinator.enabled ? coordinator : undefined, localSigningKeyPem });
+    const server = new AgentServer({ config, sessionManager, state, scheduler, telegram, relationships, feedback, feedbackAnomalyDetector, dispatches, updateChecker, autoUpdater, autoDispatcher, quotaTracker, quotaManager, publisher, viewer, tunnel, evolution, watchdog, topicMemory, triageNurse, projectMapper, coherenceGate, contextHierarchy, canonicalState, operationGate, sentinel, adaptiveTrust, memoryMonitor, orphanReaper, coherenceMonitor, commitmentTracker, semanticMemory, activitySentinel, messageRouter, summarySentinel, spawnManager, systemReviewer, capabilityMapper, topicResumeMap: _topicResumeMap ?? undefined, autonomyManager, trustElevationTracker, autonomousEvolution, coordinator: coordinator.enabled ? coordinator : undefined, localSigningKeyPem, whatsapp: whatsappAdapter, whatsappBusinessBackend });
     await server.start();
 
     // Connect DegradationReporter downstream systems now that everything is initialized.

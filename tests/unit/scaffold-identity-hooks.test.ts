@@ -53,4 +53,43 @@ describe('Scaffold templates — identity hook references', () => {
 
     expect(content).toContain('I am MyAgent');
   });
+
+  it('includes WhatsApp section when hasWhatsApp is true', () => {
+    const withWhatsApp = generateClaudeMd('test-project', 'TestAgent', 4040, false, true);
+    const withoutWhatsApp = generateClaudeMd('test-project', 'TestAgent', 4040, false, false);
+
+    expect(withWhatsApp).toContain('WhatsApp Integration');
+    expect(withoutWhatsApp).not.toContain('WhatsApp Integration');
+  });
+
+  it('WhatsApp section includes commands reference', () => {
+    const content = generateClaudeMd('test-project', 'TestAgent', 4040, false, true);
+
+    expect(content).toContain('/new');
+    expect(content).toContain('/status');
+    expect(content).toContain('/help');
+    expect(content).toContain('/whoami');
+  });
+
+  it('WhatsApp section includes privacy consent info', () => {
+    const content = generateClaudeMd('test-project', 'TestAgent', 4040, false, true);
+
+    expect(content).toContain('Privacy');
+    expect(content).toContain('consent');
+  });
+
+  it('WhatsApp section includes CLI commands', () => {
+    const content = generateClaudeMd('test-project', 'TestAgent', 4040, false, true);
+
+    expect(content).toContain('instar channels login whatsapp');
+    expect(content).toContain('instar channels doctor whatsapp');
+    expect(content).toContain('instar channels status');
+  });
+
+  it('supports both Telegram and WhatsApp simultaneously', () => {
+    const content = generateClaudeMd('test-project', 'TestAgent', 4040, true, true);
+
+    expect(content).toContain('Telegram Relay');
+    expect(content).toContain('WhatsApp Integration');
+  });
 });

@@ -126,6 +126,7 @@ export function generateClaudeMd(
   agentName: string,
   port: number,
   hasTelegram: boolean,
+  hasWhatsApp: boolean = false,
 ): string {
   let content = `# CLAUDE.md — ${projectName}
 
@@ -883,6 +884,62 @@ When your first message starts with \`CONTINUATION\`, you are **resuming an exis
 3. **Reference the prior context** — show the user you know what they were discussing
 
 The user has been talking to you (possibly for days). A generic greeting like "Hey! What can I help you with?" after 69 messages of conversation history is a critical failure — it signals you lost all context and the user has to repeat everything. The context is right there in your input. Use it.
+`;
+  }
+
+  if (hasWhatsApp) {
+    content += `
+## WhatsApp Integration
+
+This agent has WhatsApp messaging enabled. Users can interact via WhatsApp by sending messages to the connected phone number.
+
+### How WhatsApp Works
+
+- Messages from authorized phone numbers are routed to agent sessions
+- Each WhatsApp user gets their own session (mapped by phone number)
+- Users can send commands: \`/new\`, \`/reset\`, \`/stop\`, \`/status\`, \`/help\`, \`/whoami\`
+- Long messages are automatically chunked to fit WhatsApp limits
+- Messages queued while offline are delivered when the connection resumes
+
+### WhatsApp Commands
+
+| Command | What it does |
+|---------|-------------|
+| \`/new\` or \`/reset\` | Reset the current session |
+| \`/stop\` | Stop the current session |
+| \`/status\` | Show adapter status |
+| \`/help\` | List available commands |
+| \`/whoami\` | Show identity and authorization status |
+
+### Privacy & Consent
+
+- New users receive a privacy consent prompt on first contact
+- Users must agree before their messages are processed
+- Users can revoke consent anytime with \`/stop\`
+- Consent records are stored locally in the state directory
+
+### Managing WhatsApp
+
+- Login: \`instar channels login whatsapp\`
+- Diagnostics: \`instar channels doctor whatsapp\`
+- Status: \`instar channels status\`
+- Auth state is stored in the state directory (encrypted if configured)
+
+### Business API Backend
+
+When using the Business API backend (\`backend: "business-api"\`):
+- Webhook URL: \`/webhooks/whatsapp\` (mounted before auth — no Bearer token needed)
+- Meta sends webhook verification (GET) and message delivery (POST) to this URL
+- Template messages supported for proactive notifications
+- Interactive button messages for attention items (max 3 buttons per message)
+- WhatsApp status: \`curl http://localhost:<port>/whatsapp/status -H "Authorization: Bearer <token>"\`
+
+### Cross-Platform Alerts
+
+When both Telegram and WhatsApp are configured:
+- WhatsApp stalls and disconnects are automatically reported on Telegram
+- Attention items can be surfaced on WhatsApp with interactive buttons
+- Health endpoint includes WhatsApp status when authenticated
 `;
   }
 
