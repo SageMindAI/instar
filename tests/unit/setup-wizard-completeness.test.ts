@@ -81,12 +81,12 @@ describe('Setup Wizard Completeness', () => {
       expect(skill).toContain('SecretManager');
     });
 
-    it('secret management phase comes BEFORE Telegram phase', () => {
+    it('secret management phase comes BEFORE messaging phase', () => {
       const secretIndex = skill.toLowerCase().indexOf('secret management');
-      const telegramIndex = skill.indexOf('Phase 3: Telegram');
+      const messagingIndex = skill.indexOf('Phase 3: Messaging');
       expect(secretIndex).toBeGreaterThan(-1);
-      expect(telegramIndex).toBeGreaterThan(-1);
-      expect(secretIndex).toBeLessThan(telegramIndex);
+      expect(messagingIndex).toBeGreaterThan(-1);
+      expect(secretIndex).toBeLessThan(messagingIndex);
     });
 
     it('restore flow tries secret restoration before Telegram', () => {
@@ -112,31 +112,31 @@ describe('Setup Wizard Completeness', () => {
       expect(identityIndex).toBeLessThan(secretIndex);
     });
 
-    it('Telegram phase exists and comes after secret management', () => {
+    it('Messaging phase exists and comes after secret management', () => {
       const secretIndex = skill.indexOf('Phase 2.5');
-      const telegramIndex = skill.indexOf('Phase 3: Telegram');
+      const messagingIndex = skill.indexOf('Phase 3: Messaging');
       expect(secretIndex).toBeGreaterThan(-1);
-      expect(telegramIndex).toBeGreaterThan(-1);
-      expect(secretIndex).toBeLessThan(telegramIndex);
+      expect(messagingIndex).toBeGreaterThan(-1);
+      expect(secretIndex).toBeLessThan(messagingIndex);
     });
 
-    it('server config phase exists and comes after Telegram', () => {
-      const telegramIndex = skill.indexOf('Phase 3: Telegram');
+    it('server config phase exists and comes after messaging', () => {
+      const messagingIndex = skill.indexOf('Phase 3: Messaging');
       const configIndex = skill.indexOf('Phase 4:');
-      expect(telegramIndex).toBeGreaterThan(-1);
+      expect(messagingIndex).toBeGreaterThan(-1);
       expect(configIndex).toBeGreaterThan(-1);
-      expect(telegramIndex).toBeLessThan(configIndex);
+      expect(messagingIndex).toBeLessThan(configIndex);
     });
   });
 
-  // ── Telegram Skip Guard ──────────────────────────────────────
+  // ── Messaging Skip Guard ─────────────────────────────────────
   // The wizard must check for existing valid credentials before
-  // asking the user to set up Telegram from scratch.
+  // asking the user to set up messaging from scratch.
 
-  describe('Telegram skip guard', () => {
+  describe('Messaging skip guard', () => {
     it('Phase 3 checks for existing credentials before full setup', () => {
       // Find Phase 3 content
-      const phase3Start = skill.indexOf('Phase 3: Telegram');
+      const phase3Start = skill.indexOf('Phase 3: Messaging');
       const phase4Start = skill.indexOf('Phase 4');
       const phase3 = skill.substring(phase3Start, phase4Start > -1 ? phase4Start : undefined);
 

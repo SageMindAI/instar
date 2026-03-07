@@ -99,7 +99,7 @@ For fresh installs: you'll ask 1-2 questions in Phase 2 to resolve.
 Each wizard message should indicate progress: `[Step N of M]`
 
 Step counts by scenario:
-- Scenarios 1, 3: 5 steps (welcome, identity, telegram, config, launch)
+- Scenarios 1, 3: 5 steps (welcome, identity, messaging, config, launch)
 - Scenarios 2, 4: 7 steps (+ backup setup, machine identity)
 - Scenarios 5, 8: 8 steps (+ registration, recovery key, user identity)
 - Scenarios 6, 7: 11 steps (full coordination)
@@ -178,8 +178,8 @@ When an agent is fully configured and the user selects "Update configuration":
 Present:
 > What would you like to change?
 
-1. **"Update Telegram setup"** → Jump to Phase 3
-2. **"Set up WhatsApp"** → Jump to Phase 4g
+1. **"Update messaging setup"** → Jump to Phase 3 (choose Telegram or WhatsApp)
+2. **"Add a second messaging channel"** → Jump to Phase 4g (WhatsApp) or Phase 3 (Telegram)
 3. **"Change agent personality"** → Jump to Phase 2c
 4. **"Add a user"** → New User Flow
 5. **"View current config"** → Display scenario and settings
@@ -471,7 +471,7 @@ ls package.json Cargo.toml pyproject.toml go.mod Gemfile pom.xml 2>/dev/null
 
 I see you're in **[repo-name]** — I'll set up a persistent agent for this project.
 
-Your agent will monitor, build, and maintain this codebase. You'll talk to it through Telegram — no terminal needed after setup.
+Your agent will monitor, build, and maintain this codebase. You'll talk to it through messaging (Telegram or WhatsApp) — no terminal needed after setup.
 
 ---
 
@@ -485,7 +485,7 @@ If the user objects ("actually I want a personal agent, not a project agent"), a
 
 **Welcome to Instar!**
 
-You're not inside a project, so I'll set up a standalone agent — a persistent AI companion you talk to through Telegram.
+You're not inside a project, so I'll set up a standalone agent — a persistent AI companion you talk to through messaging.
 
 It can research, schedule tasks, manage files, and grow over time.
 
@@ -507,19 +507,21 @@ npx instar init --standalone "<agent-name>" --port <port>
 
 This handles directory creation, registry entry, port allocation, and gitignore — you just need to write the identity and config files into the created directory.
 
-### Key principle: Telegram is the interface, always
+### Key principle: Messaging is the interface
 
-Regardless of project or personal agent, **Telegram is how you talk to your agent**. This should be clear from the very first message. Don't present it as an optional add-on — it's the destination of this entire setup.
+Regardless of project or personal agent, **a messaging platform is how you talk to your agent**. This should be clear from the very first message. Don't present it as an optional add-on — it's the destination of this entire setup.
 
-The terminal session is the on-ramp. Telegram is where the agent experience lives.
+The terminal session is the on-ramp. Messaging (Telegram or WhatsApp) is where the agent experience lives.
+
+**Telegram is recommended** for its topic threads, bot API, and forum-style organization — but WhatsApp is a fully supported alternative for users who prefer it or already live there.
 
 ## Phase 2: Identity Bootstrap — The Birth Conversation
 
 **This is the most important part.** Have a conversation to understand who the user is and who their agent will become. Keep it natural and concise.
 
-For **Personal Agents**: emphasize that this agent will be their persistent companion. It grows, learns, and communicates through Telegram. It's not a project tool — it's a presence.
+For **Personal Agents**: emphasize that this agent will be their persistent companion. It grows, learns, and communicates through messaging. It's not a project tool — it's a presence.
 
-For **Project Agents**: emphasize that this agent will own the project's health and development. It monitors, builds, maintains — and you talk to it through Telegram, just like a personal agent.
+For **Project Agents**: emphasize that this agent will own the project's health and development. It monitors, builds, maintains — and you talk to it through messaging, just like a personal agent.
 
 ### Step 2-pre: Scenario Narrowing Questions (Fresh Installs Only)
 
@@ -709,7 +711,7 @@ This project uses instar for persistent agent capabilities.
 - **Research before escalating** — Check tools first. Build solutions. "Needs human" is last resort.
 ```
 
-**If Telegram was configured**, also add a Telegram Relay section to CLAUDE.md:
+**If Telegram was configured**, also add a Telegram Relay section to CLAUDE.md. If WhatsApp was configured instead, add an equivalent WhatsApp Relay section using the `/whatsapp/send` endpoint:
 
 ```markdown
 ## Telegram Relay
@@ -752,13 +754,13 @@ Check the prompt context for `SECRET_BACKEND_CONFIGURED`. If present:
 
 ---
 
-## Phase 3: Telegram Setup — The Destination
+## Phase 3: Messaging Setup — The Destination
 
-**Telegram is NOT optional.** It is the primary interface for talking to your agent. Everything else in setup supports getting the user onto Telegram. Treat this as a required step, not an opt-in feature.
+**Messaging is NOT optional.** It is the primary interface for talking to your agent. Everything else in setup supports getting the user onto a messaging platform. Treat this as a required step, not an opt-in feature.
 
-### Step 3-pre: Check if Telegram Already Configured
+### Step 3-pre: Check if Messaging Already Configured
 
-**FIRST**, check if Phase 2.5 already restored Telegram credentials. If `SecretManager.restoreTelegramConfig()` returned valid credentials earlier, **skip this entire phase** and move to Phase 4. The user doesn't need to set up Telegram again.
+**FIRST**, check if Phase 2.5 already restored messaging credentials. If `SecretManager.restoreTelegramConfig()` returned valid credentials earlier, **skip this entire phase** and move to Phase 4. The user doesn't need to set up messaging again.
 
 Also check if the config already has a valid Telegram token (e.g., from a restore flow):
 ```bash
@@ -769,38 +771,46 @@ if [ -n "$TOKEN" ]; then
 fi
 ```
 
-If the token is valid → skip Phase 3 entirely.
+If the token is valid → skip Phase 3 entirely. Similarly, check for existing WhatsApp config.
 
-### Step 3a: Set Expectations
+### Step 3a: Present Messaging Options
 
-Not everyone knows what Telegram is. Frame it as the core of the experience — not an add-on:
+Frame messaging as the core of the experience, then let the user choose their platform:
 
-> **Next: connecting your agent to Telegram.**
+> **Next: connecting your agent to a messaging platform.**
 >
-> Telegram is how you'll actually talk to your agent day-to-day. Not the terminal — Telegram. It's a free messaging app with topic threads, mobile access, and bot support that makes it perfect for this.
+> This is how you'll actually talk to your agent day-to-day. Not the terminal — just messaging on your phone or desktop.
 >
-> If you don't have it yet, install it now: https://telegram.org/apps
-> You'll need your phone to log in on the web too.
-
-Then ask: "Do you have Telegram installed? If not, take a minute to set it up — I'll wait."
-
-**Do NOT offer "Skip for now" as an option.** Do NOT present this as optional. The user chose to set up an AI agent — Telegram is how they'll use it. If the user explicitly says they want to skip (unprompted), acknowledge it briefly but make the cost clear:
-
-> "Without Telegram, you'll only be able to talk to [agent name] by opening a terminal and running `instar chat`. No mobile access, no proactive messages, no topic threads. Most of what makes an Instar agent useful requires Telegram."
+> 1. **Telegram** (recommended) — Topic threads for organized conversations, powerful bot API, forum-style groups. Best for power users who want structured channels.
+> 2. **WhatsApp** — Talk to your agent from the messaging app you already use. Simple, familiar, works everywhere.
 >
-> "You can set it up later with `instar telegram setup`."
+> Which do you prefer? (You can always add the other one later.)
 
-### Why Telegram
+**Do NOT offer "Skip messaging entirely" as an option.** Do NOT present messaging as optional. The user chose to set up an AI agent — messaging is how they'll use it. If the user explicitly says they want to skip (unprompted), acknowledge it briefly but make the cost clear:
 
-Frame it as established fact, not a sales pitch:
+> "Without a messaging platform, you'll only be able to talk to [agent name] by opening a terminal and running `instar chat`. No mobile access, no proactive messages, no organized threads. Most of what makes an Instar agent useful requires messaging."
+>
+> "You can set it up later with `instar telegram setup` or `instar whatsapp connect`."
 
-> Telegram is where your agent lives:
+### If User Chooses Telegram
+
+Proceed with the Telegram setup flow below (Step 3b onward).
+
+### If User Chooses WhatsApp
+
+Jump to **Phase 4g: WhatsApp Setup**. WhatsApp is a first-class option — treat it with the same energy and completeness as Telegram setup.
+
+### Why Telegram (when presenting the recommendation)
+
+Frame it as a recommendation, not an assumption:
+
+> Telegram is where most agents live:
 > - **Just talk** — no commands, no terminal, just conversation
 > - **Topic threads** — organized channels for different concerns
 > - **Mobile access** — your agent is always reachable
 > - **Proactive** — your agent reaches out when something matters
 
-For **both agent types**: Telegram IS the interface. Be direct: "This is how you'll talk to your agent." Don't hedge. Don't present alternatives. For project agents, add: "Your agent messages you about builds, issues, and progress — you just reply."
+For **both agent types**: Messaging IS the interface. Be direct: "This is how you'll talk to your agent." For project agents, add: "Your agent messages you about builds, issues, and progress — you just reply."
 
 ### Browser Automation Strategy
 
@@ -1148,9 +1158,9 @@ Append if not present:
 .instar/logs/
 ```
 
-### 4f. Install Telegram Relay Script (if Telegram configured)
+### 4f. Install Messaging Relay Script (if messaging configured)
 
-If Telegram was set up in Phase 3, install the relay script that lets Claude sessions send messages back to Telegram:
+If Telegram was set up, install the relay script that lets Claude sessions send messages back to Telegram. If WhatsApp was set up (with or without Telegram), the server handles WhatsApp relay natively via the `/whatsapp/send` endpoint — no separate script needed.
 
 ```bash
 mkdir -p .claude/scripts
@@ -1174,11 +1184,15 @@ Then make it executable:
 chmod +x .claude/scripts/telegram-reply.sh
 ```
 
-### 4g. WhatsApp Setup (Optional)
+### 4g. WhatsApp Setup
 
-**WhatsApp is optional.** Unlike Telegram, WhatsApp is an additional communication channel — not the primary interface. Only offer it after Telegram is configured.
+WhatsApp is a **first-class messaging option**. The user may arrive here either:
+- **As their primary choice** from Phase 3 (chose WhatsApp over Telegram)
+- **As an additional channel** after Telegram is already configured
 
-Present:
+**If arriving as primary choice from Phase 3**, skip the "want to add" prompt — they already chose this. Go straight to Step 4g-1.
+
+**If arriving after Telegram setup**, present:
 
 > **Want to add WhatsApp as a second channel?**
 >
@@ -1430,7 +1444,7 @@ If the health check fails, retry once. If still failing, tell the user what happ
 
 ### Step 5b: Agent Greets the User in the Lifeline Topic
 
-**If Telegram was configured, the new agent should reach out to the user in the Lifeline topic.** This is the magic moment — the agent comes alive.
+**If Telegram was configured, the new agent should reach out to the user in the Lifeline topic.** If WhatsApp was configured (without Telegram), send the greeting via WhatsApp instead. This is the magic moment — the agent comes alive.
 
 Send the greeting to the Lifeline topic (using the `message_thread_id` from Step 3e-vi):
 
@@ -1472,9 +1486,9 @@ This creates a macOS LaunchAgent or Linux systemd service. The agent will start 
 
 After the server is running, auto-start is installed, and the greeting is sent:
 
-> "All done! [Agent name] just messaged you in the Lifeline topic on Telegram. From here on, that's your primary channel — just talk to your agent there."
+> "All done! [Agent name] just messaged you on [Telegram/WhatsApp]. From here on, that's your primary channel — just talk to your agent there."
 >
-> "I've set up auto-start — your agent will come back automatically when you log in. As long as your computer is on and awake, Telegram just works."
+> "I've set up auto-start — your agent will come back automatically when you log in. As long as your computer is on and awake, messaging just works."
 
 If auto-start install failed, explain the fallback:
 
@@ -1482,13 +1496,13 @@ If auto-start install failed, explain the fallback:
 
 Keep it matter-of-fact, not alarming.
 
-**Do NOT present a list of CLI commands or next steps.** The setup wizard's job is done. The user's next action is opening Telegram and replying to their agent.
+**Do NOT present a list of CLI commands or next steps.** The setup wizard's job is done. The user's next action is opening their messaging app and replying to their agent.
 
-**If Telegram was NOT configured:**
+**If no messaging platform was configured:**
 
 Start the server, then:
 
-> "Server is running. You can talk to your agent through Claude Code sessions. When you're ready for a richer experience, just ask your agent to help set up Telegram."
+> "Server is running. You can talk to your agent through Claude Code sessions. When you're ready for a richer experience, just ask your agent to help set up Telegram or WhatsApp."
 
 ## Phase 6: Post-Setup Feedback (Optional)
 
