@@ -1120,6 +1120,44 @@ describe('WhatsApp Message Routing E2E', () => {
       await groupAdapter.stop();
     });
 
+    it('group mention detection falls back to top-level agentName', async () => {
+      // Group config WITHOUT agentName, but top-level config HAS agentName
+      const groupAdapter = new WhatsAppAdapter(
+        {
+          backend: 'baileys',
+          authorizedNumbers: [],
+          requireConsent: false,
+          agentName: 'TopLevelBot',
+          groups: {
+            enabled: true,
+            authorizedGroups: [],
+            defaultActivation: 'mention',
+          },
+        } as Record<string, unknown>,
+        project.stateDir,
+      );
+
+      const received: Message[] = [];
+      groupAdapter.onMessage(async (msg) => { received.push(msg); });
+      await groupAdapter.start();
+      groupAdapter.setBackendCapabilities(caps);
+      await groupAdapter.setConnectionState('connected', '14155551234');
+
+      // Text trigger using top-level agentName
+      await groupAdapter.handleIncomingMessage(
+        '120363187170797617@g.us',
+        'msg-fallback-1',
+        'TopLevelBot what time is it?',
+        'Alice',
+        undefined,
+        undefined,
+        '11111111111@s.whatsapp.net',
+      );
+
+      expect(received.length).toBe(1);
+      await groupAdapter.stop();
+    });
+
     it('BaileysBackend passes participant and mentionedJids', () => {
       const baileysBackendSrc = fs.readFileSync(
         path.resolve(__dirname, '../../src/messaging/backends/BaileysBackend.ts'),
@@ -1128,6 +1166,143 @@ describe('WhatsApp Message Routing E2E', () => {
       expect(baileysBackendSrc).toContain('msg.key.participant');
       expect(baileysBackendSrc).toContain('mentionedJid');
       expect(baileysBackendSrc).toContain('contextInfo');
+    });
+  });
+
+  // ══════════════════════════════════════════════════════
+  // 12. AGENT IDENTITY PREFIX
+  // ══════════════════════════════════════════════════════
+
+  describe('Agent identity prefix', () => {
+    it('prepends default prefix when prefixEnabled is not set', async () => {
+      // Default adapter has no agentName or prefixEnabled set
+      const sendSpy = vi.fn().mockResolvedValue(undefined);
+      const prefixAdapter = new WhatsAppAdapter(
+        {
+          backend: 'baileys',
+          authorizedNumbers: [],
+          requireConsent: false,
+        } as Record<string, unknown>,
+        project.stateDir,
+      );
+      await prefixAdapter.start();
+      prefixAdapter.setBackendCapabilities({ ...caps, sendText: sendSpy });
+      await prefixAdapter.setConnectionState('connected', '14155551234');
+
+      await prefixAdapter.send({
+        channel: { type: 'whatsapp' as const, identifier: TEST_JID },
+        content: 'Hello world',
+      });
+
+      expect(sendSpy).toHaveBeenCalled();
+      const sentText = sendSpy.mock.calls[0][1];
+      expect(sentText).toBe('*[Agent]* Hello world');
+      await prefixAdapter.stop();
+    });
+
+    it('uses custom agentName in prefix', async () => {
+      const sendSpy = vi.fn().mockResolvedValue(undefined);
+      const prefixAdapter = new WhatsAppAdapter(
+        {
+          backend: 'baileys',
+          authorizedNumbers: [],
+          requireConsent: false,
+          agentName: 'Dude',
+        } as Record<string, unknown>,
+        project.stateDir,
+      );
+      await prefixAdapter.start();
+      prefixAdapter.setBackendCapabilities({ ...caps, sendText: sendSpy });
+      await prefixAdapter.setConnectionState('connected', '14155551234');
+
+      await prefixAdapter.send({
+        channel: { type: 'whatsapp' as const, identifier: TEST_JID },
+        content: 'CI is green',
+      });
+
+      const sentText = sendSpy.mock.calls[0][1];
+      expect(sentText).toBe('*[Dude]* CI is green');
+      await prefixAdapter.stop();
+    });
+
+    it('uses custom messagePrefix when provided', async () => {
+      const sendSpy = vi.fn().mockResolvedValue(undefined);
+      const prefixAdapter = new WhatsAppAdapter(
+        {
+          backend: 'baileys',
+          authorizedNumbers: [],
+          requireConsent: false,
+          agentName: 'Dude',
+          messagePrefix: '🤖 *Dude:* ',
+        } as Record<string, unknown>,
+        project.stateDir,
+      );
+      await prefixAdapter.start();
+      prefixAdapter.setBackendCapabilities({ ...caps, sendText: sendSpy });
+      await prefixAdapter.setConnectionState('connected', '14155551234');
+
+      await prefixAdapter.send({
+        channel: { type: 'whatsapp' as const, identifier: TEST_JID },
+        content: 'Custom prefix test',
+      });
+
+      const sentText = sendSpy.mock.calls[0][1];
+      expect(sentText).toBe('🤖 *Dude:* Custom prefix test');
+      await prefixAdapter.stop();
+    });
+
+    it('skips prefix when prefixEnabled is false', async () => {
+      const sendSpy = vi.fn().mockResolvedValue(undefined);
+      const prefixAdapter = new WhatsAppAdapter(
+        {
+          backend: 'baileys',
+          authorizedNumbers: [],
+          requireConsent: false,
+          agentName: 'Dude',
+          prefixEnabled: false,
+        } as Record<string, unknown>,
+        project.stateDir,
+      );
+      await prefixAdapter.start();
+      prefixAdapter.setBackendCapabilities({ ...caps, sendText: sendSpy });
+      await prefixAdapter.setConnectionState('connected', '14155551234');
+
+      await prefixAdapter.send({
+        channel: { type: 'whatsapp' as const, identifier: TEST_JID },
+        content: 'No prefix here',
+      });
+
+      const sentText = sendSpy.mock.calls[0][1];
+      expect(sentText).toBe('No prefix here');
+      await prefixAdapter.stop();
+    });
+
+    it('prefix applies to chunked messages', async () => {
+      const sendSpy = vi.fn().mockResolvedValue(undefined);
+      const prefixAdapter = new WhatsAppAdapter(
+        {
+          backend: 'baileys',
+          authorizedNumbers: [],
+          requireConsent: false,
+          agentName: 'Bot',
+          maxMessageLength: 30,
+        } as Record<string, unknown>,
+        project.stateDir,
+      );
+      await prefixAdapter.start();
+      prefixAdapter.setBackendCapabilities({ ...caps, sendText: sendSpy });
+      await prefixAdapter.setConnectionState('connected', '14155551234');
+
+      await prefixAdapter.send({
+        channel: { type: 'whatsapp' as const, identifier: TEST_JID },
+        content: 'A message that will be chunked into parts',
+      });
+
+      // The prefix is added to the full content, then chunked
+      expect(sendSpy).toHaveBeenCalled();
+      const firstChunk = sendSpy.mock.calls[0][1];
+      expect(firstChunk).toContain('*[Bot]*');
+      await prefixAdapter.stop();
     });
   });
 });

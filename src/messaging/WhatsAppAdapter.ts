@@ -104,6 +104,15 @@ export interface WhatsAppConfig {
   /** Emoji to react with on message receive (ack reaction). Set false to disable. Default: '👀' */
   ackReactionEmoji?: string | false;
 
+  /** Prepend agent name to outbound messages for identity clarity. Default: true */
+  prefixEnabled?: boolean;
+
+  /** Custom prefix format. Supports WhatsApp markdown. Default: "*[{agentName}]* " */
+  messagePrefix?: string;
+
+  /** Agent display name, used in message prefix and group mentions. Default: 'Agent' */
+  agentName?: string;
+
   /** Group messaging configuration */
   groups?: WhatsAppGroupConfig;
 }
@@ -336,8 +345,17 @@ export class WhatsAppAdapter implements MessagingAdapter {
     }
 
     const jid = channelId.includes('@') ? channelId : phoneToJid(channelId);
+
+    // Agent identity prefix — prepend agent name to outbound messages
+    let content = message.content;
+    if (this.config.prefixEnabled !== false) {
+      const name = this.config.agentName ?? 'Agent';
+      const prefix = this.config.messagePrefix ?? `*[${name}]* `;
+      content = prefix + content;
+    }
+
     const maxLen = this.config.maxMessageLength ?? 4000;
-    const chunks = smartChunk(message.content, maxLen);
+    const chunks = smartChunk(content, maxLen);
 
     for (const chunk of chunks) {
       if (this.connectionState !== 'connected' || !this.sendFunction) {
@@ -664,8 +682,9 @@ export class WhatsAppAdapter implements MessagingAdapter {
       }
 
       // Also check text-based triggers (agent name at start of message)
-      if (!shouldActivate && groupConfig.agentName) {
-        const namePattern = new RegExp(`^@?${groupConfig.agentName}\\b`, 'i');
+      const agentNameForMention = groupConfig.agentName ?? this.config.agentName;
+      if (!shouldActivate && agentNameForMention) {
+        const namePattern = new RegExp(`^@?${agentNameForMention}\\b`, 'i');
         shouldActivate = namePattern.test(text.trim());
       }
     }
