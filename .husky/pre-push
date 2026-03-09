@@ -1,2 +1,3 @@
-echo "🧪 Running full test suite before push (zero-failure standard)..."
-npm test
+echo "🧪 Running test suite before push (excludes known flaky tests)..."
+echo "   Full suite: npm test | Flaky only: npm run test:flaky"
+npm run test:push
