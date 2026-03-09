@@ -36,6 +36,10 @@ if [ "$HEALTH" != "200" ]; then
   exit 0
 fi
 
+# Reset scope coherence state — prevents accumulated counts from prior sessions
+# leaking into this session and causing false-positive hook triggers.
+curl -s -X POST "http://localhost:${PORT}/scope-coherence/reset" -o /dev/null 2>/dev/null || true
+
 # Build working memory query from prompt
 PROMPT_ENCODED=$(python3 -c "
 import sys, urllib.parse

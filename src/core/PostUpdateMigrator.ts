@@ -193,6 +193,7 @@ export class PostUpdateMigrator {
       'compaction-recovery.sh', 'external-operation-gate.js', 'deferral-detector.js',
       'post-action-reflection.js', 'external-communication-guard.js',
       'scope-coherence-collector.js', 'scope-coherence-checkpoint.js',
+      'instructions-loaded-tracker.js', 'subagent-start-tracker.js',
       'free-text-guard.sh', 'claim-intercept.js', 'claim-intercept-response.js',
     ];
 
@@ -1066,6 +1067,10 @@ if [ -f "$INSTAR_DIR/config.json" ]; then
   if [ "\$HEALTH" = "200" ]; then
     echo ""
     echo "Instar server: RUNNING on port \${PORT}"
+    # Reset scope coherence state — prevents accumulated counts from prior sessions
+    # leaking into this session and causing false-positive hook triggers.
+    # Endpoint: POST /scope-coherence/reset (routes.ts)
+    curl -s -X POST "http://localhost:\${PORT}/scope-coherence/reset" -o /dev/null 2>/dev/null || true
     # Load full capabilities for tunnel + feature guide
     CAPS=\$(curl -s "http://localhost:\${PORT}/capabilities" 2>/dev/null)
     TUNNEL_URL=\$(echo "\$CAPS" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('tunnel',{}).get('url',''))" 2>/dev/null)
@@ -2358,9 +2363,17 @@ process.stdin.on('end', () => {
     const input = JSON.parse(data);
     const toolName = input.tool_name || '';
     const toolInput = input.tool_input || {};
+    const agentId = input.agent_id || null;
+    const agentType = input.agent_type || null;
     const state = loadState();
     const now = new Date().toISOString();
     if (!state.sessionStart) state.sessionStart = now;
+    // Track agent context (M4: Claude Code now enriches all hook events)
+    if (agentId) {
+      if (!state.agentActivity) state.agentActivity = {};
+      if (!state.agentActivity[agentId]) state.agentActivity[agentId] = { type: agentType, actions: 0 };
+      state.agentActivity[agentId].actions++;
+    }
 
     if (toolName === 'Edit' || toolName === 'Write') {
       state.implementationDepth += 1;
