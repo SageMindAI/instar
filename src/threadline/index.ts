@@ -150,3 +150,20 @@ export type {
   BootstrapEvidence,
   BootstrapResult,
 } from './TrustBootstrap.js';
+
+// Phase 6D: OpenClaw Skill
+export { OpenClawBridge } from './OpenClawBridge.js';
+export type {
+  OpenClawMessage,
+  OpenClawRuntime,
+  OpenClawAction,
+  OpenClawBridgeConfig,
+  OpenClawBridgeMetrics,
+  BridgeSendParams,
+  BridgeResponse,
+  BridgeAgentInfo,
+  BridgeHistoryMessage,
+} from './OpenClawBridge.js';
+
+export { generateSkillManifest } from './OpenClawSkillManifest.js';
+export type { SkillManifest } from './OpenClawSkillManifest.js';
