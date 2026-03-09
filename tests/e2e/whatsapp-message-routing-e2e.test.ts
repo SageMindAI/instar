@@ -1305,4 +1305,108 @@ describe('WhatsApp Message Routing E2E', () => {
       await prefixAdapter.stop();
     });
   });
+
+  // ══════════════════════════════════════════════════════
+  // 13. SILENT REJECT (UNAUTHORIZED NUMBERS)
+  // ══════════════════════════════════════════════════════
+
+  describe('Silent reject for unauthorized numbers', () => {
+    it('silently drops messages from unauthorized numbers by default', async () => {
+      const sendSpy = vi.fn().mockResolvedValue(undefined);
+      const silentAdapter = new WhatsAppAdapter(
+        {
+          backend: 'baileys',
+          authorizedNumbers: ['+14155552671'],
+          requireConsent: false,
+          prefixEnabled: false,
+        } as Record<string, unknown>,
+        project.stateDir,
+      );
+
+      const received: Message[] = [];
+      silentAdapter.onMessage(async (msg) => { received.push(msg); });
+      await silentAdapter.start();
+      silentAdapter.setBackendCapabilities({ ...caps, sendText: sendSpy });
+      await silentAdapter.setConnectionState('connected', '14155551234');
+
+      // Message from unauthorized number
+      await silentAdapter.handleIncomingMessage(
+        '19175559999@s.whatsapp.net',
+        'msg-unauth-1',
+        'Hey are you there?',
+        'Vince',
+      );
+
+      // Should NOT respond and should NOT forward to session
+      expect(sendSpy).not.toHaveBeenCalled();
+      expect(received.length).toBe(0);
+      await silentAdapter.stop();
+    });
+
+    it('responds to unauthorized numbers when silentReject is false', async () => {
+      const sendSpy = vi.fn().mockResolvedValue(undefined);
+      const loudAdapter = new WhatsAppAdapter(
+        {
+          backend: 'baileys',
+          authorizedNumbers: ['+14155552671'],
+          requireConsent: false,
+          prefixEnabled: false,
+          silentReject: false,
+        } as Record<string, unknown>,
+        project.stateDir,
+      );
+
+      const received: Message[] = [];
+      loudAdapter.onMessage(async (msg) => { received.push(msg); });
+      await loudAdapter.start();
+      loudAdapter.setBackendCapabilities({ ...caps, sendText: sendSpy });
+      await loudAdapter.setConnectionState('connected', '14155551234');
+
+      // Message from unauthorized number
+      await loudAdapter.handleIncomingMessage(
+        '19175559999@s.whatsapp.net',
+        'msg-unauth-2',
+        'Hey are you there?',
+        'Vince',
+      );
+
+      // Should respond with rejection message (AuthGate default closed policy)
+      expect(sendSpy).toHaveBeenCalled();
+      const sentText = sendSpy.mock.calls[0][1];
+      expect(sentText).toContain('not currently accepting');
+      expect(received.length).toBe(0);
+      await loudAdapter.stop();
+    });
+
+    it('still allows authorized numbers through', async () => {
+      const sendSpy = vi.fn().mockResolvedValue(undefined);
+      const silentAdapter = new WhatsAppAdapter(
+        {
+          backend: 'baileys',
+          authorizedNumbers: ['+14155552671'],
+          requireConsent: false,
+          prefixEnabled: false,
+        } as Record<string, unknown>,
+        project.stateDir,
+      );
+
+      const received: Message[] = [];
+      silentAdapter.onMessage(async (msg) => { received.push(msg); });
+      await silentAdapter.start();
+      silentAdapter.setBackendCapabilities({ ...caps, sendText: sendSpy });
+      await silentAdapter.setConnectionState('connected', '14155551234');
+
+      // Message from authorized number
+      await silentAdapter.handleIncomingMessage(
+        '14155552671@s.whatsapp.net',
+        'msg-auth-1',
+        'Hello agent',
+        'Justin',
+      );
+
+      // Should forward to session handler
+      expect(received.length).toBe(1);
+      await silentAdapter.stop();
+    });
+  });
 });

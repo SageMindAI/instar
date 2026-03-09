@@ -113,6 +113,11 @@ export interface WhatsAppConfig {
   /** Agent display name, used in message prefix and group mentions. Default: 'Agent' */
   agentName?: string;
 
+  /** Silently drop messages from unauthorized numbers (no response sent).
+   *  Default: true. When false, uses AuthGate registration policy to respond.
+   *  Recommended: true for linked-device mode (Baileys) to avoid revealing the agent to personal contacts. */
+  silentReject?: boolean;
+
   /** Group messaging configuration */
   groups?: WhatsAppGroupConfig;
 }
@@ -485,6 +490,19 @@ export class WhatsAppAdapter implements MessagingAdapter {
 
     // Auth check
     if (!this.authGate.isAuthorized(normalizedPhone)) {
+      // Silent reject (default for WhatsApp) — don't respond to unauthorized contacts.
+      // In linked-device mode, responding reveals the agent to the user's personal contacts.
+      if (this.config.silentReject !== false) {
+        console.log(`[whatsapp] Silently dropping message from unauthorized number ${normalizedPhone}`);
+        await this.eventBus.emit('auth:unauthorized', {
+          userId: normalizedPhone,
+          displayName: senderName ?? normalizedPhone,
+          channelId: jid,
+          messageText: text,
+        });
+        return;
+      }
+
       await this.authGate.handleUnauthorized(
         {
           userId: normalizedPhone,
