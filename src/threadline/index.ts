@@ -126,3 +126,27 @@ export type {
   A2AMetrics,
   AuditEntry,
 } from './A2AGateway.js';
+
+// Phase 6C: Trust Bootstrap & Directory
+export { DNSVerifier } from './DNSVerifier.js';
+export type {
+  DNSVerifyResult,
+  DNSResolverFn,
+  DNSVerifierConfig,
+} from './DNSVerifier.js';
+
+export { InvitationManager } from './InvitationManager.js';
+export type {
+  InvitationCreateOptions,
+  Invitation,
+  InvitationStatus,
+  InvitationValidateResult,
+} from './InvitationManager.js';
+
+export { TrustBootstrap } from './TrustBootstrap.js';
+export type {
+  TrustBootstrapStrategy,
+  TrustBootstrapConfig,
+  BootstrapEvidence,
+  BootstrapResult,
+} from './TrustBootstrap.js';
