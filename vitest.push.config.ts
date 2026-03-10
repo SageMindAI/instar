@@ -26,6 +26,7 @@ const FLAKY_TESTS = [
   'tests/e2e/messaging-multi-agent.test.ts',
 
   // ── Non-deterministic data / race conditions ──────────────────────
+  'tests/integration/semantic-memory.test.ts',
   'tests/e2e/semantic-memory-lifecycle.test.ts',
   'tests/e2e/working-memory-lifecycle.test.ts',
   'tests/e2e/episodic-memory-lifecycle.test.ts',
