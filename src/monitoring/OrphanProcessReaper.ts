@@ -62,6 +62,8 @@ export interface OrphanReaperConfig {
   highMemoryThresholdMB?: number;
   /** Whether to auto-kill instar orphans (default: true; false = report only) */
   autoKillOrphans?: boolean;
+  /** Whether to report external (non-instar) Claude processes to the user (default: true) */
+  reportExternalProcesses?: boolean;
   /** Callback to send alerts (e.g., Telegram) */
   alertCallback?: (message: string) => Promise<void>;
 }
@@ -191,9 +193,10 @@ export class OrphanProcessReaper extends EventEmitter {
     // Send alert about external processes if any are notable.
     // Cooldown: only alert once per 24h — external processes are usually normal
     // (VS Code, terminal sessions) and constant alerts are noise.
+    const reportExternal = this.reaperConfig.reportExternalProcesses !== false;
     const now = Date.now();
     const externalAlertCooledDown = now - this.lastExternalAlertTime > OrphanProcessReaper.EXTERNAL_ALERT_COOLDOWN_MS;
-    if (newExternalAlerts.length > 0 && alertCallback && externalAlertCooledDown) {
+    if (reportExternal && newExternalAlerts.length > 0 && alertCallback && externalAlertCooledDown) {
       const totalExternal = external.length;
       const totalMemMB = Math.round(external.reduce((sum, p) => sum + p.rssKB, 0) / 1024);
       const processWord = totalExternal === 1 ? 'process' : 'processes';

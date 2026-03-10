@@ -139,6 +139,18 @@ export function validateJob(job: unknown, index?: number): void {
     }
   }
 
+  // Machine scope — optional array of machine IDs or names
+  if (j.machines !== undefined) {
+    if (!Array.isArray(j.machines)) {
+      throw new Error(`${prefix}: "machines" must be an array of machine IDs or names if provided`);
+    }
+    for (const m of j.machines) {
+      if (typeof m !== 'string' || !m.trim()) {
+        throw new Error(`${prefix}: "machines" entries must be non-empty strings`);
+      }
+    }
+  }
+
   // Grounding config — validate structure if present
   if (j.grounding !== undefined) {
     validateGrounding(j.grounding, prefix);

@@ -51,7 +51,7 @@ import { MachineIdentityManager } from '../core/MachineIdentity.js';
 import { GitSyncManager } from '../core/GitSync.js';
 import { ProjectMapper } from '../core/ProjectMapper.js';
 import { CapabilityMapper } from '../core/CapabilityMapper.js';
-import { CoherenceGate } from '../core/CoherenceGate.js';
+import { ScopeVerifier } from '../core/ScopeVerifier.js';
 import { ContextHierarchy } from '../core/ContextHierarchy.js';
 import { CanonicalState } from '../core/CanonicalState.js';
 import { ExternalOperationGate, AUTONOMY_PROFILES } from '../core/ExternalOperationGate.js';
@@ -2357,13 +2357,21 @@ export async function startServer(options: StartOptions): Promise<void> {
     });
     console.log(pc.green(`  Private viewer enabled`));
 
-    // Set up Cloudflare Tunnel if configured
+    // Set up Cloudflare Tunnel — enabled by default (quick tunnel, zero-config)
+    // Only disabled if explicitly set to tunnel.enabled = false
+    const tunnelEnabled = config.tunnel?.enabled !== false;
     let tunnel: TunnelManager | undefined;
-    if (config.tunnel?.enabled) {
+    if (tunnelEnabled) {
+      // Persist tunnel config if it wasn't in config.json yet (existing agents)
+      if (!config.tunnel) {
+        liveConfig.set('tunnel', { enabled: true, type: 'quick' });
+      }
       tunnel = new TunnelManager({
         enabled: true,
-        type: config.tunnel.type || 'quick',
-        token: config.tunnel.token,
+        type: config.tunnel?.type || 'quick',
+        token: config.tunnel?.token,
+        configFile: config.tunnel?.configFile,
+        hostname: config.tunnel?.hostname,
         port: config.port,
         stateDir: config.stateDir,
       });
@@ -2417,6 +2425,7 @@ export async function startServer(options: StartOptions): Promise<void> {
       externalReportAgeMs: 14_400_000, // Report external processes after 4 hours
       highMemoryThresholdMB: 500,  // Flag processes using >500MB
       autoKillOrphans: true,       // Auto-kill Instar orphans (safe — only project-prefixed tmux sessions)
+      reportExternalProcesses: config.monitoring?.reportExternalProcesses !== false,
       alertCallback: async (msg: string) => {
         notify('DIGEST', 'system', msg);
       },
@@ -2593,13 +2602,13 @@ export async function startServer(options: StartOptions): Promise<void> {
       console.error(`  Capability map generation failed (non-critical): ${err.message}`);
     });
 
-    const coherenceGate = new CoherenceGate({
+    const scopeVerifier = new ScopeVerifier({
       projectDir: config.projectDir,
       stateDir: config.stateDir,
       projectName: config.projectName,
     });
     // Load any persisted topic-project bindings
-    coherenceGate.loadTopicBindings();
+    scopeVerifier.loadTopicBindings();
 
     // Context Hierarchy — tiered context loading for session efficiency
     const contextHierarchy = new ContextHierarchy({
@@ -2892,7 +2901,7 @@ export async function startServer(options: StartOptions): Promise<void> {
         ...createSessionProbes({
           listRunningSessions: () => sessionManager.listRunningSessions(),
           getSessionDiagnostics: () => sessionManager.getSessionDiagnostics(),
-          maxSessions: config.sessions?.maxSessions ?? 3,
+          maxSessions: config.sessions?.maxSessions ?? 10,
           tmuxPath,
         }),
         ...createSchedulerProbes({
@@ -2942,7 +2951,26 @@ export async function startServer(options: StartOptions): Promise<void> {
       console.warn(pc.yellow(`  Threadline: failed to bootstrap — ${err instanceof Error ? err.message : String(err)}`));
     }
 
-    const server = new AgentServer({ config, sessionManager, state, scheduler, telegram, relationships, feedback, feedbackAnomalyDetector, dispatches, updateChecker, autoUpdater, autoDispatcher, quotaTracker, quotaManager, publisher, viewer, tunnel, evolution, watchdog, topicMemory, triageNurse, projectMapper, coherenceGate, contextHierarchy, canonicalState, operationGate, sentinel, adaptiveTrust, memoryMonitor, orphanReaper, coherenceMonitor, commitmentTracker, semanticMemory, activitySentinel, messageRouter, summarySentinel, spawnManager, systemReviewer, capabilityMapper, topicResumeMap: _topicResumeMap ?? undefined, autonomyManager, trustElevationTracker, autonomousEvolution, coordinator: coordinator.enabled ? coordinator : undefined, localSigningKeyPem, whatsapp: whatsappAdapter, whatsappBusinessBackend, messageBridge, hookEventReceiver, worktreeMonitor, subagentTracker, instructionsVerifier, handshakeManager: threadlineHandshake });
+    // Response Review Pipeline (Coherence Gate) — evaluates agent responses before delivery
+    let responseReviewGate: import('../core/CoherenceGate.js').CoherenceGate | undefined;
+    if (config.responseReview?.enabled) {
+      const anthropicKey = process.env['ANTHROPIC_API_KEY']?.trim();
+      if (anthropicKey) {
+        const { CoherenceGate } = await import('../core/CoherenceGate.js');
+        responseReviewGate = new CoherenceGate({
+          config: config.responseReview,
+          stateDir: config.stateDir,
+          apiKey: anthropicKey,
+          relationships: relationships ?? undefined,
+          adaptiveTrust: adaptiveTrust ?? undefined,
+        });
+        console.log(pc.green(`  Response review pipeline: enabled (${Object.keys(config.responseReview.reviewers ?? {}).length} reviewers configured)`));
+      } else {
+        console.warn(pc.yellow(`  Response review pipeline: configured but ANTHROPIC_API_KEY not set`));
+      }
+    }
+
+    const server = new AgentServer({ config, sessionManager, state, scheduler, telegram, relationships, feedback, feedbackAnomalyDetector, dispatches, updateChecker, autoUpdater, autoDispatcher, quotaTracker, quotaManager, publisher, viewer, tunnel, evolution, watchdog, topicMemory, triageNurse, projectMapper, coherenceGate: scopeVerifier, contextHierarchy, canonicalState, operationGate, sentinel, adaptiveTrust, memoryMonitor, orphanReaper, coherenceMonitor, commitmentTracker, semanticMemory, activitySentinel, messageRouter, summarySentinel, spawnManager, systemReviewer, capabilityMapper, topicResumeMap: _topicResumeMap ?? undefined, autonomyManager, trustElevationTracker, autonomousEvolution, coordinator: coordinator.enabled ? coordinator : undefined, localSigningKeyPem, whatsapp: whatsappAdapter, whatsappBusinessBackend, messageBridge, hookEventReceiver, worktreeMonitor, subagentTracker, instructionsVerifier, handshakeManager: threadlineHandshake, responseReviewGate });
     await server.start();
 
     // Connect DegradationReporter downstream systems now that everything is initialized.
@@ -2960,14 +2988,55 @@ export async function startServer(options: StartOptions): Promise<void> {
       });
     }
 
-    // Start tunnel AFTER server is listening
+    // Start tunnel AFTER server is listening (with retry on failure)
     if (tunnel) {
-      try {
-        const tunnelUrl = await tunnel.start();
-        console.log(pc.green(`  Tunnel active: ${pc.bold(tunnelUrl)}`));
-      } catch (err) {
-        console.error(pc.red(`  Tunnel failed: ${err instanceof Error ? err.message : String(err)}`));
-        console.log(pc.yellow(`  Server running locally without tunnel. Fix tunnel config and restart.`));
+      const maxRetries = 5;
+      let tunnelStarted = false;
+      for (let attempt = 1; attempt <= maxRetries; attempt++) {
+        try {
+          const tunnelUrl = await tunnel.start();
+          console.log(pc.green(`  Tunnel active: ${pc.bold(tunnelUrl)}`));
+          tunnelStarted = true;
+          break;
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err);
+          if (attempt < maxRetries) {
+            const delay = Math.min(15_000 * Math.pow(2, attempt - 1), 120_000); // 15s, 30s, 60s, 120s
+            console.log(pc.yellow(`  Tunnel failed (attempt ${attempt}/${maxRetries}): ${msg}`));
+            console.log(pc.yellow(`  Retrying in ${delay / 1000}s...`));
+            await new Promise(r => setTimeout(r, delay));
+          } else {
+            console.error(pc.red(`  Tunnel failed after ${maxRetries} attempts: ${msg}`));
+          }
+        }
+      }
+      // If tunnel didn't start, schedule background retries
+      if (!tunnelStarted) {
+        const retryIntervals = [5, 10, 20]; // minutes
+        console.log(pc.yellow(`  Will retry tunnel in ${retryIntervals[0]} minutes...`));
+        const scheduleRetry = (index: number) => {
+          if (index >= retryIntervals.length) return;
+          setTimeout(async () => {
+            try {
+              const tunnelUrl = await tunnel!.start();
+              console.log(pc.green(`[tunnel] Connected: ${tunnelUrl}`));
+              if (telegram && tunnelUrl) {
+                const tunnelType = (config.tunnel?.type || 'quick') as 'quick' | 'named';
+                await telegram.broadcastDashboardUrl(tunnelUrl, tunnelType).catch(() => {});
+              }
+            } catch (retryErr) {
+              const msg = retryErr instanceof Error ? retryErr.message : String(retryErr);
+              console.error(`[tunnel] Retry failed: ${msg}`);
+              if (index + 1 < retryIntervals.length) {
+                console.log(`[tunnel] Will retry in ${retryIntervals[index + 1]} minutes...`);
+                scheduleRetry(index + 1);
+              } else {
+                console.error('[tunnel] All retries exhausted. Tunnel unavailable until server restart.');
+              }
+            }
+          }, retryIntervals[index] * 60_000);
+        };
+        scheduleRetry(0);
       }
     }
 

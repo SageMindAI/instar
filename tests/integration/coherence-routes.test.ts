@@ -9,7 +9,7 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import request from 'supertest';
 import { AgentServer } from '../../src/server/AgentServer.js';
 import { ProjectMapper } from '../../src/core/ProjectMapper.js';
-import { CoherenceGate } from '../../src/core/CoherenceGate.js';
+import { ScopeVerifier } from '../../src/core/ScopeVerifier.js';
 import {
   createTempProject,
   createMockSessionManager,
@@ -22,7 +22,7 @@ describe('Coherence Gate + Project Map API routes', () => {
   let mockSM: MockSessionManager;
   let server: AgentServer;
   let projectMapper: ProjectMapper;
-  let coherenceGate: CoherenceGate;
+  let coherenceGate: ScopeVerifier;
   let app: ReturnType<AgentServer['getApp']>;
   const AUTH_TOKEN = 'test-auth-coherence';
 
@@ -35,7 +35,7 @@ describe('Coherence Gate + Project Map API routes', () => {
       stateDir: project.stateDir,
     });
 
-    coherenceGate = new CoherenceGate({
+    coherenceGate = new ScopeVerifier({
       projectDir: project.dir,
       stateDir: project.stateDir,
       projectName: 'test-coherence-project',

@@ -543,10 +543,10 @@ curl -X POST localhost:4040/sessions/research/input \\
           <button
             id="toggle-capabilities"
             class="group flex items-center gap-2 px-6 py-3 rounded-lg border border-slate-700 bg-slate-800/50 hover:border-teal-500/30 hover:bg-slate-800 transition-all text-sm text-slate-400 hover:text-teal-400"
-            onclick="document.querySelectorAll('.more-capability').forEach(el => el.classList.toggle('hidden')); const btn = document.getElementById('toggle-capabilities'); const expanded = btn.dataset.expanded === 'true'; btn.dataset.expanded = expanded ? 'false' : 'true'; btn.querySelector('.btn-text').textContent = expanded ? 'Show 13 more capabilities' : 'Show fewer'; btn.querySelector('.btn-arrow').style.transform = expanded ? '' : 'rotate(180deg)';"
+            onclick="document.querySelectorAll('.more-capability').forEach(el => el.classList.toggle('hidden')); const btn = document.getElementById('toggle-capabilities'); const expanded = btn.dataset.expanded === 'true'; btn.dataset.expanded = expanded ? 'false' : 'true'; btn.querySelector('.btn-text').textContent = expanded ? 'Show 14 more capabilities' : 'Show fewer'; btn.querySelector('.btn-arrow').style.transform = expanded ? '' : 'rotate(180deg)';"
             data-expanded="false"
           >
-            <span class="btn-text">Show 13 more capabilities</span>
+            <span class="btn-text">Show 14 more capabilities</span>
             <svg class="w-4 h-4 btn-arrow transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><path d="M19 9l-7 7-7-7"/></svg>
           </button>
         </div>
@@ -622,6 +622,29 @@ curl -X POST localhost:4040/sessions/research/input \\
           </p>
           <div class="rounded-lg border border-slate-700/50 bg-slate-800/40 p-4 text-xs text-slate-400">
             Born from a real incident where an AI agent deleted a user's emails. Your agent asks before doing anything it can't undo.
+          </div>
+        </div>
+
+        <!-- Coherence Gate -->
+        <div class="group rounded-xl border border-slate-800 bg-slate-900/40 p-8 hover:border-teal-500/20 transition-colors more-capability hidden">
+          <div class="w-10 h-10 rounded-lg bg-teal-500/10 flex items-center justify-center mb-5">
+            <svg class="w-5 h-5 text-teal-400" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><path d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+          </div>
+          <h3 class="text-lg font-semibold text-slate-100 mb-2">Coherence Gate</h3>
+          <p class="text-slate-400 text-sm leading-relaxed mb-4">
+            Every outbound message passes through a three-layer review pipeline before delivery.
+            Deterministic credential scanning, fast LLM triage, and 9 specialist reviewers catch
+            tone issues, fabricated claims, and information leakage &mdash; before the user sees them.
+          </p>
+          <div class="rounded-lg border border-slate-700/50 bg-slate-800/40 p-4 space-y-2 text-xs">
+            <div class="flex items-center gap-2">
+              <div class="w-1.5 h-1.5 rounded-full bg-green-400"></div>
+              <span class="text-slate-400">PEL &rarr; Gate Review &rarr; 9 Specialist Reviewers &rarr; Deliver</span>
+            </div>
+            <div class="flex items-center gap-2">
+              <div class="w-1.5 h-1.5 rounded-full bg-green-400"></div>
+              <span class="text-slate-400">Per-channel config &mdash; different behavior for Telegram, WhatsApp, email</span>
+            </div>
           </div>
         </div>
 

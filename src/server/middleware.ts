@@ -38,6 +38,12 @@ export function authMiddleware(authToken?: string) {
       return;
     }
 
+    // Dashboard unlock (PIN → token exchange) is unauthenticated by design
+    if (req.path === '/dashboard/unlock' && req.method === 'POST') {
+      next();
+      return;
+    }
+
     // Message relay endpoints use their own auth (agent tokens / machine-HMAC),
     // not the general API bearer token. Auth is enforced in the route handlers.
     if (req.path === '/messages/relay-agent' || req.path === '/messages/relay-machine') {

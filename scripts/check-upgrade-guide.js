@@ -70,6 +70,15 @@ const NEXT_TEMPLATE = `# Upgrade Guide — vNEXT
 <!-- Write talking points the agent should relay to their user. -->
 <!-- This should be warm, conversational, user-facing — not a changelog. -->
 <!-- Focus on what THEY can now do, not internal plumbing. -->
+<!--                                                                    -->
+<!-- PROHIBITED in this section (will fail validation):                 -->
+<!--   camelCase config keys: silentReject, maxRetries, telegramNotify -->
+<!--   Inline code backtick references like silentReject: false        -->
+<!--   Fenced code blocks                                              -->
+<!--   Instructions to edit files or run commands                      -->
+<!--                                                                    -->
+<!-- CORRECT style: "I can turn that on for you" not "set X to false"  -->
+<!-- The agent relays this to their user — keep it human.              -->
 
 - **[Feature name]**: "[Brief, friendly description of what this means for the user]"
 
@@ -106,6 +115,40 @@ function validateGuide(filePath) {
   }
   if (content.includes('[Capability]') && content.includes('[Endpoint, command')) {
     issues.push(`"Summary of New Capabilities" section still contains template placeholder — fill it in`);
+  }
+
+  // Validate "What to Tell Your User" section for technical leakage.
+  // This section is relayed verbatim to users — it must be conversational, not a config reference.
+  const userSectionMatch = content.match(/## What to Tell Your User([\s\S]*?)(?:##|$)/);
+  if (userSectionMatch) {
+    const userSection = userSectionMatch[1];
+
+    // Detect camelCase config key references (e.g. silentReject, maxRetries, telegramNotify)
+    const camelCaseConfigKey = /\b[a-z]+[A-Z][a-zA-Z]+\s*(?::|=)/.test(userSection);
+    if (camelCaseConfigKey) {
+      issues.push(
+        `"What to Tell Your User" contains a camelCase config key reference (e.g. "silentReject: false"). ` +
+        `Users should never be told to edit config directly. ` +
+        `Rephrase conversationally: "I can turn that on for you" not "set silentReject: false".`
+      );
+    }
+
+    // Detect inline code blocks — config syntax, CLI commands, file paths
+    const hasInlineCode = /`[^`]+`/.test(userSection);
+    if (hasInlineCode) {
+      issues.push(
+        `"What to Tell Your User" contains inline code (\`...\`). ` +
+        `Remove code formatting — user-facing language should be plain and conversational.`
+      );
+    }
+
+    // Detect fenced code blocks
+    if (/```/.test(userSection)) {
+      issues.push(
+        `"What to Tell Your User" contains a fenced code block. ` +
+        `This section is for user-facing narrative — move technical examples to "What Changed".`
+      );
+    }
   }
 
   return issues;

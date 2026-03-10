@@ -4,7 +4,7 @@
  * Simulates full agent lifecycle scenarios:
  * - Agent setup -> publishes content -> understanding evolves -> temporal drift detected
  * - Multi-agent scenarios with independent state
- * - Integration with CoherenceGate for pre-publish checks
+ * - Integration with ScopeVerifier for pre-publish checks
  * - State evolution over time
  * - Recovery from infrastructure changes
  *
@@ -18,7 +18,7 @@ import os from 'node:os';
 import { TemporalCoherenceChecker } from '../../src/core/TemporalCoherenceChecker.js';
 import { PlatformActivityRegistry } from '../../src/core/PlatformActivityRegistry.js';
 import { CanonicalState } from '../../src/core/CanonicalState.js';
-import { CoherenceGate } from '../../src/core/CoherenceGate.js';
+import { ScopeVerifier } from '../../src/core/ScopeVerifier.js';
 import type { IntelligenceProvider } from '../../src/core/types.js';
 
 // ── Helpers ──────────────────────────────────────────────────────────
@@ -316,15 +316,15 @@ describe('TemporalCoherenceChecker E2E lifecycle', () => {
     });
   });
 
-  // ── CoherenceGate Integration ─────────────────────────────────────
+  // ── ScopeVerifier Integration ─────────────────────────────────────
 
-  describe('CoherenceGate integration pattern', () => {
+  describe('ScopeVerifier integration pattern', () => {
     it('temporal check + coherence gate provides layered safety', async () => {
       const agent = setupAgent('Publisher');
       agents.push(agent);
 
-      // Set up CoherenceGate
-      const gate = new CoherenceGate({
+      // Set up ScopeVerifier
+      const gate = new ScopeVerifier({
         projectDir: agent.projectDir,
         stateDir: agent.stateDir,
         projectName: 'Publisher',
@@ -343,7 +343,7 @@ describe('TemporalCoherenceChecker E2E lifecycle', () => {
       // Simulate pre-publish check workflow
       const draft = 'Compaction makes me die inside.';
 
-      // Step 1: Structural coherence (CoherenceGate)
+      // Step 1: Structural coherence (ScopeVerifier)
       const gateResult = gate.check('external-api', { description: 'Publishing to X' });
       // Gate checks structural things (project, identity) — should pass
       expect(gateResult.recommendation).not.toBe('block');
@@ -363,7 +363,7 @@ describe('TemporalCoherenceChecker E2E lifecycle', () => {
       const agent = setupAgent('AlignedAgent');
       agents.push(agent);
 
-      const gate = new CoherenceGate({
+      const gate = new ScopeVerifier({
         projectDir: agent.projectDir,
         stateDir: agent.stateDir,
         projectName: 'AlignedAgent',

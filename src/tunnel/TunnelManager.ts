@@ -16,6 +16,7 @@
  */
 
 import { EventEmitter } from 'node:events';
+import { spawn } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import { bin, install, Tunnel } from 'cloudflared';
@@ -27,8 +28,12 @@ export interface TunnelConfig {
   enabled: boolean;
   /** Tunnel type: 'quick' (ephemeral, no account) or 'named' (persistent, requires token) */
   type: 'quick' | 'named';
-  /** Cloudflare tunnel token (required for named tunnels) */
+  /** Cloudflare tunnel token (required for named tunnels using token auth) */
   token?: string;
+  /** Config file path for named tunnels using credentials file auth */
+  configFile?: string;
+  /** Public hostname for named tunnels (e.g., echo.dawn-tunnel.dev) */
+  hostname?: string;
   /** Local port to tunnel to */
   port: number;
   /** State directory for persisting tunnel info */
@@ -107,8 +112,11 @@ export class TunnelManager extends EventEmitter {
 
     // Start the appropriate tunnel type
     if (this.config.type === 'named') {
-      if (!this.config.token) {
-        throw new Error('Named tunnel requires a token. Set tunnel.token in config.');
+      if (!this.config.token && !this.config.configFile) {
+        throw new Error('Named tunnel requires either a token or a configFile. Set tunnel.token or tunnel.configFile in config.');
+      }
+      if (this.config.configFile) {
+        return this.startConfigFileTunnel();
       }
       return this.startNamedTunnel();
     } else {
@@ -288,6 +296,92 @@ export class TunnelManager extends EventEmitter {
           }
         }
       });
+    });
+  }
+
+  private startConfigFileTunnel(): Promise<string> {
+    return new Promise((resolve, reject) => {
+      const configFile = this.config.configFile!;
+      const hostname = this.config.hostname;
+
+      if (!fs.existsSync(configFile)) {
+        reject(new Error(`Tunnel config file not found: ${configFile}`));
+        return;
+      }
+
+      // Spawn cloudflared directly with the config file
+      const child = spawn(bin, ['tunnel', '--config', configFile, 'run'], {
+        stdio: ['ignore', 'pipe', 'pipe'],
+      });
+
+      let resolved = false;
+      let stderrBuffer = '';
+      const timeout = setTimeout(() => {
+        if (!resolved) {
+          resolved = true;
+          // Named tunnels with config files don't emit a URL — the URL is the hostname
+          if (hostname) {
+            const url = `https://${hostname}`;
+            this._state.url = url;
+            this._state.startedAt = new Date().toISOString();
+            this.saveState();
+            this.emit('url', url);
+            resolve(url);
+          } else {
+            reject(new Error('Named tunnel timed out and no hostname configured'));
+          }
+        }
+      }, 15_000);
+
+      // Watch stderr for connection established messages
+      child.stderr.on('data', (data: Buffer) => {
+        const line = data.toString();
+        stderrBuffer += line;
+
+        // cloudflared logs connection info to stderr
+        if (line.includes('Registered tunnel connection') || line.includes('Connection registered')) {
+          if (!resolved && hostname) {
+            resolved = true;
+            clearTimeout(timeout);
+            const url = `https://${hostname}`;
+            this._state.url = url;
+            this._state.startedAt = new Date().toISOString();
+            this.saveState();
+            this.emit('url', url);
+            resolve(url);
+          }
+        }
+      });
+
+      child.on('error', (err: Error) => {
+        if (!resolved) {
+          resolved = true;
+          clearTimeout(timeout);
+          reject(new Error(`Failed to start config-file tunnel: ${err.message}`));
+        }
+      });
+
+      child.on('exit', (code: number | null) => {
+        if (!this._stopped) {
+          this._state.url = null;
+          this.saveState();
+          this.emit('disconnected');
+          if (!resolved) {
+            resolved = true;
+            clearTimeout(timeout);
+            const errContext = stderrBuffer.slice(-500);
+            reject(new Error(`Config-file tunnel exited with code ${code}: ${errContext}`));
+          }
+        }
+      });
+
+      // Store reference for cleanup — wrap in a Tunnel-like interface
+      this.tunnel = {
+        stop: () => { child.kill('SIGTERM'); },
+        once: () => {},
+        on: () => {},
+        emit: () => false,
+      } as unknown as Tunnel;
     });
   }
 

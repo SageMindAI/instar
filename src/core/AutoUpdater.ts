@@ -103,8 +103,8 @@ export class AutoUpdater {
   // Restart cooldown — prevent rapid restart cycling (e.g., binary path mismatch)
   private lastRestartRequestedAt: string | null = null;
   private lastRestartRequestedVersion: string | null = null;
-  // npx cache detection — when true, auto-apply is disabled because npm install -g
-  // updates a different location than the running binary (infinite loop prevention)
+  // npx cache detection — legacy field, no longer used. Updates now install to
+  // a local shadow directory, so npx cache location is irrelevant.
   private isNpxCached = false;
 
   constructor(
@@ -133,21 +133,10 @@ export class AutoUpdater {
 
     this.gate = new UpdateGate();
 
-    // Detect npx cache: when the running binary is in .npm/_npx/, `npm install -g`
-    // updates a different location. Auto-applying would succeed (global gets updated)
-    // but restart loads from the same stale npx cache → infinite loop.
-    // This was the root cause of the v0.12.12 notification spam on npx-launched agents.
-    try {
-      const runningPath = new URL(import.meta.url).pathname;
-      if (runningPath.includes('.npm/_npx')) {
-        this.isNpxCached = true;
-        console.warn(
-          `[AutoUpdater] WARNING: Running from npx cache (${runningPath}). ` +
-          `Auto-apply disabled — npm install -g updates a different location. ` +
-          `Reinstall globally: npm install -g instar`
-        );
-      }
-    } catch { /* import.meta.url not available — assume not npx */ }
+    // npx cache detection is no longer needed — updates install to a local
+    // shadow directory ({stateDir}/shadow-install/) instead of globally.
+    // The supervisor resolves the shadow install on restart, so npx cache
+    // vs global vs asdf no longer matters. Each agent owns its version.
 
     // Load persisted state (survives restarts)
     this.loadState();
@@ -331,19 +320,6 @@ export class AutoUpdater {
       this.pendingUpdate = info.latestVersion;
 
       // Step 2: Auto-apply if configured
-      // Block auto-apply when running from npx cache — npm install -g can't reach us
-      if (this.isNpxCached) {
-        if (!this.coalescingUntil) {
-          await this.notify(
-            `There's a new version available (v${info.latestVersion}), but I'm running from a temporary install ` +
-            `so auto-updates can't take effect. To fix this, install me permanently and restart the lifeline — ` +
-            `your admin can handle this, or just say "help me update" and I'll walk through it.`
-          );
-          this.coalescingUntil = 'notified-npx';
-        }
-        this.saveState();
-        return;
-      }
       if (!this.config.autoApply) {
         this.saveState();
         // Notify with actionable instructions — don't leave the user hanging

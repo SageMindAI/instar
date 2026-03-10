@@ -16,6 +16,15 @@
 <!-- Write talking points the agent should relay to their user. -->
 <!-- This should be warm, conversational, user-facing — not a changelog. -->
 <!-- Focus on what THEY can now do, not internal plumbing. -->
+<!--                                                                    -->
+<!-- PROHIBITED in this section (will fail validation):                 -->
+<!--   camelCase config keys: silentReject, maxRetries, telegramNotify -->
+<!--   Inline code backtick references like silentReject: false        -->
+<!--   Fenced code blocks                                              -->
+<!--   Instructions to edit files or run commands                      -->
+<!--                                                                    -->
+<!-- CORRECT style: "I can turn that on for you" not "set X to false"  -->
+<!-- The agent relays this to their user — keep it human.              -->
 
 - **[Feature name]**: "[Brief, friendly description of what this means for the user]"
 

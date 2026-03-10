@@ -179,6 +179,13 @@ export class PostUpdateMigrator {
     } catch (err) {
       result.errors.push(`claim-intercept-response.js: ${err instanceof Error ? err.message : String(err)}`);
     }
+
+    try {
+      fs.writeFileSync(path.join(instarHooksDir, 'response-review.js'), this.getResponseReviewHook(), { mode: 0o755 });
+      result.upgraded.push('hooks/instar/response-review.js (coherence gate response review pipeline)');
+    } catch (err) {
+      result.errors.push(`response-review.js: ${err instanceof Error ? err.message : String(err)}`);
+    }
   }
 
   /**
@@ -194,7 +201,7 @@ export class PostUpdateMigrator {
       'post-action-reflection.js', 'external-communication-guard.js',
       'scope-coherence-collector.js', 'scope-coherence-checkpoint.js',
       'instructions-loaded-tracker.js', 'subagent-start-tracker.js',
-      'free-text-guard.sh', 'claim-intercept.js', 'claim-intercept-response.js',
+      'free-text-guard.sh', 'claim-intercept.js', 'claim-intercept-response.js', 'response-review.js',
     ];
 
     // Check if we're still on the old flat layout (hooks directly in .instar/hooks/)
@@ -910,7 +917,7 @@ The user has been talking to you (possibly for days). A generic greeting like "H
    * Get the content of a named hook template.
    * Used by init.ts to share canonical hook content without duplication.
    */
-  getHookContent(name: 'session-start' | 'compaction-recovery' | 'external-operation-gate' | 'deferral-detector' | 'post-action-reflection' | 'external-communication-guard' | 'scope-coherence-collector' | 'scope-coherence-checkpoint' | 'claim-intercept' | 'claim-intercept-response' | 'telegram-topic-context'): string {
+  getHookContent(name: 'session-start' | 'compaction-recovery' | 'external-operation-gate' | 'deferral-detector' | 'post-action-reflection' | 'external-communication-guard' | 'scope-coherence-collector' | 'scope-coherence-checkpoint' | 'claim-intercept' | 'claim-intercept-response' | 'telegram-topic-context' | 'response-review'): string {
     switch (name) {
       case 'session-start': return this.getSessionStartHook();
       case 'compaction-recovery': return this.getCompactionRecovery();
@@ -923,6 +930,7 @@ The user has been talking to you (possibly for days). A generic greeting like "H
       case 'claim-intercept': return this.getClaimInterceptHook();
       case 'claim-intercept-response': return this.getClaimInterceptResponseHook();
       case 'telegram-topic-context': return this.getTelegramTopicContextHook();
+      case 'response-review': return this.getResponseReviewHook();
     }
   }
 
@@ -2773,6 +2781,130 @@ process.stdin.on('end', () => {
     process.stdout.write(JSON.stringify({ decision: 'approve', additionalContext: warning }));
   } catch {}
   process.exit(0);
+});
+`;
+  }
+
+  private getResponseReviewHook(): string {
+    const port = this.config.port;
+    return `#!/usr/bin/env node
+// Response Review — Stop hook for the Coherence Gate response review pipeline.
+//
+// Thin client: reads stdin JSON, posts to the Instar server's /review/evaluate
+// endpoint, and returns the verdict. All review logic lives server-side.
+//
+// Unlike other stop hooks, this does NOT skip when stop_hook_active is true.
+// The CoherenceGate handles retry tracking and exhaustion internally.
+// The hook always passes the stopHookActive flag so the server can decide.
+
+const _r = require;
+const fs = _r('fs');
+const path = _r('path');
+const http = _r('http');
+
+// Read config for port and auth token
+let serverPort = ${port};
+let authToken = '';
+try {
+  const configPath = path.join(process.env.CLAUDE_PROJECT_DIR || '.', '.instar', 'config.json');
+  const raw = fs.readFileSync(configPath, 'utf-8');
+  const cfg = JSON.parse(raw);
+  serverPort = cfg.port || ${port};
+  authToken = cfg.authToken || '';
+} catch {}
+
+// Check if response review is enabled in config
+let reviewEnabled = false;
+try {
+  const configPath = path.join(process.env.CLAUDE_PROJECT_DIR || '.', '.instar', 'config.json');
+  const raw = fs.readFileSync(configPath, 'utf-8');
+  const cfg = JSON.parse(raw);
+  reviewEnabled = cfg.responseReview && cfg.responseReview.enabled;
+} catch {}
+
+if (!reviewEnabled) {
+  process.exit(0);
+}
+
+let data = '';
+process.stdin.on('data', chunk => data += chunk);
+process.stdin.on('end', async () => {
+  try {
+    const input = JSON.parse(data);
+    const message = input.last_assistant_message || '';
+
+    // Skip empty or very short messages (greetings, etc.)
+    if (!message || message.length < 20) {
+      process.exit(0);
+    }
+
+    // Determine channel from environment
+    const topicId = process.env.INSTAR_TELEGRAM_TOPIC;
+    const sessionId = process.env.INSTAR_SESSION_ID || 'unknown';
+    const channel = topicId ? 'telegram' : 'direct';
+    const isExternalFacing = !!topicId; // Telegram = external
+
+    // Build the review request
+    const body = JSON.stringify({
+      message,
+      sessionId,
+      stopHookActive: !!input.stop_hook_active,
+      context: {
+        channel,
+        topicId: topicId ? parseInt(topicId, 10) : undefined,
+        recipientType: 'primary-user',
+        isExternalFacing,
+      },
+    });
+
+    // Call the review endpoint with timeout
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 8000);
+
+    try {
+      const res = await fetch('http://127.0.0.1:' + serverPort + '/review/evaluate', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer ' + authToken,
+        },
+        body,
+        signal: controller.signal,
+      });
+      clearTimeout(timeout);
+
+      if (!res.ok) {
+        // Server error — fail open (approve)
+        process.exit(0);
+      }
+
+      const result = await res.json();
+
+      if (!result.pass) {
+        // BLOCK — return feedback to the agent for revision
+        const reason = result.feedback || 'Response did not pass coherence review.';
+        process.stdout.write(JSON.stringify({
+          decision: 'block',
+          reason,
+        }));
+        process.exit(2);
+      }
+
+      // PASS — optionally include warnings
+      if (result.warnings && result.warnings.length > 0) {
+        process.stderr.write('[response-review] Warnings: ' + result.warnings.join('; ') + '\\n');
+      }
+
+      process.exit(0);
+    } catch {
+      // Network error or timeout — fail open
+      clearTimeout(timeout);
+      process.exit(0);
+    }
+  } catch {
+    // JSON parse error on stdin — fail open
+    process.exit(0);
+  }
 });
 `;
   }

@@ -266,6 +266,164 @@ describe('JobScheduler', () => {
     });
   });
 
+  describe('machine scope filtering', () => {
+    it('runs all jobs when no machine identity is set', () => {
+      createScheduler();
+      scheduler.start();
+
+      // Both enabled jobs should be schedulable
+      const result1 = scheduler.triggerJob('health-check', 'test');
+      expect(result1).toBe('triggered');
+    });
+
+    it('runs unscoped jobs on any machine', () => {
+      jobsFile = createSampleJobsFile(project.stateDir);
+      createScheduler();
+      scheduler.setMachineIdentity('m_abc123def456', 'justins-macbook');
+      scheduler.start();
+
+      // Default sample jobs have no machines field — should run
+      const result = scheduler.triggerJob('health-check', 'test');
+      expect(result).toBe('triggered');
+    });
+
+    it('runs jobs scoped to this machine by ID', () => {
+      jobsFile = createSampleJobsFile(project.stateDir, [
+        {
+          slug: 'scoped-job',
+          name: 'Scoped Job',
+          description: 'Only on this machine',
+          schedule: '0 */4 * * *',
+          priority: 'medium',
+          expectedDurationMinutes: 5,
+          model: 'haiku',
+          enabled: true,
+          execute: { type: 'skill', value: 'scan' },
+          machines: ['m_abc123def456'],
+        },
+      ]);
+      createScheduler();
+      scheduler.setMachineIdentity('m_abc123def456', 'justins-macbook');
+      scheduler.start();
+
+      const result = scheduler.triggerJob('scoped-job', 'test');
+      expect(result).toBe('triggered');
+    });
+
+    it('runs jobs scoped to this machine by name (case-insensitive)', () => {
+      jobsFile = createSampleJobsFile(project.stateDir, [
+        {
+          slug: 'name-scoped',
+          name: 'Name Scoped',
+          description: 'Scoped by machine name',
+          schedule: '0 */4 * * *',
+          priority: 'medium',
+          expectedDurationMinutes: 5,
+          model: 'haiku',
+          enabled: true,
+          execute: { type: 'skill', value: 'scan' },
+          machines: ['Justins-MacBook'],
+        },
+      ]);
+      createScheduler();
+      scheduler.setMachineIdentity('m_abc123def456', 'justins-macbook');
+      scheduler.start();
+
+      const result = scheduler.triggerJob('name-scoped', 'test');
+      expect(result).toBe('triggered');
+    });
+
+    it('skips jobs scoped to a different machine', () => {
+      jobsFile = createSampleJobsFile(project.stateDir, [
+        {
+          slug: 'other-machine-job',
+          name: 'Other Machine Job',
+          description: 'Not for this machine',
+          schedule: '0 */4 * * *',
+          priority: 'medium',
+          expectedDurationMinutes: 5,
+          model: 'haiku',
+          enabled: true,
+          execute: { type: 'skill', value: 'scan' },
+          machines: ['m_other_machine_id', 'adrianas-laptop'],
+        },
+      ]);
+      createScheduler();
+      scheduler.setMachineIdentity('m_abc123def456', 'justins-macbook');
+      scheduler.start();
+
+      const result = scheduler.triggerJob('other-machine-job', 'test');
+      expect(result).toBe('skipped');
+      expect(mockSM._spawnCount).toBe(0);
+    });
+
+    it('only schedules cron tasks for machine-scoped jobs', () => {
+      const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+      jobsFile = createSampleJobsFile(project.stateDir, [
+        {
+          slug: 'local-job',
+          name: 'Local Job',
+          description: 'Runs here',
+          schedule: '0 */4 * * *',
+          priority: 'medium',
+          expectedDurationMinutes: 5,
+          model: 'haiku',
+          enabled: true,
+          execute: { type: 'skill', value: 'scan' },
+          machines: ['m_this_machine'],
+        },
+        {
+          slug: 'remote-job',
+          name: 'Remote Job',
+          description: 'Runs elsewhere',
+          schedule: '0 */4 * * *',
+          priority: 'medium',
+          expectedDurationMinutes: 5,
+          model: 'haiku',
+          enabled: true,
+          execute: { type: 'skill', value: 'scan' },
+          machines: ['m_other_machine'],
+        },
+      ]);
+      createScheduler();
+      scheduler.setMachineIdentity('m_this_machine', 'my-laptop');
+      scheduler.start();
+
+      // Should log that 1 job was skipped by machine scope
+      expect(logSpy).toHaveBeenCalledWith(
+        expect.stringContaining('1 job(s) skipped (machine scope)')
+      );
+      logSpy.mockRestore();
+
+      // Verify the start event mentions the scope filtering
+      const events = project.state.queryEvents({ type: 'scheduler_start' });
+      expect(events[0].summary).toContain('1 skipped by machine scope');
+    });
+
+    it('treats empty machines array as unscoped (runs everywhere)', () => {
+      jobsFile = createSampleJobsFile(project.stateDir, [
+        {
+          slug: 'empty-scope',
+          name: 'Empty Scope',
+          description: 'No machine restriction',
+          schedule: '0 */4 * * *',
+          priority: 'medium',
+          expectedDurationMinutes: 5,
+          model: 'haiku',
+          enabled: true,
+          execute: { type: 'skill', value: 'scan' },
+          machines: [],
+        },
+      ]);
+      createScheduler();
+      scheduler.setMachineIdentity('m_any_machine', 'any-name');
+      scheduler.start();
+
+      const result = scheduler.triggerJob('empty-scope', 'test');
+      expect(result).toBe('triggered');
+    });
+  });
+
   describe('notifyJobComplete', () => {
     it('updates job state with success on completed session', async () => {
       createScheduler();

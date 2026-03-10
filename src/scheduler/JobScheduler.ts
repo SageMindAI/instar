@@ -15,6 +15,7 @@ import path from 'node:path';
 import { ExecutionJournal } from '../core/ExecutionJournal.js';
 import { JobReflector } from '../core/JobReflector.js';
 import { loadJobs } from './JobLoader.js';
+import { JobRunHistory } from './JobRunHistory.js';
 import { SkipLedger } from './SkipLedger.js';
 import { classifySessionDeath } from '../monitoring/QuotaExhaustionDetector.js';
 import type { SessionManager } from '../core/SessionManager.js';
@@ -54,11 +55,19 @@ export class JobScheduler {
   private state: StateManager;
   private stateDir: string;
   private skipLedger: SkipLedger;
+  private runHistory: JobRunHistory;
   private jobs: JobDefinition[] = [];
   private cronTasks: Map<string, Cron> = new Map();
   private queue: QueuedJob[] = [];
   private running = false;
   private paused = false;
+
+  /** Map session names to run IDs for completion tracking */
+  private activeRunIds: Map<string, string> = new Map();
+
+  /** Local machine identity — used for machine-scoped job filtering */
+  private machineId: string | null = null;
+  private machineName: string | null = null;
 
   /** Callback to check if quota allows running a job at the given priority */
   canRunJob: (priority: JobPriority) => boolean = () => true;
@@ -89,6 +98,7 @@ export class JobScheduler {
     this.state = state;
     this.stateDir = stateDir;
     this.skipLedger = new SkipLedger(stateDir);
+    this.runHistory = new JobRunHistory(stateDir);
   }
 
   /**
@@ -134,6 +144,16 @@ export class JobScheduler {
   }
 
   /**
+   * Set local machine identity for machine-scoped job filtering.
+   * Jobs with a `machines` field will only run on machines whose ID or name matches.
+   */
+  setMachineIdentity(machineId: string, machineName: string): void {
+    this.machineId = machineId;
+    this.machineName = machineName;
+    this.runHistory.setMachineId(machineId);
+  }
+
+  /**
    * Set the intelligence provider for per-job LLM reflection (Living Skills Phase 4).
    */
   setIntelligence(provider: IntelligenceProvider): void {
@@ -150,7 +170,18 @@ export class JobScheduler {
     this.running = true;
 
     const enabledJobs = this.jobs.filter(j => j.enabled);
-    for (const job of enabledJobs) {
+
+    // Machine-scoped filtering — skip jobs not targeted at this machine
+    const scopedJobs = enabledJobs.filter(j => this.isJobScopedToThisMachine(j));
+    const skippedByScope = enabledJobs.length - scopedJobs.length;
+    if (skippedByScope > 0) {
+      const skippedNames = enabledJobs
+        .filter(j => !this.isJobScopedToThisMachine(j))
+        .map(j => j.slug);
+      console.log(`[scheduler] ${skippedByScope} job(s) skipped (machine scope): ${skippedNames.join(', ')}`);
+    }
+
+    for (const job of scopedJobs) {
       try {
         const task = new Cron(job.schedule, () => {
           this.triggerJob(job.slug, 'scheduled');
@@ -162,18 +193,18 @@ export class JobScheduler {
     }
 
     // Check for missed jobs — any enabled job overdue by >1.5x its interval
-    this.checkMissedJobs(enabledJobs);
+    this.checkMissedJobs(scopedJobs);
 
     // Ensure every job has a Telegram topic (job-topic coupling)
     if (this.telegram) {
-      this.ensureJobTopics(enabledJobs).catch(err => {
+      this.ensureJobTopics(scopedJobs).catch(err => {
         console.error(`[scheduler] Failed to ensure job topics: ${err}`);
       });
     }
 
     this.state.appendEvent({
       type: 'scheduler_start',
-      summary: `Scheduler started with ${enabledJobs.length} enabled jobs`,
+      summary: `Scheduler started with ${scopedJobs.length} enabled jobs` + (skippedByScope > 0 ? ` (${skippedByScope} skipped by machine scope)` : ''),
       timestamp: new Date().toISOString(),
     });
   }
@@ -209,6 +240,18 @@ export class JobScheduler {
 
     if (this.paused) {
       this.skipLedger.recordSkip(slug, 'paused');
+      return 'skipped';
+    }
+
+    // Machine scope check — skip jobs not targeted at this machine
+    if (!this.isJobScopedToThisMachine(job)) {
+      this.skipLedger.recordSkip(slug, 'machine-scope');
+      this.state.appendEvent({
+        type: 'job_skipped',
+        summary: `Job "${slug}" skipped — not scoped to this machine`,
+        timestamp: new Date().toISOString(),
+        metadata: { slug, reason, machines: job.machines },
+      });
       return 'skipped';
     }
 
@@ -261,6 +304,24 @@ export class JobScheduler {
 
     this.spawnJobSession(job, reason);
     return 'triggered';
+  }
+
+  /**
+   * Check if a job is scoped to run on this machine.
+   * Jobs without a `machines` field run everywhere (backwards-compatible).
+   * Jobs with `machines` only run if this machine's ID or name matches.
+   */
+  private isJobScopedToThisMachine(job: JobDefinition): boolean {
+    if (!job.machines || job.machines.length === 0) return true;
+    if (!this.machineId && !this.machineName) return true; // No identity = run everything
+
+    return job.machines.some(m => {
+      const lower = m.toLowerCase();
+      return (
+        (this.machineId && lower === this.machineId.toLowerCase()) ||
+        (this.machineName && lower === this.machineName.toLowerCase())
+      );
+    });
   }
 
   /**
@@ -333,10 +394,25 @@ export class JobScheduler {
   }
 
   /**
+   * Check if a job will run on this machine (for API visibility).
+   */
+  isJobLocal(slug: string): boolean {
+    const job = this.jobs.find(j => j.slug === slug);
+    return job ? this.isJobScopedToThisMachine(job) : false;
+  }
+
+  /**
    * Get the skip ledger instance (for API routes).
    */
   getSkipLedger(): SkipLedger {
     return this.skipLedger;
+  }
+
+  /**
+   * Get the run history instance (for API routes).
+   */
+  getRunHistory(): JobRunHistory {
+    return this.runHistory;
   }
 
   private enqueue(slug: string, reason: string): void {
@@ -398,6 +474,15 @@ export class JobScheduler {
       triggeredBy: `scheduler:${reason}`,
       maxDurationMinutes: job.expectedDurationMinutes,
     }).then(() => {
+      // Record in run history
+      const runId = this.runHistory.recordStart({
+        slug: job.slug,
+        sessionId: sessionName,
+        trigger: reason,
+        model: model ?? job.model,
+      });
+      this.activeRunIds.set(sessionName, runId);
+
       // Update job state on successful spawn (clear error, set pending result)
       const jobState: JobState = {
         slug: job.slug,
@@ -417,9 +502,17 @@ export class JobScheduler {
         metadata: { slug: job.slug, reason, model: job.model },
       });
     }).catch((err) => {
+      // Record spawn error in run history
+      const errorMsg = err instanceof Error ? err.message : String(err);
+      this.runHistory.recordSpawnError({
+        slug: job.slug,
+        trigger: reason,
+        error: errorMsg,
+        model: model ?? job.model,
+      });
+
       // Track failure with error message
       const failures = this.getConsecutiveFailures(job.slug) + 1;
-      const errorMsg = err instanceof Error ? err.message : String(err);
       const jobState: JobState = {
         slug: job.slug,
         lastRun: new Date().toISOString(),
@@ -535,6 +628,26 @@ export class JobScheduler {
     // Update job state with completion result
     const failed = session.status === 'failed' || session.status === 'killed';
 
+    // Capture session output FIRST — needed for both history and notifications
+    let output = '';
+    try {
+      output = this.sessionManager.captureOutput(tmuxSession) ?? '';
+    } catch {
+      // Session may already be dead — that's fine
+    }
+
+    // Record completion in run history (with output summary)
+    const runId = this.activeRunIds.get(session.name);
+    if (runId) {
+      this.runHistory.recordCompletion({
+        runId,
+        result: session.status === 'killed' ? 'timeout' : (failed ? 'failure' : 'success'),
+        error: failed ? `Session ${session.status} (${session.name})` : undefined,
+        outputSummary: output ? output.slice(-1000) : undefined,
+      });
+      this.activeRunIds.delete(session.name);
+    }
+
     // Signal claim completion (Phase 4C — Gap 5)
     if (this.claimManager) {
       this.claimManager.completeClaim(job.slug, failed ? 'failure' : 'success').catch(err => {
@@ -583,13 +696,16 @@ export class JobScheduler {
       } catch (err) {
         console.error(`[scheduler] ExecutionJournal finalization failed for "${job.slug}": ${err}`);
       }
+    }
 
-      // Per-job LLM reflection (Living Skills Phase 4) — enabled by default
-      if (job.livingSkills.perJobReflection !== false && this.intelligence) {
-        this.runJobReflection(job.slug, sessionId, job.topicId, job.livingSkills.reflectionModel).catch(err => {
-          console.error(`[scheduler] Per-job reflection failed for "${job.slug}": ${err}`);
-        });
-      }
+    // Per-job LLM reflection — ALWAYS ON for every completed job.
+    // History is memory. Every job's experience is captured, reflected on,
+    // and persisted permanently so the agent can evolve from its experiences.
+    if (this.intelligence) {
+      const reflectionModel = job.livingSkills?.reflectionModel ?? undefined;
+      this.runJobReflection(job.slug, sessionId, runId ?? null, job.topicId, reflectionModel).catch(err => {
+        console.error(`[scheduler] Per-job reflection failed for "${job.slug}": ${err}`);
+      });
     }
 
     // Try to drain the queue now that a slot is available
@@ -600,13 +716,7 @@ export class JobScheduler {
     const notifyMode = this.getNotifyMode(job);
     if (notifyMode === 'never') return;
 
-    // Capture the last output from the tmux session
-    let output = '';
-    try {
-      output = this.sessionManager.captureOutput(tmuxSession) ?? '';
-    } catch {
-      // Session may already be dead — that's fine
-    }
+    // Output was already captured above for run history — reuse it
 
     // Classify death cause if session failed/was killed
     let deathCause: string | undefined;
@@ -924,12 +1034,14 @@ export class JobScheduler {
   }
 
   /**
-   * Run per-job LLM reflection after execution (Living Skills Phase 4).
-   * Fire-and-forget — errors are logged, not thrown.
+   * Run per-job LLM reflection after execution.
+   * Always-on for every completed job — history is memory.
+   * Persists the reflection to run history and optionally sends to Telegram.
    */
   private async runJobReflection(
     jobSlug: string,
     sessionId: string,
+    runId: string | null,
     topicId?: number,
     reflectionModel?: import('../core/types.js').ModelTier | null,
   ): Promise<void> {
@@ -942,7 +1054,8 @@ export class JobScheduler {
       haiku: 'fast',
     };
 
-    const model = reflectionModel ? MODEL_MAP[reflectionModel] ?? 'capable' : 'capable';
+    // Default to 'fast' (haiku) for routine reflections — efficient and sufficient
+    const model = reflectionModel ? MODEL_MAP[reflectionModel] ?? 'fast' : 'fast';
 
     const reflector = new JobReflector({
       stateDir: this.stateDir,
@@ -952,6 +1065,18 @@ export class JobScheduler {
 
     const insight = await reflector.reflect(jobSlug, { sessionId });
     if (!insight) return;
+
+    // Persist reflection to run history — this is the permanent record
+    if (runId) {
+      this.runHistory.recordReflection(runId, {
+        summary: insight.summary,
+        strengths: insight.strengths,
+        improvements: insight.improvements,
+        deviationAnalysis: insight.deviationAnalysis,
+        purposeDrift: insight.purposeDrift,
+        suggestedChanges: insight.suggestedChanges,
+      });
+    }
 
     // Send reflection to the job's Telegram topic
     if (this.telegram && topicId) {

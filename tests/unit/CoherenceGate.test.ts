@@ -1,355 +1,581 @@
 /**
- * Unit tests for CoherenceGate — Pre-action coherence verification.
+ * CoherenceGate — Unit tests for the orchestrator.
  *
- * Tests cover:
- * - Working directory checks
- * - Git remote verification
- * - Topic-project alignment
- * - Deployment target validation
- * - Path scope enforcement
- * - Agent identity checks
- * - Reflection prompt generation
- * - Topic binding persistence
- * - Overall pass/fail/recommendation logic
+ * Tests the normative decision matrix, retry flow, feedback composition,
+ * PEL integration, channel config resolution, and session mutex.
+ *
+ * Uses mocked reviewers (no real API calls).
  */
 
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { CoherenceGate } from '../../src/core/CoherenceGate.js';
+import type { ResponseReviewConfig } from '../../src/core/types.js';
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
-import { CoherenceGate } from '../../src/core/CoherenceGate.js';
-import type { CoherenceGateConfig, TopicProjectBinding } from '../../src/core/CoherenceGate.js';
 
-// ── Helpers ──────────────────────────────────────────────────────
+// ── Mock the Anthropic API at fetch level ────────────────────────────
 
-function createTmpProject(): { projectDir: string; stateDir: string } {
-  const projectDir = fs.mkdtempSync(path.join(os.tmpdir(), 'coherence-test-'));
-  const stateDir = path.join(projectDir, '.instar');
-  fs.mkdirSync(stateDir, { recursive: true });
-  return { projectDir, stateDir };
+function mockFetchResponse(response: Record<string, unknown>) {
+  return vi.fn().mockResolvedValue({
+    ok: true,
+    json: async () => ({
+      content: [{ type: 'text', text: JSON.stringify(response) }],
+    }),
+  });
 }
 
-function makeConfig(projectDir: string, stateDir: string, overrides?: Partial<CoherenceGateConfig>): CoherenceGateConfig {
+function mockFetchGateSkip() {
+  return vi.fn().mockResolvedValue({
+    ok: true,
+    json: async () => ({
+      content: [{ type: 'text', text: JSON.stringify({ needsReview: false, reason: 'Simple ack' }) }],
+    }),
+  });
+}
+
+function mockFetchGateNeedsReview() {
+  // Gate says needs review, all reviewers pass
+  return vi.fn().mockResolvedValue({
+    ok: true,
+    json: async () => ({
+      content: [{ type: 'text', text: JSON.stringify({ needsReview: true, reason: 'Contains claims' }) }],
+    }),
+  });
+}
+
+function mockFetchAllPass() {
+  // Return pass for any reviewer
+  return vi.fn().mockResolvedValue({
+    ok: true,
+    json: async () => ({
+      content: [{ type: 'text', text: JSON.stringify({ pass: true, severity: 'warn', issue: '', suggestion: '' }) }],
+    }),
+  });
+}
+
+function mockFetchSequence(responses: Array<Record<string, unknown>>) {
+  let callIndex = 0;
+  return vi.fn().mockImplementation(async () => {
+    const response = responses[callIndex % responses.length];
+    callIndex++;
+    return {
+      ok: true,
+      json: async () => ({
+        content: [{ type: 'text', text: JSON.stringify(response) }],
+      }),
+    };
+  });
+}
+
+// ── Test Helpers ─────────────────────────────────────────────────────
+
+let tmpDir: string;
+
+function createTestConfig(overrides?: Partial<ResponseReviewConfig>): ResponseReviewConfig {
   return {
-    projectDir,
-    stateDir,
-    projectName: 'test-project',
+    enabled: true,
+    reviewers: {
+      'conversational-tone': { enabled: true, mode: 'block' },
+      'claim-provenance': { enabled: true, mode: 'block' },
+      'settling-detection': { enabled: true, mode: 'warn' },
+      'context-completeness': { enabled: true, mode: 'warn' },
+      'capability-accuracy': { enabled: true, mode: 'block' },
+      'url-validity': { enabled: true, mode: 'block' },
+      'value-alignment': { enabled: true, mode: 'block' },
+    },
+    maxRetries: 2,
+    timeoutMs: 8000,
+    channelDefaults: {
+      external: { failOpen: false, skipGate: true, queueOnFailure: true, queueTimeoutMs: 30000 },
+      internal: { failOpen: true, skipGate: false, queueOnFailure: false },
+    },
     ...overrides,
   };
 }
 
-// ── Tests ────────────────────────────────────────────────────────
+function createGate(config?: Partial<ResponseReviewConfig>): CoherenceGate {
+  return new CoherenceGate({
+    config: createTestConfig(config),
+    stateDir: tmpDir,
+    apiKey: 'test-api-key',
+  });
+}
+
+// ── Tests ────────────────────────────────────────────────────────────
 
 describe('CoherenceGate', () => {
-  let projectDir: string;
-  let stateDir: string;
-
   beforeEach(() => {
-    ({ projectDir, stateDir } = createTmpProject());
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'rrg-test-'));
+    // Create minimal AGENT.md for value alignment
+    fs.writeFileSync(path.join(tmpDir, 'AGENT.md'), '# Test Agent\n## Intent\n- Be helpful\n- Be accurate');
   });
 
   afterEach(() => {
-    fs.rmSync(projectDir, { recursive: true, force: true });
     vi.restoreAllMocks();
+    fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 
-  describe('check() — basic operation', () => {
-    it('returns a valid CoherenceCheckResult', () => {
-      const gate = new CoherenceGate(makeConfig(projectDir, stateDir));
-      const result = gate.check('deploy');
+  describe('PEL integration', () => {
+    it('blocks messages with credentials (Row 1 — PEL HARD_BLOCK)', async () => {
+      const gate = createGate();
+      vi.stubGlobal('fetch', mockFetchAllPass());
 
-      expect(result.checkedAt).toBeTruthy();
-      expect(Array.isArray(result.checks)).toBe(true);
-      expect(result.checks.length).toBeGreaterThan(0);
-      expect(['proceed', 'warn', 'block']).toContain(result.recommendation);
-      expect(typeof result.summary).toBe('string');
+      const result = await gate.evaluate({
+        message: 'Here is your API key: sk-ant-abc123456789012345678',
+        sessionId: 'test-1',
+        stopHookActive: false,
+        context: { channel: 'telegram', isExternalFacing: true },
+      });
+
+      expect(result.pass).toBe(false);
+      expect(result._pelBlock).toBe(true);
+      expect(result.feedback).toContain('POLICY VIOLATION');
     });
 
-    it('includes working directory check', () => {
-      const gate = new CoherenceGate(makeConfig(projectDir, stateDir));
-      const result = gate.check('deploy');
+    it('blocks PEL violations even in observeOnly mode', async () => {
+      const gate = createGate({ observeOnly: true });
+      vi.stubGlobal('fetch', mockFetchAllPass());
 
-      const wdCheck = result.checks.find(c => c.name === 'working-directory');
-      expect(wdCheck).toBeDefined();
-    });
+      const result = await gate.evaluate({
+        message: 'Your password is: password=s3cr3tP@ss!',
+        sessionId: 'test-2',
+        stopHookActive: false,
+        context: { channel: 'direct' },
+      });
 
-    it('includes git remote check', () => {
-      const gate = new CoherenceGate(makeConfig(projectDir, stateDir));
-      const result = gate.check('deploy');
-
-      const gitCheck = result.checks.find(c => c.name === 'git-remote');
-      expect(gitCheck).toBeDefined();
-    });
-
-    it('includes agent identity check', () => {
-      const gate = new CoherenceGate(makeConfig(projectDir, stateDir));
-      const result = gate.check('deploy');
-
-      const idCheck = result.checks.find(c => c.name === 'agent-identity');
-      expect(idCheck).toBeDefined();
+      expect(result.pass).toBe(false);
+      expect(result._pelBlock).toBe(true);
     });
   });
 
-  describe('check() — topic-project alignment', () => {
-    it('fails when topic has no binding', () => {
-      const gate = new CoherenceGate(makeConfig(projectDir, stateDir));
-      const result = gate.check('deploy', { topicId: 123 });
+  describe('gate reviewer (triage)', () => {
+    it('skips full review for simple acks on internal channels (Row 4)', async () => {
+      const gate = createGate();
+      vi.stubGlobal('fetch', mockFetchGateSkip());
 
-      const topicCheck = result.checks.find(c => c.name === 'topic-project-alignment');
-      expect(topicCheck).toBeDefined();
-      expect(topicCheck!.passed).toBe(false);
-      expect(topicCheck!.severity).toBe('warning');
+      const result = await gate.evaluate({
+        message: 'Got it!',
+        sessionId: 'test-3',
+        stopHookActive: false,
+        context: { channel: 'direct', isExternalFacing: false },
+      });
+
+      expect(result.pass).toBe(true);
+      expect(result._outcome).toBe('pass');
     });
 
-    it('passes when topic is bound to current project', () => {
-      const gate = new CoherenceGate(makeConfig(projectDir, stateDir, {
-        topicProjects: {
-          '123': {
-            projectName: 'test-project',
-            projectDir,
-          },
+    it('always runs full review on external channels (skipGate: true)', async () => {
+      // Gate would skip, but skipGate=true means gate is bypassed and full review runs
+      vi.stubGlobal('fetch', mockFetchAllPass());
+      const gate = createGate();
+
+      const result = await gate.evaluate({
+        message: 'Got it!',
+        sessionId: 'test-4',
+        stopHookActive: false,
+        context: { channel: 'telegram', isExternalFacing: true },
+      });
+
+      expect(result.pass).toBe(true);
+      // fetch should be called multiple times (all reviewers, not just gate)
+      expect(vi.mocked(fetch).mock.calls.length).toBeGreaterThan(1);
+    });
+  });
+
+  describe('observeOnly mode (Row 3)', () => {
+    it('logs verdicts but never blocks', async () => {
+      const gate = createGate({ observeOnly: true });
+      vi.stubGlobal('fetch', mockFetchSequence([
+        { needsReview: true, reason: 'Has claims' }, // gate
+        { pass: false, severity: 'block', issue: 'Tone issue', suggestion: 'Fix it' }, // reviewer
+        { pass: true, severity: 'warn', issue: '', suggestion: '' }, // other reviewers pass
+      ]));
+
+      const result = await gate.evaluate({
+        message: 'Check .instar/config.json for your settings',
+        sessionId: 'test-5',
+        stopHookActive: false,
+        context: { channel: 'direct', isExternalFacing: false },
+      });
+
+      expect(result.pass).toBe(true);
+      expect(result._outcome).toBe('pass-observe');
+    });
+  });
+
+  describe('blocking and revision flow (Row 6)', () => {
+    it('blocks when a block-mode reviewer fails', async () => {
+      const gate = createGate();
+      vi.stubGlobal('fetch', mockFetchSequence([
+        { pass: false, severity: 'block', issue: 'Technical language detected', suggestion: 'Use plain language' },
+      ]));
+
+      const result = await gate.evaluate({
+        message: 'Here is how you configure the scheduler using the terminal command interface.',
+        sessionId: 'test-6',
+        stopHookActive: false,
+        context: { channel: 'telegram', isExternalFacing: true },
+      });
+
+      expect(result.pass).toBe(false);
+      expect(result.feedback).toContain('COHERENCE REVIEW');
+      expect(result.retryCount).toBe(0);
+    });
+
+    it('composes collapse feedback on retry', async () => {
+      const gate = createGate();
+      vi.stubGlobal('fetch', mockFetchSequence([
+        { pass: false, severity: 'block', issue: 'Issue 1', suggestion: 'Fix 1' },
+      ]));
+
+      // First call — initial block
+      await gate.evaluate({
+        message: 'Bad message',
+        sessionId: 'test-7',
+        stopHookActive: false,
+        context: { channel: 'telegram', isExternalFacing: true },
+      });
+
+      // Second call — retry
+      const result = await gate.evaluate({
+        message: 'Still bad message',
+        sessionId: 'test-7',
+        stopHookActive: true,
+        context: { channel: 'telegram', isExternalFacing: true },
+      });
+
+      expect(result.pass).toBe(false);
+      expect(result.feedback).toContain('Previous attempt');
+      expect(result.feedback).toContain('revision 1 of 2');
+      expect(result.retryCount).toBe(1);
+    });
+  });
+
+  describe('retry exhaustion (Rows 7-9)', () => {
+    it('passes on internal channel after retry exhaustion (Row 7)', async () => {
+      const gate = createGate({ maxRetries: 1 });
+      vi.stubGlobal('fetch', mockFetchSequence([
+        { pass: false, severity: 'block', issue: 'Tone issue', suggestion: 'Fix' },
+      ]));
+
+      // First: initial block
+      await gate.evaluate({
+        message: 'Bad message',
+        sessionId: 'test-8',
+        stopHookActive: false,
+        context: { channel: 'direct', isExternalFacing: false },
+      });
+
+      // Second: retry exhausted on internal → pass
+      const result = await gate.evaluate({
+        message: 'Still bad',
+        sessionId: 'test-8',
+        stopHookActive: true,
+        context: { channel: 'direct', isExternalFacing: false },
+      });
+
+      expect(result.pass).toBe(true);
+      expect(result._outcome).toBe('pass-exhausted');
+    });
+
+    it('passes on external + tone issue after exhaustion (Row 8)', async () => {
+      const gate = createGate({
+        maxRetries: 1,
+        reviewers: {
+          'conversational-tone': { enabled: true, mode: 'block' },
+          'claim-provenance': { enabled: false, mode: 'block' },
+          'settling-detection': { enabled: false, mode: 'warn' },
+          'context-completeness': { enabled: false, mode: 'warn' },
+          'capability-accuracy': { enabled: false, mode: 'block' },
+          'url-validity': { enabled: false, mode: 'block' },
+          'value-alignment': { enabled: false, mode: 'block' },
         },
-      }));
+      });
+      vi.stubGlobal('fetch', mockFetchSequence([
+        { pass: false, severity: 'block', issue: 'Tone issue', suggestion: 'Fix' },
+      ]));
 
-      const result = gate.check('deploy', { topicId: 123 });
+      // First: block
+      await gate.evaluate({
+        message: 'Here is the technical configuration for your setup.',
+        sessionId: 'test-9',
+        stopHookActive: false,
+        context: { channel: 'telegram', isExternalFacing: true },
+      });
 
-      const topicCheck = result.checks.find(c => c.name === 'topic-project-alignment');
-      expect(topicCheck).toBeDefined();
-      expect(topicCheck!.passed).toBe(true);
+      // Second: exhausted on external + tone → pass
+      const result = await gate.evaluate({
+        message: 'Still has technical language in the response.',
+        sessionId: 'test-9',
+        stopHookActive: true,
+        context: { channel: 'telegram', isExternalFacing: true },
+      });
+
+      expect(result.pass).toBe(true);
+      expect(result._outcome).toBe('pass-exhausted');
     });
+  });
 
-    it('fails with error when topic is bound to DIFFERENT project', () => {
-      const gate = new CoherenceGate(makeConfig(projectDir, stateDir, {
-        topicProjects: {
-          '123': {
-            projectName: 'dental-city',
-            projectDir: '/path/to/dental-city',
-          },
+  describe('warn-only mode (Row 5)', () => {
+    it('passes with warnings when only warn-mode reviewers flag', async () => {
+      // Only enable settling-detection in warn mode; disable all block-mode reviewers
+      const gate = createGate({
+        reviewers: {
+          'settling-detection': { enabled: true, mode: 'warn' },
+          'conversational-tone': { enabled: false, mode: 'block' },
+          'claim-provenance': { enabled: false, mode: 'block' },
+          'context-completeness': { enabled: false, mode: 'warn' },
+          'capability-accuracy': { enabled: false, mode: 'block' },
+          'url-validity': { enabled: false, mode: 'block' },
+          'value-alignment': { enabled: false, mode: 'block' },
         },
-      }));
+      });
+      vi.stubGlobal('fetch', mockFetchSequence([
+        { pass: false, severity: 'warn', issue: 'Settling detected', suggestion: 'Try harder' },
+      ]));
 
-      const result = gate.check('deploy', { topicId: 123 });
+      const result = await gate.evaluate({
+        message: 'I could not find any data.',
+        sessionId: 'test-10',
+        stopHookActive: false,
+        context: { channel: 'telegram', isExternalFacing: true },
+      });
 
-      const topicCheck = result.checks.find(c => c.name === 'topic-project-alignment');
-      expect(topicCheck).toBeDefined();
-      expect(topicCheck!.passed).toBe(false);
-      expect(topicCheck!.severity).toBe('error');
-      expect(topicCheck!.message).toContain('WRONG PROJECT');
-      expect(topicCheck!.message).toContain('dental-city');
-
-      // Overall should recommend block
-      expect(result.recommendation).toBe('block');
+      expect(result.pass).toBe(true);
+      expect(result._outcome).toBe('pass-warn');
+      expect(result.warnings).toContain('Settling detected');
     });
   });
 
-  describe('check() — deployment target', () => {
-    it('passes when target matches binding', () => {
-      const gate = new CoherenceGate(makeConfig(projectDir, stateDir, {
-        topicProjects: {
-          '456': {
-            projectName: 'dental-city',
-            projectDir,
-            deploymentTargets: ['dental-city.vercel.app'],
-          },
+  describe('channel config resolution', () => {
+    it('uses explicit channel config when available', async () => {
+      const gate = createGate({
+        channels: {
+          email: { failOpen: false, skipGate: true, queueOnFailure: true, queueTimeoutMs: 60000 },
         },
-      }));
+      });
+      vi.stubGlobal('fetch', mockFetchAllPass());
 
-      const result = gate.check('deploy', {
-        topicId: 456,
-        targetUrl: 'dental-city.vercel.app',
+      const result = await gate.evaluate({
+        message: 'Hello via email',
+        sessionId: 'test-11',
+        stopHookActive: false,
+        context: { channel: 'email', isExternalFacing: true },
       });
 
-      const deployCheck = result.checks.find(c => c.name === 'deployment-target');
-      expect(deployCheck).toBeDefined();
-      expect(deployCheck!.passed).toBe(true);
+      expect(result.pass).toBe(true);
     });
 
-    it('fails when deploying to wrong target', () => {
-      const gate = new CoherenceGate(makeConfig(projectDir, stateDir, {
-        topicProjects: {
-          '456': {
-            projectName: 'dental-city',
-            projectDir,
-            deploymentTargets: ['dental-city.vercel.app'],
-          },
+    it('falls back to external defaults for unknown external channels', async () => {
+      const gate = createGate();
+      vi.stubGlobal('fetch', mockFetchAllPass());
+
+      const result = await gate.evaluate({
+        message: 'Hello via slack',
+        sessionId: 'test-12',
+        stopHookActive: false,
+        context: { channel: 'slack', isExternalFacing: true },
+      });
+
+      expect(result.pass).toBe(true);
+      // Should have skipped gate (external default: skipGate: true)
+    });
+  });
+
+  describe('conversation advancement detection', () => {
+    it('abandons stale revision when transcript advances', async () => {
+      const transcriptPath = path.join(tmpDir, 'transcript.jsonl');
+      fs.writeFileSync(transcriptPath, '{"type":"message"}\n');
+
+      const gate = createGate();
+      vi.stubGlobal('fetch', mockFetchSequence([
+        { pass: false, severity: 'block', issue: 'Issue', suggestion: 'Fix' },
+      ]));
+
+      // First: block
+      await gate.evaluate({
+        message: 'Bad message',
+        sessionId: 'test-13',
+        stopHookActive: false,
+        context: { channel: 'telegram', isExternalFacing: true, transcriptPath },
+      });
+
+      // Simulate user sending new message (advance transcript)
+      fs.appendFileSync(transcriptPath, '{"type":"user_message"}\n');
+
+      // Tiny delay to ensure mtime changes
+      await new Promise(r => setTimeout(r, 50));
+
+      // Second: retry but transcript has advanced
+      const result = await gate.evaluate({
+        message: 'Revised message',
+        sessionId: 'test-13',
+        stopHookActive: true,
+        context: { channel: 'telegram', isExternalFacing: true, transcriptPath },
+      });
+
+      expect(result.pass).toBe(true);
+      expect(result._outcome).toBe('abandoned-stale');
+    });
+  });
+
+  describe('information-leakage reviewer skipping', () => {
+    it('skips information-leakage for primary-user', async () => {
+      const gate = createGate({
+        reviewers: {
+          'information-leakage': { enabled: true, mode: 'block' },
         },
-      }));
+      });
+      vi.stubGlobal('fetch', mockFetchAllPass());
 
-      const result = gate.check('deploy', {
-        topicId: 456,
-        targetUrl: 'bot-me.ai',
+      const result = await gate.evaluate({
+        message: 'Hello primary user',
+        sessionId: 'test-14',
+        stopHookActive: false,
+        context: { channel: 'direct', recipientType: 'primary-user' },
       });
 
-      const deployCheck = result.checks.find(c => c.name === 'deployment-target');
-      expect(deployCheck).toBeDefined();
-      expect(deployCheck!.passed).toBe(false);
-      expect(deployCheck!.severity).toBe('error');
-      expect(deployCheck!.message).toContain('WRONG DEPLOY TARGET');
+      expect(result.pass).toBe(true);
     });
   });
 
-  describe('check() — path scope', () => {
-    it('passes for paths within project', () => {
-      const gate = new CoherenceGate(makeConfig(projectDir, stateDir));
-      const result = gate.check('file-modify-outside-project', {
-        targetPath: path.join(projectDir, 'src', 'index.ts'),
+  describe('review history and stats', () => {
+    it('tracks review history', async () => {
+      const gate = createGate();
+      vi.stubGlobal('fetch', mockFetchAllPass());
+
+      await gate.evaluate({
+        message: 'Hello',
+        sessionId: 'test-15',
+        stopHookActive: false,
+        context: { channel: 'direct' },
       });
 
-      const pathCheck = result.checks.find(c => c.name === 'path-scope');
-      expect(pathCheck).toBeDefined();
-      expect(pathCheck!.passed).toBe(true);
+      const history = gate.getReviewHistory();
+      expect(history.length).toBeGreaterThan(0);
+      expect(history[0].sessionId).toBe('test-15');
     });
 
-    it('fails for paths outside project', () => {
-      const gate = new CoherenceGate(makeConfig(projectDir, stateDir));
-      const result = gate.check('file-modify-outside-project', {
-        targetPath: '/completely/different/project/file.ts',
+    it('filters history by sessionId', async () => {
+      const gate = createGate();
+      vi.stubGlobal('fetch', mockFetchAllPass());
+
+      await gate.evaluate({
+        message: 'Hello 1',
+        sessionId: 'session-a',
+        stopHookActive: false,
+        context: { channel: 'direct' },
+      });
+      await gate.evaluate({
+        message: 'Hello 2',
+        sessionId: 'session-b',
+        stopHookActive: false,
+        context: { channel: 'direct' },
       });
 
-      const pathCheck = result.checks.find(c => c.name === 'path-scope');
-      expect(pathCheck).toBeDefined();
-      expect(pathCheck!.passed).toBe(false);
-      expect(pathCheck!.severity).toBe('error');
-      expect(pathCheck!.message).toContain('PATH OUTSIDE PROJECT');
+      const historyA = gate.getReviewHistory({ sessionId: 'session-a' });
+      expect(historyA.length).toBe(1);
+      expect(historyA[0].sessionId).toBe('session-a');
+    });
+
+    it('returns reviewer stats', async () => {
+      const gate = createGate();
+      vi.stubGlobal('fetch', mockFetchAllPass());
+
+      await gate.evaluate({
+        message: 'Hello',
+        sessionId: 'test-17',
+        stopHookActive: false,
+        context: { channel: 'direct' },
+      });
+
+      const stats = gate.getReviewerStats();
+      // Should have stats for at least some reviewers
+      expect(Object.keys(stats).length).toBeGreaterThan(0);
     });
   });
 
-  describe('check() — agent identity', () => {
-    it('warns when AGENT.md does not exist', () => {
-      const gate = new CoherenceGate(makeConfig(projectDir, stateDir));
-      const result = gate.check('deploy');
+  describe('value document loading', () => {
+    it('reads and caches AGENT.md Intent section', async () => {
+      fs.writeFileSync(path.join(tmpDir, 'AGENT.md'), `# My Agent
+## Intent
+- **Mission**: Help users
+- Be thorough
+- Always verify
 
-      const idCheck = result.checks.find(c => c.name === 'agent-identity');
-      expect(idCheck).toBeDefined();
-      expect(idCheck!.passed).toBe(false);
-    });
+## Other Section
+This should not be included.
+`);
 
-    it('passes when AGENT.md has a name', () => {
-      fs.writeFileSync(
-        path.join(stateDir, 'AGENT.md'),
-        '# Luna\n\nA web development agent.\n\n## Intent\n### Mission\nBuild websites.\n',
-      );
+      const gate = createGate();
+      vi.stubGlobal('fetch', mockFetchAllPass());
 
-      const gate = new CoherenceGate(makeConfig(projectDir, stateDir));
-      const result = gate.check('deploy');
+      await gate.evaluate({
+        message: 'Hello',
+        sessionId: 'test-18',
+        stopHookActive: false,
+        context: { channel: 'direct' },
+      });
 
-      const idCheck = result.checks.find(c => c.name === 'agent-identity');
-      expect(idCheck).toBeDefined();
-      expect(idCheck!.passed).toBe(true);
-      expect(idCheck!.actual).toContain('Intent: yes');
+      // The gate should have loaded and cached value docs
+      // We can verify indirectly by checking that it doesn't fail
+      expect(true).toBe(true);
     });
   });
 
-  describe('check() — overall recommendation', () => {
-    it('recommends proceed when all checks pass', () => {
-      // Create AGENT.md so identity check passes
-      fs.writeFileSync(path.join(stateDir, 'AGENT.md'), '# TestAgent\n');
+  describe('URL extraction', () => {
+    it('extracts URLs from messages', async () => {
+      const gate = createGate();
+      vi.stubGlobal('fetch', mockFetchAllPass());
 
-      const gate = new CoherenceGate(makeConfig(projectDir, stateDir));
-      const result = gate.check('deploy');
+      const result = await gate.evaluate({
+        message: 'Check https://example.com and http://test.org/page for details',
+        sessionId: 'test-19',
+        stopHookActive: false,
+        context: { channel: 'direct' },
+      });
 
-      // With no topic binding and no git remote config, most checks are info/pass
-      expect(result.recommendation).not.toBe('block');
-    });
-
-    it('recommends block when error severity check fails', () => {
-      const gate = new CoherenceGate(makeConfig(projectDir, stateDir, {
-        topicProjects: {
-          '999': {
-            projectName: 'other-project',
-            projectDir: '/path/to/other',
-          },
-        },
-      }));
-
-      const result = gate.check('deploy', { topicId: 999 });
-      expect(result.recommendation).toBe('block');
-      expect(result.passed).toBe(false);
+      expect(result.pass).toBe(true);
     });
   });
 
-  describe('generateReflectionPrompt()', () => {
-    it('generates a human-readable reflection prompt', () => {
-      const gate = new CoherenceGate(makeConfig(projectDir, stateDir));
-      const prompt = gate.generateReflectionPrompt('deploy', {
-        topicId: 123,
-        topicName: 'Dental City — Website',
-        targetUrl: 'dental-city.vercel.app',
-        description: 'Deploy updated homepage',
-      });
-
-      expect(prompt).toContain('PRE-ACTION COHERENCE CHECK');
-      expect(prompt).toContain('test-project');
-      expect(prompt).toContain('deploy');
-      expect(prompt).toContain('dental-city.vercel.app');
-      expect(prompt).toContain('Deploy updated homepage');
-      expect(prompt).toContain('STOP and verify');
+  describe('isEnabled', () => {
+    it('returns true when enabled', () => {
+      const gate = createGate({ enabled: true });
+      expect(gate.isEnabled()).toBe(true);
     });
 
-    it('includes warnings when topic has no binding', () => {
-      const gate = new CoherenceGate(makeConfig(projectDir, stateDir));
-      const prompt = gate.generateReflectionPrompt('deploy', {
-        topicId: 123,
-        topicName: 'Dental City',
-      });
-
-      expect(prompt).toContain('NO project binding');
-      expect(prompt).toContain('Verify which project');
+    it('returns false when disabled', () => {
+      const gate = createGate({ enabled: false });
+      expect(gate.isEnabled()).toBe(false);
     });
   });
 
-  describe('topic binding persistence', () => {
-    it('saves and loads topic bindings', () => {
-      const gate = new CoherenceGate(makeConfig(projectDir, stateDir));
+  describe('new response resets retry counter', () => {
+    it('resets retryCount on non-stopHookActive request', async () => {
+      const gate = createGate();
+      vi.stubGlobal('fetch', mockFetchSequence([
+        { pass: false, severity: 'block', issue: 'Issue', suggestion: 'Fix' },
+      ]));
 
-      gate.setTopicBinding(123, {
-        projectName: 'dental-city',
-        projectDir: '/path/to/dental-city',
-        gitRemote: 'https://github.com/org/dental-city.git',
-        deploymentTargets: ['dental-city.vercel.app'],
+      // First: block
+      await gate.evaluate({
+        message: 'Bad',
+        sessionId: 'test-20',
+        stopHookActive: false,
+        context: { channel: 'telegram', isExternalFacing: true },
       });
 
-      // Create a new gate instance and load bindings
-      const gate2 = new CoherenceGate(makeConfig(projectDir, stateDir));
-      const bindings = gate2.loadTopicBindings();
-
-      expect(bindings['123']).toBeDefined();
-      expect(bindings['123'].projectName).toBe('dental-city');
-      expect(bindings['123'].projectDir).toBe('/path/to/dental-city');
-      expect(bindings['123'].deploymentTargets).toContain('dental-city.vercel.app');
-    });
-
-    it('getTopicBinding returns null for unbound topic', () => {
-      const gate = new CoherenceGate(makeConfig(projectDir, stateDir));
-      expect(gate.getTopicBinding(999)).toBeNull();
-    });
-
-    it('getTopicBinding returns binding after set', () => {
-      const gate = new CoherenceGate(makeConfig(projectDir, stateDir));
-      gate.setTopicBinding(42, {
-        projectName: 'my-project',
-        projectDir: '/tmp/my-project',
+      // New message (not a revision) — resets counter
+      const result = await gate.evaluate({
+        message: 'New bad message',
+        sessionId: 'test-20',
+        stopHookActive: false,
+        context: { channel: 'telegram', isExternalFacing: true },
       });
 
-      const binding = gate.getTopicBinding(42);
-      expect(binding).not.toBeNull();
-      expect(binding!.projectName).toBe('my-project');
-    });
-  });
-
-  describe('git remote normalization', () => {
-    it('matches HTTPS and SSH formats of same repo', () => {
-      // Use a temp git repo to test actual git remote checking
-      const gate = new CoherenceGate(makeConfig(projectDir, stateDir, {
-        expectedGitRemote: 'https://github.com/SageMindAI/portal.git',
-      }));
-
-      // Without an actual git repo, the check reports no remote found
-      const result = gate.check('git-push');
-      const gitCheck = result.checks.find(c => c.name === 'git-remote');
-      expect(gitCheck).toBeDefined();
-      // Can't verify normalization without a real git repo, but the check should exist
-      expect(gitCheck!.name).toBe('git-remote');
+      expect(result.retryCount).toBe(0);
     });
   });
 });

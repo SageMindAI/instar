@@ -843,7 +843,7 @@ export async function runNonInteractiveSetup(opts: NonInteractiveOptions): Promi
       tmuxPath: '/opt/homebrew/bin/tmux',
       claudePath: '/usr/local/bin/claude',
       projectDir: agentDir,
-      maxSessions: 3,
+      maxSessions: 10,
       protectedSessions: [`${agentName}-server`],
       completionPatterns: ['has been automatically paused', 'Session ended', 'Interrupted by user'],
     },

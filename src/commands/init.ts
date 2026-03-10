@@ -179,7 +179,7 @@ async function initFreshProject(projectName: string, options: InitOptions): Prom
       tmuxPath,
       claudePath,
       projectDir,
-      maxSessions: 3,
+      maxSessions: 10,
       protectedSessions: [`${projectName}-server`],
       completionPatterns: [
         'has been automatically paused',
@@ -241,6 +241,10 @@ async function initFreshProject(projectName: string, options: InitOptions): Prom
         autoElevateEnabled: true,
         elevationThreshold: 5,
       },
+    },
+    tunnel: {
+      enabled: true,
+      type: 'quick',
     },
   };
 
@@ -455,7 +459,7 @@ async function initExistingProject(options: InitOptions): Promise<void> {
       tmuxPath,
       claudePath,
       projectDir,
-      maxSessions: 3,
+      maxSessions: 10,
       protectedSessions: [`${projectName}-server`],
       completionPatterns: [
         'has been automatically paused',
@@ -517,6 +521,10 @@ async function initExistingProject(options: InitOptions): Promise<void> {
         autoElevateEnabled: false,  // Disabled until operator confirms
         elevationThreshold: 5,
       },
+    },
+    tunnel: {
+      enabled: true,
+      type: 'quick',
     },
   };
 
@@ -762,7 +770,7 @@ async function initStandaloneAgent(agentName: string, options: InitOptions): Pro
     sessions: {
       tmuxPath,
       claudePath,
-      maxSessions: 3,
+      maxSessions: 10,
       protectedSessions: [`${agentName}-server`],
     },
     scheduler: { enabled: true, maxParallelJobs: 2 },
@@ -783,6 +791,10 @@ async function initStandaloneAgent(agentName: string, options: InitOptions): Pro
         autoElevateEnabled: true,
         elevationThreshold: 5,
       },
+    },
+    tunnel: {
+      enabled: true,
+      type: 'quick',
     },
   };
   fs.writeFileSync(path.join(stateDir, 'config.json'), JSON.stringify(config, null, 2));
@@ -2757,6 +2769,10 @@ done
   // PostToolUse hook checks tool output; Stop hook checks direct responses.
   fs.writeFileSync(path.join(hooksDir, 'claim-intercept.js'), migrator.getHookContent('claim-intercept'), { mode: 0o755 });
   fs.writeFileSync(path.join(hooksDir, 'claim-intercept-response.js'), migrator.getHookContent('claim-intercept-response'), { mode: 0o755 });
+
+  // Response review — Coherence Gate response review pipeline.
+  // Stop hook that calls /review/evaluate for LLM-powered response quality checking.
+  fs.writeFileSync(path.join(hooksDir, 'response-review.js'), migrator.getHookContent('response-review'), { mode: 0o755 });
 }
 
 function installHealthWatchdog(projectDir: string, port: number, projectName: string): void {
@@ -3324,6 +3340,13 @@ function installClaudeSettings(projectDir: string): void {
     }
   }
 
+  // Stop: response review pipeline — Coherence Gate LLM-powered review
+  const responseReviewHook = {
+    type: 'command',
+    command: 'node .instar/hooks/instar/response-review.js',
+    timeout: 10000,
+  };
+
   // Stop: scope coherence checkpoint fires the zoom-out prompt
   const scopeCheckpointHook = {
     type: 'command',
@@ -3342,6 +3365,14 @@ function installClaudeSettings(projectDir: string): void {
     hooks.Stop = [];
   }
   const stopHooks = hooks.Stop as Array<{ matcher?: string; hooks?: Array<{ command?: string }> }>;
+
+  // Register response review (first — catches quality issues before other checks)
+  const hasResponseReview = stopHooks.some(e =>
+    e.hooks?.some(h => h.command?.includes('response-review.js')),
+  );
+  if (!hasResponseReview) {
+    stopHooks.unshift({ matcher: '', hooks: [responseReviewHook] });
+  }
 
   // Register claim intercept response (before scope checkpoint — catch claims first)
   const hasClaimIntercept = stopHooks.some(e =>

@@ -38,8 +38,8 @@ import type { OrphanProcessReaper } from '../monitoring/OrphanProcessReaper.js';
 import type { TopicMemory } from '../memory/TopicMemory.js';
 import type { FeedbackAnomalyDetector } from '../monitoring/FeedbackAnomalyDetector.js';
 import type { ProjectMapper } from '../core/ProjectMapper.js';
-import type { CoherenceGate } from '../core/CoherenceGate.js';
-import type { HighRiskAction } from '../core/CoherenceGate.js';
+import type { ScopeVerifier } from '../core/ScopeVerifier.js';
+import type { HighRiskAction } from '../core/ScopeVerifier.js';
 import type { ContextHierarchy } from '../core/ContextHierarchy.js';
 import type { CanonicalState } from '../core/CanonicalState.js';
 import type { ExternalOperationGate } from '../core/ExternalOperationGate.js';
@@ -76,6 +76,7 @@ import type { HookEventReceiver } from '../monitoring/HookEventReceiver.js';
 import type { WorktreeMonitor } from '../monitoring/WorktreeMonitor.js';
 import type { SubagentTracker } from '../monitoring/SubagentTracker.js';
 import type { InstructionsVerifier } from '../monitoring/InstructionsVerifier.js';
+import type { CoherenceGate } from '../core/CoherenceGate.js';
 
 export interface RouteContext {
   config: InstarConfig;
@@ -99,7 +100,7 @@ export interface RouteContext {
   topicMemory: TopicMemory | null;
   feedbackAnomalyDetector: FeedbackAnomalyDetector | null;
   projectMapper: ProjectMapper | null;
-  coherenceGate: CoherenceGate | null;
+  coherenceGate: ScopeVerifier | null;
   contextHierarchy: ContextHierarchy | null;
   canonicalState: CanonicalState | null;
   operationGate: ExternalOperationGate | null;
@@ -130,6 +131,7 @@ export interface RouteContext {
   instructionsVerifier: InstructionsVerifier | null;
   threadlineRouter: ThreadlineRouter | null;
   handshakeManager: HandshakeManager | null;
+  responseReviewGate: CoherenceGate | null;
   startTime: Date;
 }
 
@@ -159,6 +161,8 @@ export function createRoutes(ctx: RouteContext): Router {
         projectMap: '/project-map',
         sessions: '/sessions',
         jobs: '/jobs',
+        jobHistory: '/jobs/history',
+        jobHistoryBySlug: '/jobs/:slug/history',
         evolution: '/evolution',
         context: '/context',
         autonomy: '/autonomy',
@@ -172,7 +176,7 @@ export function createRoutes(ctx: RouteContext): Router {
     const uptimeMs = Date.now() - ctx.startTime.getTime();
     // Determine if anything is degraded
     const sessions = ctx.sessionManager.listRunningSessions();
-    const maxSessions = ctx.config.sessions?.maxSessions ?? 3;
+    const maxSessions = ctx.config.sessions?.maxSessions ?? 10;
     const sessionExhausted = sessions.length >= maxSessions;
 
     let totalFailures = 0;
@@ -1364,6 +1368,23 @@ export function createRoutes(ctx: RouteContext): Router {
           'POST /topic-bindings — bind a topic to a project',
         ] : [],
       },
+      responseReview: {
+        enabled: !!ctx.responseReviewGate,
+        endpoints: ctx.responseReviewGate ? [
+          'POST /review/evaluate — evaluate agent response before delivery',
+          'POST /review/test — dry-run test of review pipeline',
+          'GET /review/history — review audit log (filterable, 30-day retention)',
+          'DELETE /review/history?sessionId=X — delete history for session (DSAR)',
+          'GET /review/stats — reviewer effectiveness metrics (per-period, per-recipient)',
+          'GET /coherence/proposals — patch proposal queue',
+          'POST /coherence/proposals — submit a new proposal',
+          'POST /coherence/proposals/:id/approve — approve a proposal',
+          'POST /coherence/proposals/:id/reject — reject a proposal',
+          'GET /coherence/health — coherence evolution dashboard',
+          'GET /review/health — reviewer health and anomaly detection',
+          'POST /review/canary — run canary tests with known-bad messages',
+        ] : [],
+      },
       externalOperationSafety: {
         enabled: !!ctx.operationGate,
         sentinel: !!ctx.sentinel,
@@ -1565,7 +1586,7 @@ export function createRoutes(ctx: RouteContext): Router {
 
   router.post('/coherence/check', (req, res) => {
     if (!ctx.coherenceGate) {
-      res.status(501).json({ error: 'CoherenceGate not initialized' });
+      res.status(501).json({ error: 'ScopeVerifier not initialized' });
       return;
     }
 
@@ -1581,7 +1602,7 @@ export function createRoutes(ctx: RouteContext): Router {
 
   router.post('/coherence/reflect', (req, res) => {
     if (!ctx.coherenceGate) {
-      res.status(501).json({ error: 'CoherenceGate not initialized' });
+      res.status(501).json({ error: 'ScopeVerifier not initialized' });
       return;
     }
 
@@ -1602,7 +1623,7 @@ export function createRoutes(ctx: RouteContext): Router {
 
   router.get('/topic-bindings', (_req, res) => {
     if (!ctx.coherenceGate) {
-      res.status(501).json({ error: 'CoherenceGate not initialized' });
+      res.status(501).json({ error: 'ScopeVerifier not initialized' });
       return;
     }
 
@@ -1612,7 +1633,7 @@ export function createRoutes(ctx: RouteContext): Router {
 
   router.post('/topic-bindings', (req, res) => {
     if (!ctx.coherenceGate) {
-      res.status(501).json({ error: 'CoherenceGate not initialized' });
+      res.status(501).json({ error: 'ScopeVerifier not initialized' });
       return;
     }
 
@@ -2054,7 +2075,7 @@ export function createRoutes(ctx: RouteContext): Router {
 
     const jobs = ctx.scheduler.getJobs().map(job => {
       const jobState = ctx.state.getJobState(job.slug);
-      return { ...job, state: jobState };
+      return { ...job, state: jobState, runsOnThisMachine: ctx.scheduler!.isJobLocal(job.slug) };
     });
 
     res.json({ jobs, queue: ctx.scheduler.getQueue() });
@@ -2079,6 +2100,55 @@ export function createRoutes(ctx: RouteContext): Router {
     } catch (err) {
       res.status(404).json({ error: err instanceof Error ? err.message : String(err) });
     }
+  });
+
+  // ── Job Run History ─────────────────────────────────────────────
+
+  router.get('/jobs/history', (_req, res) => {
+    if (!ctx.scheduler) {
+      res.json({ runs: [], total: 0, stats: [] });
+      return;
+    }
+
+    const history = ctx.scheduler.getRunHistory();
+    const sinceHours = parseInt(_req.query.sinceHours as string) || undefined;
+    const result = _req.query.result as string | undefined;
+    const limit = Math.min(parseInt(_req.query.limit as string) || 50, 500);
+    const offset = parseInt(_req.query.offset as string) || 0;
+
+    const validResults = ['pending', 'success', 'failure', 'timeout', 'spawn-error'];
+    const resultFilter = result && validResults.includes(result) ? result as 'success' | 'failure' | 'timeout' | 'spawn-error' | 'pending' : undefined;
+
+    const data = history.query({ sinceHours, result: resultFilter, limit, offset });
+    const stats = history.allStats(sinceHours);
+
+    res.json({ ...data, stats });
+  });
+
+  router.get('/jobs/:slug/history', (req, res) => {
+    if (!JOB_SLUG_RE.test(req.params.slug)) {
+      res.status(400).json({ error: 'Invalid job slug' });
+      return;
+    }
+    if (!ctx.scheduler) {
+      res.json({ runs: [], total: 0, stats: null });
+      return;
+    }
+
+    const history = ctx.scheduler.getRunHistory();
+    const slug = req.params.slug;
+    const sinceHours = parseInt(req.query.sinceHours as string) || undefined;
+    const result = req.query.result as string | undefined;
+    const limit = Math.min(parseInt(req.query.limit as string) || 50, 500);
+    const offset = parseInt(req.query.offset as string) || 0;
+
+    const validResults = ['pending', 'success', 'failure', 'timeout', 'spawn-error'];
+    const resultFilter = result && validResults.includes(result) ? result as 'success' | 'failure' | 'timeout' | 'spawn-error' | 'pending' : undefined;
+
+    const data = history.query({ slug, sinceHours, result: resultFilter, limit, offset });
+    const stats = history.stats(slug, sinceHours);
+
+    res.json({ ...data, stats });
   });
 
   // ── Skip Ledger ──────────────────────────────────────────────────
@@ -5435,6 +5505,293 @@ export function createRoutes(ctx: RouteContext): Router {
     );
     router.use(threadlineRoutes);
   }
+
+  // ── Response Review Pipeline (Coherence Gate) ────────────────────────
+  //
+  // Evaluates agent responses before delivery. Implements PEL + Gate + Specialist
+  // reviewer fan-out with the normative decision matrix.
+
+  // Rate limiter for review endpoints (per session)
+  const reviewRateLimits = new Map<string, { count: number; resetAt: number }>();
+  const REVIEW_RATE_LIMIT = 10; // max requests per minute
+  const REVIEW_RATE_WINDOW_MS = 60_000;
+
+  function checkReviewRateLimit(sessionId: string, maxPerMinute: number): boolean {
+    const now = Date.now();
+    let entry = reviewRateLimits.get(sessionId);
+    if (entry && now > entry.resetAt) {
+      reviewRateLimits.delete(sessionId);
+      entry = undefined;
+    }
+    if (!entry) {
+      entry = { count: 0, resetAt: now + REVIEW_RATE_WINDOW_MS };
+      reviewRateLimits.set(sessionId, entry);
+    }
+    entry.count++;
+    return entry.count <= maxPerMinute;
+  }
+
+  router.post('/review/evaluate', async (req, res) => {
+    if (!ctx.responseReviewGate) {
+      res.status(501).json({ error: 'Response review pipeline not enabled' });
+      return;
+    }
+
+    const { message, sessionId, stopHookActive, context: evalContext } = req.body;
+
+    // Validate required fields
+    if (!message || typeof message !== 'string') {
+      res.status(400).json({ error: 'Missing or invalid "message" field' });
+      return;
+    }
+    if (!sessionId || typeof sessionId !== 'string') {
+      res.status(400).json({ error: 'Missing or invalid "sessionId" field' });
+      return;
+    }
+
+    // Per-session rate limit
+    if (!checkReviewRateLimit(sessionId, REVIEW_RATE_LIMIT)) {
+      res.status(429).json({ error: 'Rate limit exceeded (max 10/min per session)' });
+      return;
+    }
+
+    try {
+      const result = await ctx.responseReviewGate.evaluate({
+        message,
+        sessionId,
+        stopHookActive: stopHookActive ?? false,
+        context: {
+          channel: evalContext?.channel ?? 'direct',
+          topicId: evalContext?.topicId,
+          recipientType: evalContext?.recipientType,
+          recipientId: evalContext?.recipientId,
+          isExternalFacing: evalContext?.isExternalFacing,
+          transcriptPath: evalContext?.transcriptPath,
+        },
+      });
+
+      // Strip internal audit fields from response (agent sees generic feedback only)
+      res.json({
+        pass: result.pass,
+        feedback: result.feedback,
+        issueCategories: result.issueCategories,
+        warnings: result.warnings,
+        retryCount: result.retryCount,
+      });
+    } catch (err) {
+      // Fail-open: if the pipeline crashes, let the message through
+      console.error('[review/evaluate] Pipeline error:', err);
+      res.json({ pass: true, warnings: ['[review-error] Pipeline encountered an error'] });
+    }
+  });
+
+  router.post('/review/test', async (req, res) => {
+    if (!ctx.responseReviewGate) {
+      res.status(501).json({ error: 'Response review pipeline not enabled' });
+      return;
+    }
+
+    // Check if test endpoint is disabled
+    if (ctx.config.responseReview?.testEndpointDisabled) {
+      res.status(403).json({ error: 'Test endpoint is disabled' });
+      return;
+    }
+
+    const { message, reviewer: reviewerName, context: testContext } = req.body;
+
+    if (!message || typeof message !== 'string') {
+      res.status(400).json({ error: 'Missing or invalid "message" field' });
+      return;
+    }
+
+    // Per-session rate limit (use 'test' as session for test endpoint)
+    if (!checkReviewRateLimit('__test__', 20)) {
+      res.status(429).json({ error: 'Rate limit exceeded (max 20/min for test endpoint)' });
+      return;
+    }
+
+    try {
+      // Use a test session ID to avoid interfering with real sessions
+      const testSessionId = `test-${Date.now()}`;
+      const result = await ctx.responseReviewGate.evaluate({
+        message,
+        sessionId: testSessionId,
+        stopHookActive: false,
+        context: {
+          channel: testContext?.channel ?? 'direct',
+          topicId: testContext?.topicId,
+          recipientType: testContext?.recipientType,
+          recipientId: testContext?.recipientId,
+          isExternalFacing: testContext?.isExternalFacing,
+          transcriptPath: testContext?.transcriptPath,
+        },
+      });
+
+      // Test endpoint returns FULL details (including reviewer names and specific issues)
+      res.json({
+        results: result._auditViolations ?? [],
+        aggregateVerdict: result.pass ? 'pass' : 'block',
+        gateResult: result._gateResult,
+        pelBlock: result._pelBlock ?? false,
+        outcome: result._outcome,
+        warnings: result.warnings,
+        feedback: result.feedback,
+      });
+    } catch (err) {
+      res.status(500).json({ error: err instanceof Error ? err.message : 'Test failed' });
+    }
+  });
+
+  router.get('/review/history', (_req, res) => {
+    if (!ctx.responseReviewGate) {
+      res.status(501).json({ error: 'Response review pipeline not enabled' });
+      return;
+    }
+
+    const history = ctx.responseReviewGate.getReviewHistory({
+      sessionId: _req.query.sessionId as string | undefined,
+      reviewer: _req.query.reviewer as string | undefined,
+      verdict: _req.query.verdict as string | undefined,
+      since: _req.query.since as string | undefined,
+      recipientId: _req.query.recipientId as string | undefined,
+      limit: _req.query.limit ? parseInt(_req.query.limit as string, 10) : undefined,
+    });
+
+    res.json({ history, count: history.length });
+  });
+
+  router.delete('/review/history', (_req, res) => {
+    if (!ctx.responseReviewGate) {
+      res.status(501).json({ error: 'Response review pipeline not enabled' });
+      return;
+    }
+
+    const sessionId = _req.query.sessionId as string | undefined;
+    if (!sessionId) {
+      res.status(400).json({ error: 'sessionId query parameter required' });
+      return;
+    }
+
+    const deleted = ctx.responseReviewGate.deleteHistory(sessionId);
+    res.json({ deleted, sessionId });
+  });
+
+  router.get('/review/stats', (_req, res) => {
+    if (!ctx.responseReviewGate) {
+      res.status(501).json({ error: 'Response review pipeline not enabled' });
+      return;
+    }
+
+    res.json(ctx.responseReviewGate.getReviewerStats({
+      period: (_req.query.period as 'daily' | 'weekly' | 'all') || undefined,
+      since: _req.query.since as string | undefined,
+    }));
+  });
+
+  // ── Coherence Proposals ─────────────────────────────────────────
+
+  router.get('/coherence/proposals', (_req, res) => {
+    if (!ctx.responseReviewGate) {
+      res.status(501).json({ error: 'Response review pipeline not enabled' });
+      return;
+    }
+
+    const status = _req.query.status as 'pending' | 'approved' | 'rejected' | undefined;
+    const proposals = ctx.responseReviewGate.getProposals(status);
+    res.json({ proposals, count: proposals.length });
+  });
+
+  router.post('/coherence/proposals', (_req, res) => {
+    if (!ctx.responseReviewGate) {
+      res.status(501).json({ error: 'Response review pipeline not enabled' });
+      return;
+    }
+
+    const { type, title, description, source, data } = _req.body;
+    if (!type || !title || !description) {
+      res.status(400).json({ error: 'type, title, and description required' });
+      return;
+    }
+
+    const proposal = ctx.responseReviewGate.addProposal({ type, title, description, source: source || 'user', data });
+    res.status(201).json(proposal);
+  });
+
+  router.post('/coherence/proposals/:id/approve', (_req, res) => {
+    if (!ctx.responseReviewGate) {
+      res.status(501).json({ error: 'Response review pipeline not enabled' });
+      return;
+    }
+
+    const result = ctx.responseReviewGate.resolveProposal(_req.params.id, 'approve', _req.body.resolution);
+    if (!result) {
+      res.status(404).json({ error: 'Proposal not found or already resolved' });
+      return;
+    }
+    res.json(result);
+  });
+
+  router.post('/coherence/proposals/:id/reject', (_req, res) => {
+    if (!ctx.responseReviewGate) {
+      res.status(501).json({ error: 'Response review pipeline not enabled' });
+      return;
+    }
+
+    const result = ctx.responseReviewGate.resolveProposal(_req.params.id, 'reject', _req.body.resolution);
+    if (!result) {
+      res.status(404).json({ error: 'Proposal not found or already resolved' });
+      return;
+    }
+    res.json(result);
+  });
+
+  // ── Coherence Health Dashboard ──────────────────────────────────
+
+  router.get('/coherence/health', (_req, res) => {
+    if (!ctx.responseReviewGate) {
+      res.status(501).json({ error: 'Response review pipeline not enabled' });
+      return;
+    }
+
+    res.json(ctx.responseReviewGate.getHealthDashboard());
+  });
+
+  // ── Reviewer Health & Canary ────────────────────────────────────
+
+  router.get('/review/health', (_req, res) => {
+    if (!ctx.responseReviewGate) {
+      res.status(501).json({ error: 'Response review pipeline not enabled' });
+      return;
+    }
+
+    res.json(ctx.responseReviewGate.getReviewerHealth());
+  });
+
+  router.post('/review/canary', async (_req, res) => {
+    if (!ctx.responseReviewGate) {
+      res.status(501).json({ error: 'Response review pipeline not enabled' });
+      return;
+    }
+
+    try {
+      const results = await ctx.responseReviewGate.runCanaryTests();
+      ctx.responseReviewGate.setCanaryResults(results);
+
+      const passed = results.filter(r => r.pass).length;
+      const total = results.length;
+      const missed = results.filter(r => !r.pass);
+
+      res.json({
+        passed,
+        total,
+        allPassed: passed === total,
+        results,
+        missed: missed.length > 0 ? missed : undefined,
+      });
+    } catch (err) {
+      res.status(500).json({ error: err instanceof Error ? err.message : 'Canary test failed' });
+    }
+  });
 
   return router;
 }

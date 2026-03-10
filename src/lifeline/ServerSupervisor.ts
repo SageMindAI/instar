@@ -43,6 +43,8 @@ export class ServerSupervisor extends EventEmitter {
   private tmuxPath: string | null;
   private serverSessionName: string;
   private healthCheckInterval: ReturnType<typeof setInterval> | null = null;
+  private lastHealthCheckAt = 0; // Wall-clock ms for sleep/wake detection
+  private readonly sleepWakeGapMs = 2 * 60_000; // Gap > 2 min between 10s intervals = machine was suspended
   private restartAttempts = 0;
   private maxRestartAttempts = 5;
   private restartBackoffMs = 5000;
@@ -257,21 +259,22 @@ export class ServerSupervisor extends EventEmitter {
     if (!this.tmuxPath) return false;
 
     try {
-      // Get the instar CLI path — resolves from the lifeline's installed location.
-      // CRITICAL: If the lifeline was started from an npx cache, prefer the global
-      // install so that auto-updates actually take effect on restart.
+      // Get the instar CLI path — resolution order:
+      //   1. Shadow install (agent's own managed version from AutoUpdater)
+      //   2. Current binary location (how the lifeline was started)
+      //
+      // Shadow install is the agent's private copy at {stateDir}/shadow-install/.
+      // The AutoUpdater installs updates there instead of globally, so each agent
+      // manages its own version independently.
       let cliPath = new URL('../cli.js', import.meta.url).pathname;
-      if (cliPath.includes('.npm/_npx')) {
-        try {
-          const prefix = execFileSync('npm', ['prefix', '-g'], {
-            encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'], timeout: 10000,
-          }).trim();
-          const globalCli = path.join(prefix, 'lib', 'node_modules', 'instar', 'dist', 'cli.js');
-          if (fs.existsSync(globalCli)) {
-            console.log(`[Supervisor] Redirecting from npx cache to global install: ${globalCli}`);
-            cliPath = globalCli;
-          }
-        } catch { /* fall back to npx path */ }
+
+      // Check for shadow install first — this is the agent's own managed version
+      if (this.stateDir) {
+        const shadowCli = path.join(this.stateDir, 'shadow-install', 'node_modules', 'instar', 'dist', 'cli.js');
+        if (fs.existsSync(shadowCli)) {
+          console.log(`[Supervisor] Using shadow install: ${shadowCli}`);
+          cliPath = shadowCli;
+        }
       }
 
       // Stderr capture: tee to crash log file for fast-exit diagnostics
@@ -317,8 +320,27 @@ export class ServerSupervisor extends EventEmitter {
     if (this.healthCheckInterval) return;
 
     this.healthCheckInterval = setInterval(async () => {
+      const now = Date.now();
+
+      // Sleep/wake detection: if the gap between health checks is much larger than
+      // the poll interval, the machine was likely suspended (e.g., lid close after
+      // an auto-update restart). Reset failure counters so brief wake cycles don't
+      // exhaust restart attempts before the machine is fully awake.
+      if (this.lastHealthCheckAt > 0 && (now - this.lastHealthCheckAt) > this.sleepWakeGapMs) {
+        const gapSec = Math.round((now - this.lastHealthCheckAt) / 1000);
+        console.log(`[Supervisor] Sleep/wake detected (${gapSec}s gap). Resetting failure counters.`);
+        this.restartAttempts = 0;
+        this.maxRetriesExhaustedAt = 0;
+        this.consecutiveFailures = 0;
+        this.totalFailures = 0;
+        this.totalFailureWindowStart = 0;
+        // Give the server the full startup grace period from wake time
+        this.spawnedAt = now;
+      }
+      this.lastHealthCheckAt = now;
+
       // Skip health checks during startup grace period — server needs time to boot
-      if (this.spawnedAt > 0 && (Date.now() - this.spawnedAt) < this.startupGraceMs) {
+      if (this.spawnedAt > 0 && (now - this.spawnedAt) < this.startupGraceMs) {
         // But still check for restart requests during grace period
         this.checkRestartRequest();
         return;
@@ -621,7 +643,27 @@ export class ServerSupervisor extends EventEmitter {
     }
     this.consecutiveFailures = 0; // Reset after triggering action
 
-    // Track total failures for circuit breaker
+    // After max retries exhausted, wait for cooldown before trying again.
+    // IMPORTANT: Check cooldown BEFORE incrementing totalFailures. Otherwise, passive health check
+    // failures during cooldown accumulate and trip the circuit breaker, escalating a recoverable
+    // 5-min cooldown into a 30-min circuit breaker stall. Only actual restart failures should
+    // count toward the circuit breaker threshold.
+    if (this.restartAttempts >= this.maxRestartAttempts) {
+      if (this.maxRetriesExhaustedAt === 0) {
+        this.maxRetriesExhaustedAt = Date.now();
+        console.error(`[Supervisor] Max restart attempts (${this.maxRestartAttempts}) reached. Cooling down for ${this.retryCooldownMs / 1000}s before retrying.`);
+      }
+
+      if ((Date.now() - this.maxRetriesExhaustedAt) >= this.retryCooldownMs) {
+        console.log(`[Supervisor] Cooldown elapsed. Resetting restart counter.`);
+        this.restartAttempts = 0;
+        this.maxRetriesExhaustedAt = 0;
+      } else {
+        return; // Still cooling down — skip totalFailures increment
+      }
+    }
+
+    // Track total failures for circuit breaker (only incremented for active failure handling, not passive cooldown)
     const now = Date.now();
     if (this.totalFailureWindowStart === 0 || (now - this.totalFailureWindowStart) > this.circuitBreakerWindowMs) {
       // Reset window
@@ -639,22 +681,6 @@ export class ServerSupervisor extends EventEmitter {
       console.error(`[Supervisor] Last crash output:\n${this.lastCrashOutput}`);
       this.emit('circuitBroken', this.totalFailures, this.lastCrashOutput);
       return;
-    }
-
-    // After max retries exhausted, wait for cooldown before trying again.
-    if (this.restartAttempts >= this.maxRestartAttempts) {
-      if (this.maxRetriesExhaustedAt === 0) {
-        this.maxRetriesExhaustedAt = Date.now();
-        console.error(`[Supervisor] Max restart attempts (${this.maxRestartAttempts}) reached. Cooling down for ${this.retryCooldownMs / 1000}s before retrying.`);
-      }
-
-      if ((Date.now() - this.maxRetriesExhaustedAt) >= this.retryCooldownMs) {
-        console.log(`[Supervisor] Cooldown elapsed. Resetting restart counter.`);
-        this.restartAttempts = 0;
-        this.maxRetriesExhaustedAt = 0;
-      } else {
-        return; // Still cooling down
-      }
     }
 
     // Auto-restart with backoff

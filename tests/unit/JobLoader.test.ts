@@ -222,6 +222,48 @@ describe('JobLoader', () => {
         })).toThrow('"grounding" must be an object');
       });
     });
+
+    // ── Machine scope validation ────────────────────────────────────
+    describe('machines validation', () => {
+      it('accepts job with valid machines array', () => {
+        expect(() => validateJob({
+          ...validJob,
+          machines: ['m_abc123', 'justins-macbook'],
+        })).not.toThrow();
+      });
+
+      it('accepts job without machines (optional field)', () => {
+        expect(() => validateJob(validJob)).not.toThrow();
+      });
+
+      it('accepts job with empty machines array (runs everywhere)', () => {
+        expect(() => validateJob({
+          ...validJob,
+          machines: [],
+        })).not.toThrow();
+      });
+
+      it('rejects non-array machines', () => {
+        expect(() => validateJob({
+          ...validJob,
+          machines: 'm_abc123',
+        })).toThrow('"machines" must be an array');
+      });
+
+      it('rejects empty string in machines', () => {
+        expect(() => validateJob({
+          ...validJob,
+          machines: ['m_abc123', ''],
+        })).toThrow('"machines" entries must be non-empty strings');
+      });
+
+      it('rejects non-string in machines', () => {
+        expect(() => validateJob({
+          ...validJob,
+          machines: [123],
+        })).toThrow('"machines" entries must be non-empty strings');
+      });
+    });
   });
 
   describe('grounding audit', () => {

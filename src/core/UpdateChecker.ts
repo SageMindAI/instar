@@ -117,7 +117,11 @@ export class UpdateChecker {
   }
 
   /**
-   * Apply the update: npm update, verify new version, check health.
+   * Apply the update: install to a local shadow directory, verify, and restart.
+   *
+   * IMPORTANT: Does NOT use `npm install -g`. Each agent manages its own version
+   * via a local shadow install at `{stateDir}/shadow-install/`. This prevents
+   * global install pollution, version drift across agents, and npx cache conflicts.
    *
    * Uses explicit version pinning (not @latest) to avoid npm CDN propagation
    * delays where @latest still resolves to the old version for several minutes
@@ -127,7 +131,7 @@ export class UpdateChecker {
     const previousVersion = this.getInstalledVersion();
 
     // Check what the registry has. Note: even if getInstalledVersion() returns
-    // the latest (e.g., after a previous npm install -g updated files in place),
+    // the latest (e.g., after a previous install updated files in place),
     // we still need to install+restart since the running process has old code.
     // The caller (AutoUpdater) is responsible for loop prevention.
     const info = await this.check();
@@ -157,6 +161,16 @@ export class UpdateChecker {
     let lastError: string | null = null;
     let newVersion = 'unknown';
 
+    // Install to local shadow directory — each agent owns its version
+    const shadowDir = path.join(this.stateDir, 'shadow-install');
+    fs.mkdirSync(shadowDir, { recursive: true });
+
+    // Ensure shadow dir has a package.json (npm install requires it)
+    const shadowPkgPath = path.join(shadowDir, 'package.json');
+    if (!fs.existsSync(shadowPkgPath)) {
+      fs.writeFileSync(shadowPkgPath, JSON.stringify({ name: 'instar-shadow', private: true }, null, 2));
+    }
+
     for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
       if (attempt > 0) {
         console.log(`[UpdateChecker] Retry ${attempt}/${MAX_RETRIES - 1} after ${RETRY_DELAYS[attempt]}ms...`);
@@ -164,21 +178,28 @@ export class UpdateChecker {
       }
 
       try {
+        // Install to local shadow directory instead of global.
         // --ignore-scripts prevents cloudflared's postinstall binary download from
         // failing with ENOENT in environments where the download path doesn't exist.
         // The cloudflared binary is installed lazily on-demand by TunnelManager when
         // the tunnel feature is first used (via install(bin) from the cloudflared package).
-        await this.execAsync('npm', ['install', '-g', `instar@${targetVersion}`, '--ignore-scripts'], 120000);
+        await this.execAsync('npm', [
+          'install', `instar@${targetVersion}`,
+          '--ignore-scripts',
+          '--prefix', shadowDir,
+        ], 120000);
       } catch (err) {
         lastError = err instanceof Error ? err.message : String(err);
         continue;
       }
 
-      // Verify the update was applied
+      // Verify the update was applied by reading the local install
       try {
-        const listOutput = await this.execAsync('npm', ['list', '-g', 'instar', '--depth=0', '--json'], 15000);
-        const parsed = JSON.parse(listOutput);
-        newVersion = parsed?.dependencies?.instar?.version || 'unknown';
+        const localPkgPath = path.join(shadowDir, 'node_modules', 'instar', 'package.json');
+        if (fs.existsSync(localPkgPath)) {
+          const pkg = JSON.parse(fs.readFileSync(localPkgPath, 'utf-8'));
+          newVersion = pkg.version || 'unknown';
+        }
       } catch {
         newVersion = 'unknown';
       }
@@ -203,26 +224,20 @@ export class UpdateChecker {
     // new binary on disk has the latest PostUpdateMigrator entries.
     // This now also processes upgrade guides (Layer 2: intelligent knowledge).
     //
-    // PATH resolution fix: `npm install -g` may install to a different prefix
-    // than where the running `instar` binary lives (e.g., ASDF vs homebrew).
-    // We resolve the exact installed cli.js from npm's prefix and run it with
-    // the current Node.js process to avoid PATH mismatch issues.
+    // Resolution: use the shadow install's cli.js directly — no global prefix needed.
     let migrationSummary = '';
     let upgradeGuideNote = '';
     if (success && this.migratorConfig) {
       try {
-        // Resolve the newly installed cli.js path from npm's global prefix
+        // Resolve the newly installed cli.js from the shadow install
         let cmd = 'instar';
         let baseArgs: string[] = [];
-        try {
-          const prefix = await this.execAsync('npm', ['prefix', '-g'], 10000);
-          const cliJs = path.join(prefix, 'lib', 'node_modules', 'instar', 'dist', 'cli.js');
-          if (fs.existsSync(cliJs)) {
-            // Run the exact installed cli.js with the current Node.js runtime
-            cmd = process.execPath;
-            baseArgs = [cliJs];
-          }
-        } catch { /* fall back to PATH resolution */ }
+        const shadowCliJs = path.join(shadowDir, 'node_modules', 'instar', 'dist', 'cli.js');
+        if (fs.existsSync(shadowCliJs)) {
+          // Run the exact installed cli.js with the current Node.js runtime
+          cmd = process.execPath;
+          baseArgs = [shadowCliJs];
+        }
 
         let output: string;
         try {
@@ -326,8 +341,21 @@ export class UpdateChecker {
 
     const currentVersion = this.getInstalledVersion();
 
+    // Install rollback version to shadow directory
+    const shadowDir = path.join(this.stateDir, 'shadow-install');
+    fs.mkdirSync(shadowDir, { recursive: true });
+
+    const shadowPkgPath = path.join(shadowDir, 'package.json');
+    if (!fs.existsSync(shadowPkgPath)) {
+      fs.writeFileSync(shadowPkgPath, JSON.stringify({ name: 'instar-shadow', private: true }, null, 2));
+    }
+
     try {
-      await this.execAsync('npm', ['install', '-g', `instar@${rollbackInfo.previousVersion}`, '--ignore-scripts'], 120000);
+      await this.execAsync('npm', [
+        'install', `instar@${rollbackInfo.previousVersion}`,
+        '--ignore-scripts',
+        '--prefix', shadowDir,
+      ], 120000);
     } catch (err) {
       return {
         success: false,
@@ -337,12 +365,16 @@ export class UpdateChecker {
       };
     }
 
-    // Verify the rollback
+    // Verify the rollback from shadow install
     let restoredVersion: string;
     try {
-      const output = await this.execAsync('npm', ['list', '-g', 'instar', '--depth=0', '--json'], 15000);
-      const parsed = JSON.parse(output);
-      restoredVersion = parsed?.dependencies?.instar?.version || 'unknown';
+      const localPkgPath = path.join(shadowDir, 'node_modules', 'instar', 'package.json');
+      if (fs.existsSync(localPkgPath)) {
+        const pkg = JSON.parse(fs.readFileSync(localPkgPath, 'utf-8'));
+        restoredVersion = pkg.version || 'unknown';
+      } else {
+        restoredVersion = 'unknown';
+      }
     } catch {
       restoredVersion = 'unknown';
     }

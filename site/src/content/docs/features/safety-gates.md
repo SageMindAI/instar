@@ -38,6 +38,10 @@ Say "stop everything" and the MessageSentinel halts operations immediately, befo
 
 The safety gate hook is installed automatically for all MCP tool calls. No configuration needed.
 
+## Related: Coherence Gate
+
+Safety Gates protect against dangerous *actions*. The [Coherence Gate](/features/coherence-gate/) protects against dangerous *messages* -- reviewing every outbound response for tone issues, fabricated claims, information leakage, and value misalignment before the user sees it. Together, they form a complete safety layer: actions are gated before execution, messages are reviewed before delivery.
+
 ## Origin
 
 Born from a real incident where an AI agent deleted a user's emails. Instar ensures your agent asks before doing anything it can't undo.

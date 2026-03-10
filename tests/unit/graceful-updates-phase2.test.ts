@@ -344,7 +344,7 @@ describe('Phase 2B: UpdateGate', () => {
     expect(result.blockingSessions).toEqual(['session-1']);
   });
 
-  it('forces restart after max deferral timeout', () => {
+  it('continues deferring past max deferral when healthy sessions exist (never kills healthy)', () => {
     const gate = new UpdateGate({ maxDeferralHours: 0.001 }); // ~3.6 seconds
     const sm = createMockSessionManager([
       { name: 'active-session', topicId: 100 },
@@ -358,13 +358,12 @@ describe('Phase 2B: UpdateGate', () => {
     expect(r1.allowed).toBe(false);
 
     // Simulate time passing past max deferral
-    // We need to manipulate the internal state since fake timers don't affect Date.now in the gate
     (gate as any).deferralStartedAt = Date.now() - 4000; // 4 seconds ago > 3.6 second max
 
-    // Second check: forced
+    // Second check: still defers — healthy sessions are never killed for an update
     const r2 = gate.canRestart(sm, monitor);
-    expect(r2.allowed).toBe(true);
-    expect(r2.reason).toContain('Max deferral exceeded');
+    expect(r2.allowed).toBe(false);
+    expect(r2.blockingSessions).toEqual(['active-session']);
   });
 
   it('getStatus reports deferral state correctly', () => {

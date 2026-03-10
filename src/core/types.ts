@@ -89,6 +89,11 @@ export interface JobDefinition {
   supervision?: SupervisionTier;
   /** Living Skills — opt-in execution journaling and pattern detection (PROP-229) */
   livingSkills?: LivingSkillsConfig;
+  /** Machine scope — restrict this job to specific machines.
+   *  Values can be machine IDs (m_...) or machine names (case-insensitive).
+   *  If omitted or empty, the job runs on ALL machines (default behavior).
+   *  Example: ["m_abc123...", "justins-macbook"] */
+  machines?: string[];
 }
 
 export interface JobGrounding {
@@ -432,11 +437,12 @@ export interface RelationshipManagerConfig {
 // ── Skip Ledger & Auto-Tune ─────────────────────────────────────────
 
 export type SkipReason =
-  | 'disabled'    // Job has enabled: false
-  | 'paused'      // Scheduler is paused
-  | 'quota'       // Quota constraints
-  | 'capacity'    // No available session slots (queued instead of skipped, but tracked)
-  | 'claimed';    // Another machine already claimed this job (Phase 4C — Gap 5)
+  | 'disabled'        // Job has enabled: false
+  | 'paused'          // Scheduler is paused
+  | 'quota'           // Quota constraints
+  | 'capacity'        // No available session slots (queued instead of skipped, but tracked)
+  | 'claimed'         // Another machine already claimed this job (Phase 4C — Gap 5)
+  | 'machine-scope';  // Job is scoped to a different machine
 
 export interface SkipEvent {
   slug: string;
@@ -1286,6 +1292,62 @@ export interface InstarConfig {
   autonomyProfile?: AutonomyProfileLevel;
   /** Notification preferences for autonomy events */
   notifications?: NotificationPreferences;
+  /** Response Review Pipeline (Coherence Gate) configuration */
+  responseReview?: ResponseReviewConfig;
+}
+
+// ── Response Review Pipeline (Coherence Gate) ───────────────────────
+
+export interface ResponseReviewConfig {
+  /** Whether the review pipeline is enabled */
+  enabled: boolean;
+  /** Per-reviewer configuration */
+  reviewers?: Record<string, ReviewerConfig>;
+  /** Observe-only mode — log violations without blocking */
+  observeOnly?: boolean;
+  /** Default timeout for reviewers in ms */
+  timeoutMs?: number;
+  /** Model to use for the gate reviewer */
+  gateModel?: string;
+  /** Model to use for specialist reviewers */
+  reviewerModel?: string;
+  /** Per-reviewer model overrides */
+  reviewerModelOverrides?: Record<string, string>;
+  /** Max retries for failed reviews */
+  maxRetries?: number;
+  /** Per-reviewer criticality levels */
+  reviewerCriticality?: Record<string, 'critical' | 'high' | 'medium' | 'low'>;
+  /** Threshold for escalating warn-mode violations */
+  warnEscalationThreshold?: number;
+  /** Per-channel overrides */
+  channels?: Record<string, ChannelReviewConfig>;
+  /** Default channel configs by type */
+  channelDefaults?: {
+    internal?: ChannelReviewConfig;
+    external?: ChannelReviewConfig;
+  };
+  /** Enable prompt caching for LLM calls */
+  promptCaching?: boolean;
+  /** Disable the test endpoint */
+  testEndpointDisabled?: boolean;
+}
+
+export interface ReviewerConfig {
+  enabled: boolean;
+  mode: 'block' | 'warn' | 'observe';
+}
+
+export interface ChannelReviewConfig {
+  /** Whether to fail open (allow message) on review error */
+  failOpen?: boolean;
+  /** Skip the gate reviewer for this channel */
+  skipGate?: boolean;
+  /** Queue the message for manual review on failure */
+  queueOnFailure?: boolean;
+  /** Timeout for queued reviews in ms */
+  queueTimeoutMs?: number;
+  /** Additional reviewer names to enable for this channel */
+  additionalReviewers?: string[];
 }
 
 // ── Adaptive Autonomy (PROP — Unified Self-Evolution Governance) ────
@@ -1374,8 +1436,12 @@ export interface TunnelConfigType {
   enabled: boolean;
   /** Tunnel type: 'quick' (ephemeral, no account) or 'named' (persistent, requires token) */
   type: 'quick' | 'named';
-  /** Cloudflare tunnel token (required for named tunnels) */
+  /** Cloudflare tunnel token (required for named tunnels using token auth) */
   token?: string;
+  /** Config file path for named tunnels using credentials file auth */
+  configFile?: string;
+  /** Public hostname for named tunnels (e.g., echo.dawn-tunnel.dev) */
+  hostname?: string;
 }
 
 export interface DispatchConfig {
@@ -1442,6 +1508,8 @@ export interface MonitoringConfig {
     /** Minimum minutes between user notifications per topic (default: 30) */
     notificationCooldownMinutes?: number;
   };
+  /** Whether to report external (non-instar) Claude processes to the user (default: true) */
+  reportExternalProcesses?: boolean;
   /** System Reviewer — periodic self-monitoring of feature health */
   systemReview?: {
     /** Enable the system reviewer (default: true) */

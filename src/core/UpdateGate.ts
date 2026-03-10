@@ -6,7 +6,8 @@
  * 'unresponsive', 'idle', and 'dead' sessions don't — blocking an update
  * for a broken session serves no user interest.
  *
- * Maximum deferral: 4 hours. After that, restart regardless with advance warnings.
+ * Healthy sessions are NEVER killed for an update. The gate defers indefinitely
+ * while healthy sessions exist, sending warnings at the configured thresholds.
  */
 
 export interface SessionInfo {
@@ -76,7 +77,9 @@ export class UpdateGate {
   private deferralStartedAt: number | null = null;
   private deferralReason: string | null = null;
   private firstWarningSent = false;
+  private firstWarningPending = false;
   private finalWarningSent = false;
+  private finalWarningPending = false;
 
   constructor(config?: UpdateGateConfig) {
     this.config = {
@@ -145,16 +148,11 @@ export class UpdateGate {
 
     this.deferralReason = `${activeSessions.length} active session(s): ${activeSessions.join(', ')}`;
 
-    // Check if max deferral exceeded → force restart
+    // Max deferral exceeded — but only force restart if no HEALTHY sessions.
+    // Active, healthy sessions should NEVER be killed for an update.
+    // The update can wait — the user's work cannot.
     if (remainingMs <= 0) {
-      console.log(`[UpdateGate] Max deferral (${this.config.maxDeferralHours}h) exceeded — forcing restart`);
-      this.reset();
-      return {
-        allowed: true,
-        reason: `Max deferral exceeded (${this.config.maxDeferralHours}h)`,
-        blockingSessions: activeSessions,
-        unresponsiveSessions: unresponsiveSessions.length > 0 ? unresponsiveSessions : undefined,
-      };
+      console.log(`[UpdateGate] Max deferral (${this.config.maxDeferralHours}h) exceeded, but ${activeSessions.length} healthy session(s) still running — continuing to defer`);
     }
 
     // Check warning thresholds
@@ -162,10 +160,12 @@ export class UpdateGate {
 
     if (remainingMinutes <= this.config.finalWarningMinutes && !this.finalWarningSent) {
       this.finalWarningSent = true;
+      this.finalWarningPending = true;
     }
 
     if (remainingMinutes <= this.config.firstWarningMinutes && !this.firstWarningSent) {
       this.firstWarningSent = true;
+      this.firstWarningPending = true;
     }
 
     return {
@@ -195,17 +195,26 @@ export class UpdateGate {
 
   /**
    * Whether the first warning (T-30min before forced restart) should fire.
-   * Caller checks this and sends the notification, then it won't fire again.
+   * Returns true exactly once — consumes the flag on read.
    */
   shouldSendFirstWarning(): boolean {
-    return this.firstWarningSent;
+    if (this.firstWarningPending) {
+      this.firstWarningPending = false;
+      return true;
+    }
+    return false;
   }
 
   /**
    * Whether the final warning (T-5min before forced restart) should fire.
+   * Returns true exactly once — consumes the flag on read.
    */
   shouldSendFinalWarning(): boolean {
-    return this.finalWarningSent;
+    if (this.finalWarningPending) {
+      this.finalWarningPending = false;
+      return true;
+    }
+    return false;
   }
 
   /**
@@ -215,6 +224,8 @@ export class UpdateGate {
     this.deferralStartedAt = null;
     this.deferralReason = null;
     this.firstWarningSent = false;
+    this.firstWarningPending = false;
     this.finalWarningSent = false;
+    this.finalWarningPending = false;
   }
 }

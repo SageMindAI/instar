@@ -74,7 +74,7 @@ export class AgentServer {
     topicMemory?: TopicMemory;
     feedbackAnomalyDetector?: FeedbackAnomalyDetector;
     projectMapper?: import('../core/ProjectMapper.js').ProjectMapper;
-    coherenceGate?: import('../core/CoherenceGate.js').CoherenceGate;
+    coherenceGate?: import('../core/ScopeVerifier.js').ScopeVerifier;
     contextHierarchy?: import('../core/ContextHierarchy.js').ContextHierarchy;
     canonicalState?: import('../core/CanonicalState.js').CanonicalState;
     operationGate?: import('../core/ExternalOperationGate.js').ExternalOperationGate;
@@ -108,6 +108,7 @@ export class AgentServer {
     instructionsVerifier?: import('../monitoring/InstructionsVerifier.js').InstructionsVerifier;
     threadlineRouter?: import('../threadline/ThreadlineRouter.js').ThreadlineRouter;
     handshakeManager?: import('../threadline/HandshakeManager.js').HandshakeManager;
+    responseReviewGate?: import('../core/CoherenceGate.js').CoherenceGate;
   }) {
     this.config = options.config;
     this.startTime = new Date();
@@ -278,6 +279,7 @@ export class AgentServer {
       instructionsVerifier: options.instructionsVerifier ?? null,
       threadlineRouter: options.threadlineRouter ?? null,
       handshakeManager: options.handshakeManager ?? null,
+      responseReviewGate: options.responseReviewGate ?? null,
       startTime: this.startTime,
     });
     this.app.use(routes);

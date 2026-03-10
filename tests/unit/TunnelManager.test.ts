@@ -216,7 +216,7 @@ describe('TunnelManager', () => {
 
     it('rejects if token is missing for named tunnel', async () => {
       const tm = createManager({ type: 'named' });
-      await expect(tm.start()).rejects.toThrow('requires a token');
+      await expect(tm.start()).rejects.toThrow('Named tunnel requires either a token');
     });
   });
 
