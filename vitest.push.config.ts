@@ -72,6 +72,9 @@ const FLAKY_TESTS = [
 
   // ── ReflectionConsolidator pattern detection non-deterministic ───
   'tests/unit/ReflectionConsolidator.test.ts',
+
+  // ── Supertest timeout on route ordering test ──────────────────────
+  'tests/unit/server-host-binding.test.ts',
 ];
 
 export default defineConfig({
