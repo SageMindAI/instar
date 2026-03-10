@@ -2767,7 +2767,42 @@ export async function startServer(options: StartOptions): Promise<void> {
         return null; // Normal messages pass through
       };
       telegram.onSentinelKillSession = (sessionName: string) => {
+        // Save resume UUID before killing so respawn can --resume
+        if (_topicResumeMap) {
+          try {
+            const uuid = _topicResumeMap.findUuidForSession(sessionName);
+            if (uuid) {
+              // Find the topic ID for this session
+              const topicSessions = telegram.getAllTopicSessions();
+              for (const [topicId, sessName] of topicSessions) {
+                if (sessName === sessionName) {
+                  _topicResumeMap.save(topicId, uuid, sessionName);
+                  console.log(`[sentinel] Saved resume UUID ${uuid} for topic ${topicId} before kill`);
+                  break;
+                }
+              }
+            }
+          } catch { /* best effort */ }
+        }
         return sessionManager.killSession(sessionName);
+      };
+      telegram.onSentinelPauseSession = (sessionName: string) => {
+        // Save resume UUID so if the session dies during pause, respawn can --resume
+        if (_topicResumeMap) {
+          try {
+            const uuid = _topicResumeMap.findUuidForSession(sessionName);
+            if (uuid) {
+              const topicSessions = telegram.getAllTopicSessions();
+              for (const [topicId, sessName] of topicSessions) {
+                if (sessName === sessionName) {
+                  _topicResumeMap.save(topicId, uuid, sessionName);
+                  console.log(`[sentinel] Saved resume UUID ${uuid} for topic ${topicId} on pause`);
+                  break;
+                }
+              }
+            }
+          } catch { /* best effort */ }
+        }
       };
       console.log(pc.green('  Sentinel wired into Telegram message flow'));
     }
@@ -3017,7 +3052,7 @@ export async function startServer(options: StartOptions): Promise<void> {
       }
     }
 
-    const server = new AgentServer({ config, sessionManager, state, scheduler, telegram, relationships, feedback, feedbackAnomalyDetector, dispatches, updateChecker, autoUpdater, autoDispatcher, quotaTracker, quotaManager, publisher, viewer, tunnel, evolution, watchdog, topicMemory, triageNurse, projectMapper, coherenceGate: scopeVerifier, contextHierarchy, canonicalState, operationGate, sentinel, adaptiveTrust, memoryMonitor, orphanReaper, coherenceMonitor, commitmentTracker, semanticMemory, activitySentinel, messageRouter, summarySentinel, spawnManager, systemReviewer, capabilityMapper, topicResumeMap: _topicResumeMap ?? undefined, autonomyManager, trustElevationTracker, autonomousEvolution, coordinator: coordinator.enabled ? coordinator : undefined, localSigningKeyPem, whatsapp: whatsappAdapter, whatsappBusinessBackend, messageBridge, hookEventReceiver, worktreeMonitor, subagentTracker, instructionsVerifier, handshakeManager: threadlineHandshake, responseReviewGate });
+    const server = new AgentServer({ config, sessionManager, state, scheduler, telegram, relationships, feedback, feedbackAnomalyDetector, dispatches, updateChecker, autoUpdater, autoDispatcher, quotaTracker, quotaManager, publisher, viewer, tunnel, evolution, watchdog, topicMemory, triageNurse, projectMapper, coherenceGate: scopeVerifier, contextHierarchy, canonicalState, operationGate, sentinel, adaptiveTrust, memoryMonitor, orphanReaper, coherenceMonitor, commitmentTracker, semanticMemory, activitySentinel, messageRouter, summarySentinel, spawnManager, systemReviewer, capabilityMapper, topicResumeMap: _topicResumeMap ?? undefined, autonomyManager, trustElevationTracker, autonomousEvolution, coordinator: coordinator.enabled ? coordinator : undefined, localSigningKeyPem, whatsapp: whatsappAdapter, whatsappBusinessBackend, messageBridge, hookEventReceiver, worktreeMonitor, subagentTracker, instructionsVerifier, handshakeManager: threadlineHandshake, responseReviewGate, telemetryHeartbeat });
     await server.start();
 
     // Connect DegradationReporter downstream systems now that everything is initialized.
