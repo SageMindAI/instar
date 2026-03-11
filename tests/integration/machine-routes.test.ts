@@ -151,6 +151,7 @@ describe('Machine Routes Integration', () => {
       const res = await request(env.app)
         .post('/api/heartbeat')
         .set(headers)
+        .set('Connection', 'close')
         .send(heartbeat);
 
       expect(res.status).toBe(200);
@@ -173,6 +174,7 @@ describe('Machine Routes Integration', () => {
       const res = await request(env.app)
         .post('/api/heartbeat')
         .set(headers)
+        .set('Connection', 'close')
         .send(heartbeat);
 
       expect(res.status).toBe(200);
@@ -196,6 +198,7 @@ describe('Machine Routes Integration', () => {
       const res = await request(env.app)
         .post('/api/heartbeat')
         .set(headers)
+        .set('Connection', 'close')
         .send(heartbeat);
 
       expect(res.status).toBe(200);
@@ -214,6 +217,7 @@ describe('Machine Routes Integration', () => {
       const res = await request(env.app)
         .post('/api/heartbeat')
         .set(headers)
+        .set('Connection', 'close')
         .send(heartbeat);
 
       expect(res.status).toBe(403);
@@ -223,6 +227,7 @@ describe('Machine Routes Integration', () => {
     it('rejects unauthenticated heartbeat', async () => {
       const res = await request(env.app)
         .post('/api/heartbeat')
+        .set('Connection', 'close')
         .send({ holder: env.bId, role: 'awake', timestamp: new Date().toISOString(), expiresAt: new Date(Date.now() + 900_000).toISOString() });
 
       expect(res.status).toBe(401);
@@ -235,6 +240,7 @@ describe('Machine Routes Integration', () => {
     it('accepts pairing request (no auth required)', async () => {
       const res = await request(env.app)
         .post('/api/pair')
+        .set('Connection', 'close')
         .send({
           pairingCode: 'test-code',
           machineIdentity: { machineId: 'm_new', name: 'new-machine' },
@@ -249,6 +255,7 @@ describe('Machine Routes Integration', () => {
     it('rejects incomplete pairing request', async () => {
       const res = await request(env.app)
         .post('/api/pair')
+        .set('Connection', 'close')
         .send({ pairingCode: 'test' });
 
       expect(res.status).toBe(400);
@@ -265,6 +272,7 @@ describe('Machine Routes Integration', () => {
       const res = await request(env.app)
         .post('/api/handoff/challenge')
         .set(headers)
+        .set('Connection', 'close')
         .send(body);
 
       expect(res.status).toBe(200);
@@ -281,6 +289,7 @@ describe('Machine Routes Integration', () => {
       const challengeRes = await request(env.app)
         .post('/api/handoff/challenge')
         .set(challengeHeaders)
+        .set('Connection', 'close')
         .send(challengeBody);
 
       expect(challengeRes.status).toBe(200);
@@ -304,6 +313,7 @@ describe('Machine Routes Integration', () => {
       const handoffRes = await request(env.app)
         .post('/api/handoff/request')
         .set(handoffHeaders)
+        .set('Connection', 'close')
         .send(handoffBody);
 
       expect(handoffRes.status).toBe(200);
@@ -326,6 +336,7 @@ describe('Machine Routes Integration', () => {
       const challengeRes = await request(env.app)
         .post('/api/handoff/challenge')
         .set(challengeHeaders)
+        .set('Connection', 'close')
         .send(challengeBody);
 
       const challenge = challengeRes.body.challenge;
@@ -345,6 +356,7 @@ describe('Machine Routes Integration', () => {
       const res = await request(env.app)
         .post('/api/handoff/request')
         .set(handoffHeaders)
+        .set('Connection', 'close')
         .send(handoffBody);
 
       expect(res.status).toBe(403);
@@ -357,6 +369,7 @@ describe('Machine Routes Integration', () => {
       const challengeRes = await request(env.app)
         .post('/api/handoff/challenge')
         .set(challengeHeaders)
+        .set('Connection', 'close')
         .send(challengeBody);
 
       const challenge = challengeRes.body.challenge;
@@ -370,7 +383,7 @@ describe('Machine Routes Integration', () => {
       // First request with this challenge succeeds
       const handoffBody1 = { ...requestBody, challenge, challengeSignature };
       const headers1 = signRequest(env.bId, env.bSigning.privateKey, handoffBody1, 1);
-      await request(env.app).post('/api/handoff/request').set(headers1).send(handoffBody1).expect(200);
+      await request(env.app).post('/api/handoff/request').set(headers1).set('Connection', 'close').send(handoffBody1).expect(200);
 
       // Second request with same challenge fails
       const handoffBody2 = { ...requestBody, challenge, challengeSignature };
@@ -378,6 +391,7 @@ describe('Machine Routes Integration', () => {
       const res = await request(env.app)
         .post('/api/handoff/request')
         .set(headers2)
+        .set('Connection', 'close')
         .send(handoffBody2);
 
       expect(res.status).toBe(403);
@@ -399,6 +413,7 @@ describe('Machine Routes Integration', () => {
       const res = await request(env.app)
         .post('/api/sync/state')
         .set(headers)
+        .set('Connection', 'close')
         .send(body);
 
       expect(res.status).toBe(200);
@@ -413,6 +428,7 @@ describe('Machine Routes Integration', () => {
       const res = await request(env.app)
         .post('/api/sync/state')
         .set(headers)
+        .set('Connection', 'close')
         .send(body);
 
       expect(res.status).toBe(400);
@@ -434,6 +450,7 @@ describe('Machine Routes Integration', () => {
       await request(env.app)
         .post('/api/heartbeat')
         .set(headers)
+        .set('Connection', 'close')
         .send(heartbeat);
 
       const events = env.securityLog.readAll();

@@ -191,7 +191,7 @@ describeMaybe('E2E: Job Run History lifecycle', () => {
   it('GET /jobs/history returns empty history initially', async () => {
     const res = await request(app)
       .get('/jobs/history')
-      .set('Authorization', `Bearer ${AUTH_TOKEN}`);
+      .set('Authorization', `Bearer ${AUTH_TOKEN}`).set('Connection', 'close');
 
     expect(res.status).toBe(200);
     expect(res.body).toHaveProperty('runs');
@@ -204,7 +204,7 @@ describeMaybe('E2E: Job Run History lifecycle', () => {
   it('GET /jobs/:slug/history returns empty for untriggered job', async () => {
     const res = await request(app)
       .get('/jobs/hist-test-job/history')
-      .set('Authorization', `Bearer ${AUTH_TOKEN}`);
+      .set('Authorization', `Bearer ${AUTH_TOKEN}`).set('Connection', 'close');
 
     expect(res.status).toBe(200);
     expect(res.body.runs).toHaveLength(0);
@@ -214,14 +214,14 @@ describeMaybe('E2E: Job Run History lifecycle', () => {
   });
 
   it('rejects unauthenticated history requests', async () => {
-    const res = await request(app).get('/jobs/history');
+    const res = await request(app).get('/jobs/history').set('Connection', 'close');
     expect(res.status).toBe(401);
   });
 
   it('rejects invalid slug in per-job history', async () => {
     const res = await request(app)
       .get('/jobs/inv@lid!slug/history')
-      .set('Authorization', `Bearer ${AUTH_TOKEN}`);
+      .set('Authorization', `Bearer ${AUTH_TOKEN}`).set('Connection', 'close');
 
     expect(res.status).toBe(400);
   });
@@ -233,6 +233,7 @@ describeMaybe('E2E: Job Run History lifecycle', () => {
     const triggerRes = await request(app)
       .post('/jobs/hist-test-job/trigger')
       .set('Authorization', `Bearer ${AUTH_TOKEN}`)
+      .set('Connection', 'close')
       .send({ reason: 'e2e-history-test' });
 
     expect(triggerRes.status).toBe(200);
@@ -244,7 +245,7 @@ describeMaybe('E2E: Job Run History lifecycle', () => {
     // Query history via API
     const histRes = await request(app)
       .get('/jobs/hist-test-job/history')
-      .set('Authorization', `Bearer ${AUTH_TOKEN}`);
+      .set('Authorization', `Bearer ${AUTH_TOKEN}`).set('Connection', 'close');
 
     expect(histRes.status).toBe(200);
     expect(histRes.body.total).toBeGreaterThanOrEqual(1);
@@ -275,7 +276,7 @@ describeMaybe('E2E: Job Run History lifecycle', () => {
     // Query history — should now have a completed run
     const histRes = await request(app)
       .get('/jobs/hist-test-job/history')
-      .set('Authorization', `Bearer ${AUTH_TOKEN}`);
+      .set('Authorization', `Bearer ${AUTH_TOKEN}`).set('Connection', 'close');
 
     expect(histRes.status).toBe(200);
 
@@ -300,6 +301,7 @@ describeMaybe('E2E: Job Run History lifecycle', () => {
     const triggerRes = await request(app)
       .post('/jobs/hist-secondary/trigger')
       .set('Authorization', `Bearer ${AUTH_TOKEN}`)
+      .set('Connection', 'close')
       .send({ reason: 'e2e-multi-job' });
 
     expect(triggerRes.status).toBe(200);
@@ -309,7 +311,7 @@ describeMaybe('E2E: Job Run History lifecycle', () => {
     // Global history should have runs from both jobs
     const histRes = await request(app)
       .get('/jobs/history')
-      .set('Authorization', `Bearer ${AUTH_TOKEN}`);
+      .set('Authorization', `Bearer ${AUTH_TOKEN}`).set('Connection', 'close');
 
     expect(histRes.status).toBe(200);
     expect(histRes.body.total).toBeGreaterThanOrEqual(2);
@@ -329,7 +331,7 @@ describeMaybe('E2E: Job Run History lifecycle', () => {
   it('filters history by result via query param', async () => {
     const res = await request(app)
       .get('/jobs/history?result=pending')
-      .set('Authorization', `Bearer ${AUTH_TOKEN}`);
+      .set('Authorization', `Bearer ${AUTH_TOKEN}`).set('Connection', 'close');
 
     expect(res.status).toBe(200);
     for (const run of res.body.runs) {
@@ -340,7 +342,7 @@ describeMaybe('E2E: Job Run History lifecycle', () => {
   it('supports pagination via limit and offset', async () => {
     const page1 = await request(app)
       .get('/jobs/history?limit=1&offset=0')
-      .set('Authorization', `Bearer ${AUTH_TOKEN}`);
+      .set('Authorization', `Bearer ${AUTH_TOKEN}`).set('Connection', 'close');
 
     expect(page1.status).toBe(200);
     expect(page1.body.runs.length).toBeLessThanOrEqual(1);
@@ -350,7 +352,7 @@ describeMaybe('E2E: Job Run History lifecycle', () => {
     if (page1.body.total > 1) {
       const page2 = await request(app)
         .get('/jobs/history?limit=1&offset=1')
-        .set('Authorization', `Bearer ${AUTH_TOKEN}`);
+        .set('Authorization', `Bearer ${AUTH_TOKEN}`).set('Connection', 'close');
 
       expect(page2.status).toBe(200);
       expect(page2.body.runs.length).toBeLessThanOrEqual(1);
@@ -367,7 +369,7 @@ describeMaybe('E2E: Job Run History lifecycle', () => {
   it('capabilities endpoint shows scheduler with job info', async () => {
     const res = await request(app)
       .get('/capabilities')
-      .set('Authorization', `Bearer ${AUTH_TOKEN}`);
+      .set('Authorization', `Bearer ${AUTH_TOKEN}`).set('Connection', 'close');
 
     expect(res.status).toBe(200);
     expect(res.body.scheduler).toBeDefined();
@@ -408,6 +410,7 @@ describeMaybe('E2E: Job Run History lifecycle', () => {
         const res = await request(app)
           .post('/sessions/spawn')
           .set('Authorization', `Bearer ${AUTH_TOKEN}`)
+          .set('Connection', 'close')
           .send({ name: `filler-${i}`, prompt: 'fill slot' });
         if (res.status === 201) {
           spawnedSessions.push(res.body.tmuxSession);
@@ -419,6 +422,7 @@ describeMaybe('E2E: Job Run History lifecycle', () => {
     await request(app)
       .post('/jobs/hist-test-job/trigger')
       .set('Authorization', `Bearer ${AUTH_TOKEN}`)
+      .set('Connection', 'close')
       .send({ reason: 'e2e-spawn-error' });
 
     await new Promise(r => setTimeout(r, 300));
@@ -426,7 +430,7 @@ describeMaybe('E2E: Job Run History lifecycle', () => {
     // Check history for spawn-error entries
     const histRes = await request(app)
       .get('/jobs/hist-test-job/history?result=spawn-error')
-      .set('Authorization', `Bearer ${AUTH_TOKEN}`);
+      .set('Authorization', `Bearer ${AUTH_TOKEN}`).set('Connection', 'close');
 
     // May or may not have spawn errors depending on timing,
     // but the endpoint should work correctly regardless
@@ -446,7 +450,7 @@ describeMaybe('E2E: Job Run History lifecycle', () => {
   it('per-job stats have correct shape and values', async () => {
     const res = await request(app)
       .get('/jobs/hist-test-job/history')
-      .set('Authorization', `Bearer ${AUTH_TOKEN}`);
+      .set('Authorization', `Bearer ${AUTH_TOKEN}`).set('Connection', 'close');
 
     expect(res.status).toBe(200);
     const stats = res.body.stats;

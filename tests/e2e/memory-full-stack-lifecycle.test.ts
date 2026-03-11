@@ -196,7 +196,7 @@ describe('Full Memory Stack E2E lifecycle', () => {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 
-  const auth = () => ({ Authorization: `Bearer ${AUTH_TOKEN}` });
+  const auth = () => ({ Authorization: `Bearer ${AUTH_TOKEN}`, Connection: 'close' });
 
   // ══════════════════════════════════════════════════════════════════
   // Phase 1: ALL subsystems alive simultaneously
@@ -718,19 +718,22 @@ describe('Full Memory Stack E2E lifecycle', () => {
       // Semantic routes return 503
       const semanticRes = await request(bareApp)
         .get('/semantic/stats')
-        .set(auth());
+        .set(auth())
+        .set('Connection', 'close');
       expect(semanticRes.status).toBe(503);
 
       // Export returns 503
       const exportRes = await request(bareApp)
         .post('/semantic/export-memory')
         .set(auth())
+        .set('Connection', 'close')
         .send({});
       expect(exportRes.status).toBe(503);
 
       // Health still works
       const healthRes = await request(bareApp)
-        .get('/health');
+        .get('/health')
+        .set('Connection', 'close');
       expect(healthRes.status).toBe(200);
     });
 
@@ -761,6 +764,7 @@ describe('Full Memory Stack E2E lifecycle', () => {
       const res = await request(partialApp)
         .get('/context/working-memory')
         .set(auth())
+        .set('Connection', 'close')
         .query({ prompt: 'JWT authentication' });
 
       expect(res.status).toBe(200);
