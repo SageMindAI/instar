@@ -148,6 +148,8 @@ export { ScopeVerifier } from './core/ScopeVerifier.js';
 export type { ScopeVerifierConfig, ScopeVerificationResult, ScopeCheck, TopicProjectBinding, HighRiskAction } from './core/ScopeVerifier.js';
 export { CoherenceGate } from './core/CoherenceGate.js';
 export type { CoherenceGateOptions, EvaluateRequest, EvaluateResponse, AuditViolation } from './core/CoherenceGate.js';
+export { CapabilityRegistryGenerator } from './core/CapabilityRegistryGenerator.js';
+export type { StoredCapabilityRegistry } from './core/CapabilityRegistryGenerator.js';
 export { ContextHierarchy } from './core/ContextHierarchy.js';
 export type { ContextSegment, ContextHierarchyConfig, ContextDispatchTable } from './core/ContextHierarchy.js';
 export { CanonicalState } from './core/CanonicalState.js';
@@ -285,8 +287,10 @@ export type {
 
 // Scheduler
 export { JobScheduler } from './scheduler/JobScheduler.js';
+export { IntegrationGate } from './scheduler/IntegrationGate.js';
+export type { IntegrationGateConfig, GateContext, GateResult } from './scheduler/IntegrationGate.js';
 export { SkipLedger } from './scheduler/SkipLedger.js';
-export { loadJobs, validateJob } from './scheduler/JobLoader.js';
+export { loadJobs, validateJob, validateCommonBlockers } from './scheduler/JobLoader.js';
 export { JobClaimManager } from './scheduler/JobClaimManager.js';
 export type {
   JobClaimPayload, JobCompletePayload, JobClaim,
@@ -541,6 +545,8 @@ export type {
   MemorySource,
   MemorySearchResult,
   MemoryIndexStats,
+  CommonBlocker,
+  CapabilityRegistry,
 } from './core/types.js';
 export type {
   LivingSkillsConfig,

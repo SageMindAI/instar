@@ -17,6 +17,8 @@ import { loadConfig, ensureStateDir, detectTmuxPath } from '../core/Config.js';
 import { SessionManager } from '../core/SessionManager.js';
 import { StateManager } from '../core/StateManager.js';
 import { JobScheduler } from '../scheduler/JobScheduler.js';
+import { IntegrationGate } from '../scheduler/IntegrationGate.js';
+import { JobRunHistory } from '../scheduler/JobRunHistory.js';
 import { AgentServer } from '../server/AgentServer.js';
 import { TelegramAdapter, TOPIC_STYLE, selectTopicEmoji } from '../messaging/TelegramAdapter.js';
 import { RelationshipManager } from '../core/RelationshipManager.js';
@@ -1637,6 +1639,15 @@ export async function startServer(options: StartOptions): Promise<void> {
       if (sharedIntelligence) {
         scheduler.setIntelligence(sharedIntelligence);
       }
+
+      // Wire IntegrationGate — enforces learning consolidation after job completion
+      const integrationGate = new IntegrationGate({
+        stateDir: config.stateDir,
+        intelligence: sharedIntelligence ?? null,
+        runHistory: new JobRunHistory(config.stateDir),
+      });
+      scheduler.setIntegrationGate(integrationGate);
+
       scheduler.start();
       console.log(pc.green('  Scheduler started'));
     } else if (config.scheduler.enabled && !coordinator.isAwake) {

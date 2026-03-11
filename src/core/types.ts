@@ -94,6 +94,48 @@ export interface JobDefinition {
    *  If omitted or empty, the job runs on ALL machines (default behavior).
    *  Example: ["m_abc123...", "justins-macbook"] */
   machines?: string[];
+  /** Common blockers — pre-confirmed resolution patterns for this job.
+   *  Injected into working memory at session start and used by the
+   *  EscalationResolutionReviewer to catch unnecessary human escalations. */
+  commonBlockers?: Record<string, CommonBlocker>;
+}
+
+/** A pre-confirmed resolution for a common blocker pattern. */
+export interface CommonBlocker {
+  /** Human-readable description of the blocker pattern */
+  description: string;
+  /** How to resolve this blocker without human intervention */
+  resolution: string;
+  /** Confirmation status: 'confirmed' means tested and working */
+  status?: 'confirmed' | 'pending' | 'expired';
+  /** Tools needed to execute the resolution */
+  toolsNeeded?: string[];
+  /** Credential sources needed (string or array) */
+  credentials?: string | string[];
+  /** ISO timestamp when this blocker resolution was last confirmed */
+  confirmedAt?: string;
+  /** ISO timestamp after which this resolution should be re-verified */
+  expiresAt?: string;
+  /** ISO timestamp when this blocker was last used */
+  lastUsedAt?: string;
+  /** Number of times this resolution has been successfully applied */
+  successCount?: number;
+  /** Session ID that added this blocker (for learning loop provenance) */
+  addedFrom?: string;
+  /** ISO timestamp when this blocker was added */
+  addedAt?: string;
+}
+
+/** Machine-readable description of what an agent CAN do. */
+export interface CapabilityRegistry {
+  /** Authentication methods available, keyed by service name */
+  authentication?: Record<string, { tool: string; platforms: string[] }>;
+  /** Tools available to the agent, keyed by tool category */
+  tools?: Record<string, { tool: string; capabilities: string[] }>;
+  /** Accounts/platforms the agent has access to, keyed by platform */
+  accountsOwned?: Record<string, { handle?: string; authMethod: string }>;
+  /** Credential infrastructure availability */
+  credentials?: { hasEnvFile?: boolean; hasSecretStore?: boolean; hasBitwarden?: boolean };
 }
 
 export interface JobGrounding {
@@ -775,6 +817,10 @@ export interface LivingSkillsConfig {
   reflectionModel?: ModelTier | null;
   /** Frequency threshold for pattern proposals (0.0-1.0). Default: 0.6 */
   patternThreshold?: number;
+  /** Enable IntegrationGate (blocks queue drain until learning captured). Default: true when livingSkills enabled */
+  integrationGate?: boolean;
+  /** Timeout in ms for IntegrationGate evaluation. Default: 30000 */
+  integrationGateTimeoutMs?: number;
 }
 
 export interface DefinedStepConfig {

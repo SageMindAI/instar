@@ -13,6 +13,7 @@ import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import { ExecutionJournal } from '../core/ExecutionJournal.js';
+import { IntegrationGate } from './IntegrationGate.js';
 import { JobReflector } from '../core/JobReflector.js';
 import { loadJobs } from './JobLoader.js';
 import { JobRunHistory } from './JobRunHistory.js';
@@ -87,6 +88,9 @@ export class JobScheduler {
   /** Optional LLM provider for per-job reflection (Living Skills Phase 4) */
   private intelligence: IntelligenceProvider | null = null;
 
+  /** Optional IntegrationGate for post-completion learning consolidation */
+  private integrationGate: IntegrationGate | null = null;
+
   constructor(
     config: JobSchedulerConfig,
     sessionManager: SessionManager,
@@ -158,6 +162,15 @@ export class JobScheduler {
    */
   setIntelligence(provider: IntelligenceProvider): void {
     this.intelligence = provider;
+  }
+
+  /**
+   * Set the IntegrationGate for post-completion learning consolidation.
+   * When set, reflection runs synchronously before queue drain.
+   * When not set, the existing fire-and-forget reflection behavior is preserved.
+   */
+  setIntegrationGate(gate: IntegrationGate): void {
+    this.integrationGate = gate;
   }
 
   /**
@@ -454,6 +467,7 @@ export class JobScheduler {
       startedAt: new Date().toISOString(),
       grounding: job.grounding ?? null,
       topicId: job.topicId ?? null,
+      commonBlockers: job.commonBlockers ?? null,
     });
 
     // Create Living Skills sentinel file if enabled (allows hook to detect opt-in)
@@ -699,18 +713,40 @@ export class JobScheduler {
       }
     }
 
-    // Per-job LLM reflection — ALWAYS ON for every completed job.
-    // History is memory. Every job's experience is captured, reflected on,
-    // and persisted permanently so the agent can evolve from its experiences.
-    if (this.intelligence) {
+    // IntegrationGate — synchronous learning consolidation before queue drain.
+    // When the gate is set, reflection runs synchronously (awaited) and blocks
+    // queue drain if a failed job produces no learning.
+    if (this.integrationGate) {
+      const gateResult = await this.integrationGate.evaluate({
+        job,
+        sessionId,
+        runId: runId ?? null,
+        failed,
+        output,
+        topicId: job.topicId,
+      });
+
+      if (!gateResult.proceed) {
+        console.error(`[scheduler] IntegrationGate blocked for "${job.slug}": ${gateResult.gateBlockReason}`);
+        this.state.appendEvent({
+          type: 'integration_gate_blocked',
+          summary: `IntegrationGate blocked queue drain for "${job.slug}": ${gateResult.gateBlockReason}`,
+          timestamp: new Date().toISOString(),
+          metadata: { slug: job.slug, reason: gateResult.gateBlockReason },
+        });
+      } else {
+        this.processQueue();
+      }
+    } else if (this.intelligence) {
+      // Fallback: no gate, run standalone reflection (existing fire-and-forget)
       const reflectionModel = job.livingSkills?.reflectionModel ?? undefined;
       this.runJobReflection(job.slug, sessionId, runId ?? null, job.topicId, reflectionModel).catch(err => {
         console.error(`[scheduler] Per-job reflection failed for "${job.slug}": ${err}`);
       });
+      this.processQueue();
+    } else {
+      this.processQueue();
     }
-
-    // Try to drain the queue now that a slot is available
-    this.processQueue();
 
     // Skip notifications if no messaging configured or job opted out
     if (!this.messenger && !this.telegram) return;
