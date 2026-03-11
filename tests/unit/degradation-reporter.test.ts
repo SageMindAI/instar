@@ -126,11 +126,13 @@ describe('DegradationReporter', () => {
       alertTopicId: 42,
     });
 
-    // Wait for async drain
-    await new Promise(resolve => setTimeout(resolve, 50));
-
-    expect(feedbackSubmitter).toHaveBeenCalledTimes(1);
-    expect(telegramSender).toHaveBeenCalledTimes(1);
+    // Wait for async drain — use vi.waitFor to handle CPU-loaded environments
+    // where a fixed setTimeout may not be enough (the drain calls async reportEvent
+    // which awaits feedbackSubmitter and telegramSender promises).
+    await vi.waitFor(() => {
+      expect(feedbackSubmitter).toHaveBeenCalledTimes(1);
+      expect(telegramSender).toHaveBeenCalledTimes(1);
+    }, { timeout: 2000, interval: 20 });
 
     // Verify the feedback submission
     const feedbackCall = feedbackSubmitter.mock.calls[0][0];
@@ -185,10 +187,12 @@ describe('DegradationReporter', () => {
     const feedbackSubmitter = vi.fn().mockRejectedValue(new Error('webhook down'));
     reporter.connectDownstream({ feedbackSubmitter });
 
-    await new Promise(resolve => setTimeout(resolve, 50));
+    // Wait for async drain — use vi.waitFor for robustness under CPU load
+    await vi.waitFor(() => {
+      expect(errorSpy).toHaveBeenCalled();
+    }, { timeout: 2000, interval: 20 });
 
     // Should not throw — failure is logged, not propagated
-    expect(errorSpy).toHaveBeenCalled();
     // Event stays unreported
     expect(reporter.getEvents()[0].reported).toBe(false);
 

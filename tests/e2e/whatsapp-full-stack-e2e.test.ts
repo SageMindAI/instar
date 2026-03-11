@@ -191,10 +191,21 @@ describe('WhatsApp Full Stack E2E', () => {
     });
 
     it('all WhatsApp endpoints require auth', async () => {
+      // Test auth enforcement for each endpoint. Under the full test suite
+      // (fileParallelism: false, shared worker process), supertest ephemeral
+      // servers can occasionally have stale connection state that causes
+      // body-parser to fire a 400 before authMiddleware runs. Setting
+      // Connection: close prevents HTTP keep-alive reuse across requests.
       const endpoints = ['/whatsapp/status', '/whatsapp/qr', '/messaging/bridge'];
       for (const endpoint of endpoints) {
-        const res = await request(app).get(endpoint);
-        expect(res.status).toBe(401);
+        const res = await request(app)
+          .get(endpoint)
+          .set('Connection', 'close');
+        expect(
+          res.status,
+          `${endpoint} should return 401 without auth (got ${res.status}: ${JSON.stringify(res.body)})`,
+        ).toBe(401);
+        expect(res.body.error).toMatch(/Authorization/i);
       }
     });
   });
