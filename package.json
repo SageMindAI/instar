@@ -45,7 +45,9 @@
     "agent-identity",
     "llm",
     "mcp",
-    "cli"
+    "cli",
+    "molt",
+    "lobster"
   ],
   "repository": {
     "type": "git",
