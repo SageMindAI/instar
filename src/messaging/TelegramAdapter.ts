@@ -899,6 +899,7 @@ export class TelegramAdapter implements MessagingAdapter {
         console.log(`[telegram] Lifeline topic verified (retry succeeded): ${this.config.lifelineTopicId}`);
         return this.config.lifelineTopicId;
       } catch (e) {
+        // @silent-fallback-ok — error assigned to retryErr, reported to DegradationReporter below
         retryErr = e;
       }
       DegradationReporter.getInstance().report({
