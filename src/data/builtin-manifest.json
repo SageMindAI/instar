@@ -1,8 +1,8 @@
 {
   "$schema": "./builtin-manifest.schema.json",
   "schemaVersion": 1,
-  "generatedAt": "2026-03-12T20:18:36.475Z",
-  "instarVersion": "0.18.1",
+  "generatedAt": "2026-03-12T20:23:08.626Z",
+  "instarVersion": "0.18.2",
   "entryCount": 168,
   "entries": {
     "hook:session-start": {

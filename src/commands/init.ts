@@ -246,6 +246,11 @@ async function initFreshProject(projectName: string, options: InitOptions): Prom
       enabled: true,
       type: 'quick',
     },
+    threadline: {
+      relayEnabled: true,
+      visibility: 'public',
+      capabilities: ['chat'],
+    },
   };
 
   const configFilePath = path.join(stateDir, 'config.json');
@@ -525,6 +530,11 @@ async function initExistingProject(options: InitOptions): Promise<void> {
     tunnel: {
       enabled: true,
       type: 'quick',
+    },
+    threadline: {
+      relayEnabled: true,
+      visibility: 'public',
+      capabilities: ['chat'],
     },
   };
 
