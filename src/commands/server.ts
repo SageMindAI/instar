@@ -47,6 +47,7 @@ import { QuotaManager } from '../monitoring/QuotaManager.js';
 import { classifySessionDeath } from '../monitoring/QuotaExhaustionDetector.js';
 import { SessionWatchdog } from '../monitoring/SessionWatchdog.js';
 import { StallTriageNurse } from '../monitoring/StallTriageNurse.js';
+import { TriageOrchestrator } from '../monitoring/TriageOrchestrator.js';
 import { SessionMonitor } from '../monitoring/SessionMonitor.js';
 import { MultiMachineCoordinator } from '../core/MultiMachineCoordinator.js';
 import { MachineIdentityManager } from '../core/MachineIdentity.js';
@@ -2267,6 +2268,95 @@ export async function startServer(options: StartOptions): Promise<void> {
       console.log(pc.green('  Stall Triage Nurse enabled'));
     }
 
+    // TriageOrchestrator — next-gen session recovery with scoped Claude Code sessions
+    let triageOrchestrator: TriageOrchestrator | undefined;
+    if (config.monitoring.triageOrchestrator?.enabled && telegram) {
+      triageOrchestrator = new TriageOrchestrator(
+        {
+          captureSessionOutput: (name, lines) => sessionManager.captureOutput(name, lines),
+          isSessionAlive: (name) => sessionManager.isSessionAlive(name),
+          sendKey: (name, key) => sessionManager.sendKey(name, key),
+          sendInput: (name, text) => sessionManager.sendInput(name, text),
+          getTopicHistory: (topicId, limit) => {
+            const entries = telegram!.getTopicHistory(topicId, limit);
+            return entries.map(e => ({
+              text: e.text,
+              fromUser: e.fromUser,
+              timestamp: e.timestamp,
+            }));
+          },
+          sendToTopic: (topicId, text) => telegram!.sendToTopic(topicId, text),
+          respawnSession: (name, topicId) => respawnSessionForTopic(sessionManager, telegram!, name, topicId, undefined, topicMemory),
+          clearStallForTopic: (topicId) => telegram!.clearStallTracking(topicId),
+          spawnTriageSession: (name, options) => sessionManager.spawnTriageSession(name, options),
+          getTriageSessionUuid: (sessionName) => {
+            return _topicResumeMap?.findUuidForSession(sessionName) ?? undefined;
+          },
+          killTriageSession: (name) => {
+            try {
+              const tmux = detectTmuxPath() || 'tmux';
+              execFileSync(tmux, ['kill-session', '-t', `=${name}`], { encoding: 'utf-8' });
+            } catch { /* best-effort — session may already be dead */ }
+          },
+          scheduleFollowUpJob: (slug, delayMs, callback) => {
+            const jobId = `${slug}-${Date.now()}`;
+            const timer = setTimeout(callback, delayMs);
+            (triageOrchestrator as any).__timers = (triageOrchestrator as any).__timers || new Map();
+            (triageOrchestrator as any).__timers.set(jobId, timer);
+            return jobId;
+          },
+          cancelJob: (jobId) => {
+            const timers = (triageOrchestrator as any).__timers as Map<string, NodeJS.Timeout> | undefined;
+            if (timers?.has(jobId)) {
+              clearTimeout(timers.get(jobId)!);
+              timers.delete(jobId);
+            }
+          },
+          injectMessage: (name, text) => sessionManager.sendInput(name, text),
+          captureTriageOutput: (name, lines) => sessionManager.captureOutput(name, lines),
+          isTriageSessionAlive: (name) => sessionManager.tmuxSessionExists(name),
+          projectDir: config.projectDir,
+        },
+        {
+          config: {
+            cooldownMs: config.monitoring.triageOrchestrator.cooldownMs,
+            maxConcurrentTriages: config.monitoring.triageOrchestrator.maxConcurrentTriages,
+            autoActionEnabled: config.monitoring.triageOrchestrator.autoActionEnabled,
+            maxAutoActionsPerHour: config.monitoring.triageOrchestrator.maxAutoActionsPerHour,
+            defaultModel: config.monitoring.triageOrchestrator.defaultModel,
+          },
+          state,
+        },
+      );
+
+      // TriageOrchestrator takes over stall detection from StallTriageNurse
+      telegram.onStallDetected = async (topicId, sessionName, messageText, injectedAt) => {
+        const result = await triageOrchestrator!.activate(topicId, sessionName, 'stall_detector', messageText, injectedAt);
+        return { resolved: result.resolved };
+      };
+
+      // Cancel triage when stall tracking clears (session responded)
+      const origClearStall = telegram.clearStallTracking.bind(telegram);
+      telegram.clearStallTracking = (topicId: number) => {
+        origClearStall(topicId);
+        triageOrchestrator!.onTargetSessionResponded(topicId);
+      };
+
+      // Wire /triage command
+      telegram.onGetTriageStatus = (topicId) => {
+        const ts = triageOrchestrator!.getTriageState(topicId);
+        if (!ts) return null;
+        return {
+          active: true,
+          classification: ts.classification,
+          checkCount: ts.checkCount,
+          lastCheck: new Date(ts.lastCheckAt).toISOString(),
+        };
+      };
+
+      console.log(pc.green('  Triage Orchestrator enabled (replaces Stall Triage Nurse for stall detection)'));
+    }
+
     // SessionMonitor — proactive session health monitoring
     let sessionMonitor: SessionMonitor | undefined;
     if (telegram) {
@@ -2284,12 +2374,17 @@ export async function startServer(options: StartOptions): Promise<void> {
               .map((m: any) => ({ text: m.text, fromUser: m.fromUser, timestamp: m.timestamp }));
           },
           sendToTopic: (topicId, text) => telegram!.sendToTopic(topicId, text),
-          triggerTriage: triageNurse
+          triggerTriage: triageOrchestrator
             ? async (topicId, sessionName, reason) => {
-                const result = await triageNurse!.triage(topicId, sessionName, reason, Date.now(), 'watchdog');
+                const result = await triageOrchestrator!.activate(topicId, sessionName, 'watchdog', reason, Date.now());
                 return { resolved: result.resolved };
               }
-            : undefined,
+            : triageNurse
+              ? async (topicId, sessionName, reason) => {
+                  const result = await triageNurse!.triage(topicId, sessionName, reason, Date.now(), 'watchdog');
+                  return { resolved: result.resolved };
+                }
+              : undefined,
         },
         config.monitoring.sessionMonitor,
       );

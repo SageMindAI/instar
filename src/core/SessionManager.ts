@@ -700,6 +700,86 @@ export class SessionManager extends EventEmitter {
   }
 
   /**
+   * Spawn a scoped triage session with restricted tool access.
+   * Unlike interactive sessions, triage sessions use --allowedTools + --permission-mode dontAsk
+   * instead of --dangerously-skip-permissions. This gives them read-only access.
+   *
+   * Used by TriageOrchestrator for behind-the-scenes session investigation.
+   */
+  async spawnTriageSession(name: string, options: {
+    allowedTools: string[];
+    permissionMode: string;
+    resumeSessionId?: string;
+  }): Promise<string> {
+    const sanitized = name.toLowerCase().replace(/[^a-z0-9-]/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, '').slice(0, 40);
+    const projectBase = path.basename(this.config.projectDir);
+    const tmuxSession = `${projectBase}-${sanitized}`;
+
+    if (this.config.protectedSessions.includes(tmuxSession)) {
+      throw new Error(`Cannot create triage session with protected name: ${tmuxSession}`);
+    }
+
+    // Kill existing triage session if present (triage sessions are ephemeral)
+    if (this.tmuxSessionExists(tmuxSession)) {
+      try {
+        execFileSync(this.config.tmuxPath, ['kill-session', '-t', tmuxSession], { encoding: 'utf-8' });
+      } catch {
+        // Best-effort
+      }
+    }
+
+    try {
+      const tmuxArgs = [
+        'new-session', '-d',
+        '-s', tmuxSession,
+        '-c', this.config.projectDir,
+        '-x', '200', '-y', '50',
+        '-e', 'CLAUDECODE=',
+        '-e', 'ANTHROPIC_API_KEY=',
+        '-e', 'DATABASE_URL=',
+        '-e', 'DIRECT_DATABASE_URL=',
+        '-e', 'DATABASE_URL_PROD=',
+        '-e', 'DATABASE_URL_DEV=',
+        '-e', 'DATABASE_URL_TEST=',
+      ];
+
+      tmuxArgs.push(this.config.claudePath);
+
+      // Scoped permissions: allowedTools + permissionMode (NOT --dangerously-skip-permissions)
+      if (options.allowedTools.length > 0) {
+        tmuxArgs.push('--allowedTools', options.allowedTools.join(','));
+      }
+      tmuxArgs.push('--permission-mode', options.permissionMode);
+
+      if (options.resumeSessionId) {
+        tmuxArgs.push('--resume', options.resumeSessionId);
+        console.log(`[SessionManager] Resuming triage session: ${options.resumeSessionId}`);
+      }
+
+      execFileSync(this.config.tmuxPath, tmuxArgs, { encoding: 'utf-8' });
+    } catch (err) {
+      throw new Error(`Failed to create triage tmux session: ${err}`);
+    }
+
+    // Track it but with a shorter timeout (triage sessions should be brief)
+    const session: Session = {
+      id: this.generateId(),
+      name,
+      status: 'running',
+      tmuxSession,
+      startedAt: new Date().toISOString(),
+      maxDurationMinutes: 10,
+    };
+    this.state.saveSession(session);
+
+    // Wait for Claude to be ready
+    const readyTimeout = options.resumeSessionId ? 60000 : 30000;
+    await this.waitForClaudeReady(tmuxSession, readyTimeout);
+
+    return tmuxSession;
+  }
+
+  /**
    * Inject a Telegram message into a tmux session.
    * Short messages go via send-keys; long messages are written to a temp file.
    *
@@ -960,7 +1040,7 @@ export class SessionManager extends EventEmitter {
     return false;
   }
 
-  private tmuxSessionExists(name: string): boolean {
+  tmuxSessionExists(name: string): boolean {
     try {
       execFileSync(this.config.tmuxPath, ['has-session', '-t', `=${name}`], {
         encoding: 'utf-8',

@@ -1564,6 +1564,20 @@ export interface MonitoringConfig {
     /** Use IntelligenceProvider instead of direct API (default: true) */
     useIntelligenceProvider?: boolean;
   };
+  /** TriageOrchestrator — next-gen session recovery with scoped Claude Code sessions */
+  triageOrchestrator?: {
+    enabled: boolean;
+    /** Cooldown between triages for same topic in ms (default: 180000) */
+    cooldownMs?: number;
+    /** Max concurrent triage sessions (default: 3) */
+    maxConcurrentTriages?: number;
+    /** Enable auto-actions like auto_restart, auto_interrupt (default: true) */
+    autoActionEnabled?: boolean;
+    /** Max auto-actions per hour (default: 5) */
+    maxAutoActionsPerHour?: number;
+    /** Default model tier for triage sessions (default: 'sonnet') */
+    defaultModel?: 'sonnet' | 'opus';
+  };
   /** Proactive session health monitoring */
   sessionMonitor?: {
     /** Enable the session monitor (default: true) */
