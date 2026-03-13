@@ -8,23 +8,28 @@
 
 ## What Changed
 
-### SQLite Auto-Recovery Fix — More Reliable Native Binary Handling
-
-Two related bugs in the `better-sqlite3` native binary auto-recovery path have been fixed:
-
-1. **Missing scripts in npm package**: `scripts/fix-better-sqlite3.cjs` was referenced in the `postinstall` hook but not included in the published npm package. Fresh global installs would fail the postinstall silently. The `scripts/` directory is now correctly included in the npm package.
-
-2. **Fragile `npm rebuild` fallback**: When `better-sqlite3` failed to load after a Node.js version change, the auto-recovery used `npm rebuild better-sqlite3` which fails in pnpm or asdf-managed Node.js environments (the `npm root -g` path doesn't match where the package actually lives). Auto-recovery now uses the bundled `fix-better-sqlite3.cjs` script which downloads the correct prebuild directly from GitHub — the same reliable approach used at install time. `npm rebuild` is kept as a fallback if the script is not found.
-
-**Impact**: Agents that upgrade Node.js after installing Instar will now recover automatically without manual intervention. Affects TopicMemory and SemanticMemory initialization on Node.js version changes.
+<!-- Describe what changed technically. What new features, APIs, behavioral changes? -->
+<!-- Write this for the AGENT — they need to understand the system deeply. -->
 
 ## What to Tell Your User
 
-No action needed — this is an invisible reliability improvement. If your agent previously showed TopicMemory degradation warnings after a Node.js update, updating to 0.18.7 will prevent these going forward.
+<!-- Write talking points the agent should relay to their user. -->
+<!-- This should be warm, conversational, user-facing — not a changelog. -->
+<!-- Focus on what THEY can now do, not internal plumbing. -->
+<!--                                                                    -->
+<!-- PROHIBITED in this section (will fail validation):                 -->
+<!--   camelCase config keys: silentReject, maxRetries, telegramNotify -->
+<!--   Inline code backtick references like silentReject: false        -->
+<!--   Fenced code blocks                                              -->
+<!--   Instructions to edit files or run commands                      -->
+<!--                                                                    -->
+<!-- CORRECT style: "I can turn that on for you" not "set X to false"  -->
+<!-- The agent relays this to their user — keep it human.              -->
+
+- **[Feature name]**: "[Brief, friendly description of what this means for the user]"
 
 ## Summary of New Capabilities
 
 | Capability | How to Use |
 |-----------|-----------|
-| SQLite native binary auto-recovery | Automatic — runs on server start if binding mismatch detected |
-| Works with pnpm and asdf installs | Automatic — no configuration needed |
+| [Capability] | [Endpoint, command, or "automatic"] |
