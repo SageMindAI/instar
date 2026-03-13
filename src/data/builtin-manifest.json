@@ -1,7 +1,7 @@
 {
   "$schema": "./builtin-manifest.schema.json",
   "schemaVersion": 1,
-  "generatedAt": "2026-03-13T20:27:19.560Z",
+  "generatedAt": "2026-03-13T20:39:08.802Z",
   "instarVersion": "0.20.0",
   "entryCount": 168,
   "entries": {
@@ -295,7 +295,7 @@
       "type": "skill",
       "domain": "skills",
       "sourcePath": ".claude/skills/setup-wizard/skill.md",
-      "contentHash": "fea30df55d38396dab8fb2edf69f9442956fdab8f3d88cfb36893d27b720644d",
+      "contentHash": "4e8edc7f19d4593aa553d22234c812a836e4f81b5f2a9c8f4316139c83e0c139",
       "since": "2025-01-01"
     },
     "route-group:health": {
@@ -303,7 +303,7 @@
       "type": "route-group",
       "domain": "monitoring",
       "sourcePath": "src/server/routes.ts",
-      "contentHash": "2b1bcf04dd5a0ceaebefe3d4dc0af1bece29456e78e5a7e45f7c48998b61428d",
+      "contentHash": "c71a1e2c61362f77eaec4650c70f9b32596b367764c58cc5b17aecb763c59484",
       "since": "2025-01-01"
     },
     "route-group:agents": {
@@ -311,7 +311,7 @@
       "type": "route-group",
       "domain": "sessions",
       "sourcePath": "src/server/routes.ts",
-      "contentHash": "2b1bcf04dd5a0ceaebefe3d4dc0af1bece29456e78e5a7e45f7c48998b61428d",
+      "contentHash": "c71a1e2c61362f77eaec4650c70f9b32596b367764c58cc5b17aecb763c59484",
       "since": "2025-01-01"
     },
     "route-group:backups": {
@@ -319,7 +319,7 @@
       "type": "route-group",
       "domain": "operations",
       "sourcePath": "src/server/routes.ts",
-      "contentHash": "2b1bcf04dd5a0ceaebefe3d4dc0af1bece29456e78e5a7e45f7c48998b61428d",
+      "contentHash": "c71a1e2c61362f77eaec4650c70f9b32596b367764c58cc5b17aecb763c59484",
       "since": "2025-01-01"
     },
     "route-group:git": {
@@ -327,7 +327,7 @@
       "type": "route-group",
       "domain": "coordination",
       "sourcePath": "src/server/routes.ts",
-      "contentHash": "2b1bcf04dd5a0ceaebefe3d4dc0af1bece29456e78e5a7e45f7c48998b61428d",
+      "contentHash": "c71a1e2c61362f77eaec4650c70f9b32596b367764c58cc5b17aecb763c59484",
       "since": "2025-01-01"
     },
     "route-group:memory": {
@@ -335,7 +335,7 @@
       "type": "route-group",
       "domain": "memory",
       "sourcePath": "src/server/routes.ts",
-      "contentHash": "2b1bcf04dd5a0ceaebefe3d4dc0af1bece29456e78e5a7e45f7c48998b61428d",
+      "contentHash": "c71a1e2c61362f77eaec4650c70f9b32596b367764c58cc5b17aecb763c59484",
       "since": "2025-01-01"
     },
     "route-group:semantic": {
@@ -343,7 +343,7 @@
       "type": "route-group",
       "domain": "memory",
       "sourcePath": "src/server/routes.ts",
-      "contentHash": "2b1bcf04dd5a0ceaebefe3d4dc0af1bece29456e78e5a7e45f7c48998b61428d",
+      "contentHash": "c71a1e2c61362f77eaec4650c70f9b32596b367764c58cc5b17aecb763c59484",
       "since": "2025-01-01"
     },
     "route-group:status": {
@@ -351,7 +351,7 @@
       "type": "route-group",
       "domain": "monitoring",
       "sourcePath": "src/server/routes.ts",
-      "contentHash": "2b1bcf04dd5a0ceaebefe3d4dc0af1bece29456e78e5a7e45f7c48998b61428d",
+      "contentHash": "c71a1e2c61362f77eaec4650c70f9b32596b367764c58cc5b17aecb763c59484",
       "since": "2025-01-01"
     },
     "route-group:capabilities": {
@@ -359,7 +359,7 @@
       "type": "route-group",
       "domain": "mapping",
       "sourcePath": "src/server/routes.ts",
-      "contentHash": "2b1bcf04dd5a0ceaebefe3d4dc0af1bece29456e78e5a7e45f7c48998b61428d",
+      "contentHash": "c71a1e2c61362f77eaec4650c70f9b32596b367764c58cc5b17aecb763c59484",
       "since": "2025-01-01"
     },
     "route-group:project-map": {
@@ -367,7 +367,7 @@
       "type": "route-group",
       "domain": "mapping",
       "sourcePath": "src/server/routes.ts",
-      "contentHash": "2b1bcf04dd5a0ceaebefe3d4dc0af1bece29456e78e5a7e45f7c48998b61428d",
+      "contentHash": "c71a1e2c61362f77eaec4650c70f9b32596b367764c58cc5b17aecb763c59484",
       "since": "2025-01-01"
     },
     "route-group:coherence": {
@@ -375,7 +375,7 @@
       "type": "route-group",
       "domain": "coherence",
       "sourcePath": "src/server/routes.ts",
-      "contentHash": "2b1bcf04dd5a0ceaebefe3d4dc0af1bece29456e78e5a7e45f7c48998b61428d",
+      "contentHash": "c71a1e2c61362f77eaec4650c70f9b32596b367764c58cc5b17aecb763c59484",
       "since": "2025-01-01"
     },
     "route-group:topic-bindings": {
@@ -383,7 +383,7 @@
       "type": "route-group",
       "domain": "sessions",
       "sourcePath": "src/server/routes.ts",
-      "contentHash": "2b1bcf04dd5a0ceaebefe3d4dc0af1bece29456e78e5a7e45f7c48998b61428d",
+      "contentHash": "c71a1e2c61362f77eaec4650c70f9b32596b367764c58cc5b17aecb763c59484",
       "since": "2025-01-01"
     },
     "route-group:context": {
@@ -391,7 +391,7 @@
       "type": "route-group",
       "domain": "context",
       "sourcePath": "src/server/routes.ts",
-      "contentHash": "2b1bcf04dd5a0ceaebefe3d4dc0af1bece29456e78e5a7e45f7c48998b61428d",
+      "contentHash": "c71a1e2c61362f77eaec4650c70f9b32596b367764c58cc5b17aecb763c59484",
       "since": "2025-01-01"
     },
     "route-group:scope-coherence": {
@@ -399,7 +399,7 @@
       "type": "route-group",
       "domain": "coherence",
       "sourcePath": "src/server/routes.ts",
-      "contentHash": "2b1bcf04dd5a0ceaebefe3d4dc0af1bece29456e78e5a7e45f7c48998b61428d",
+      "contentHash": "c71a1e2c61362f77eaec4650c70f9b32596b367764c58cc5b17aecb763c59484",
       "since": "2025-01-01"
     },
     "route-group:canonical-state": {
@@ -407,7 +407,7 @@
       "type": "route-group",
       "domain": "state",
       "sourcePath": "src/server/routes.ts",
-      "contentHash": "2b1bcf04dd5a0ceaebefe3d4dc0af1bece29456e78e5a7e45f7c48998b61428d",
+      "contentHash": "c71a1e2c61362f77eaec4650c70f9b32596b367764c58cc5b17aecb763c59484",
       "since": "2025-01-01"
     },
     "route-group:ci": {
@@ -415,7 +415,7 @@
       "type": "route-group",
       "domain": "monitoring",
       "sourcePath": "src/server/routes.ts",
-      "contentHash": "2b1bcf04dd5a0ceaebefe3d4dc0af1bece29456e78e5a7e45f7c48998b61428d",
+      "contentHash": "c71a1e2c61362f77eaec4650c70f9b32596b367764c58cc5b17aecb763c59484",
       "since": "2025-01-01"
     },
     "route-group:sessions": {
@@ -423,7 +423,7 @@
       "type": "route-group",
       "domain": "sessions",
       "sourcePath": "src/server/routes.ts",
-      "contentHash": "2b1bcf04dd5a0ceaebefe3d4dc0af1bece29456e78e5a7e45f7c48998b61428d",
+      "contentHash": "c71a1e2c61362f77eaec4650c70f9b32596b367764c58cc5b17aecb763c59484",
       "since": "2025-01-01"
     },
     "route-group:jobs": {
@@ -431,7 +431,7 @@
       "type": "route-group",
       "domain": "scheduling",
       "sourcePath": "src/server/routes.ts",
-      "contentHash": "2b1bcf04dd5a0ceaebefe3d4dc0af1bece29456e78e5a7e45f7c48998b61428d",
+      "contentHash": "c71a1e2c61362f77eaec4650c70f9b32596b367764c58cc5b17aecb763c59484",
       "since": "2025-01-01"
     },
     "route-group:skip-ledger": {
@@ -439,7 +439,7 @@
       "type": "route-group",
       "domain": "scheduling",
       "sourcePath": "src/server/routes.ts",
-      "contentHash": "2b1bcf04dd5a0ceaebefe3d4dc0af1bece29456e78e5a7e45f7c48998b61428d",
+      "contentHash": "c71a1e2c61362f77eaec4650c70f9b32596b367764c58cc5b17aecb763c59484",
       "since": "2025-01-01"
     },
     "route-group:telegram": {
@@ -447,7 +447,7 @@
       "type": "route-group",
       "domain": "communication",
       "sourcePath": "src/server/routes.ts",
-      "contentHash": "2b1bcf04dd5a0ceaebefe3d4dc0af1bece29456e78e5a7e45f7c48998b61428d",
+      "contentHash": "c71a1e2c61362f77eaec4650c70f9b32596b367764c58cc5b17aecb763c59484",
       "since": "2025-01-01"
     },
     "route-group:attention": {
@@ -455,7 +455,7 @@
       "type": "route-group",
       "domain": "communication",
       "sourcePath": "src/server/routes.ts",
-      "contentHash": "2b1bcf04dd5a0ceaebefe3d4dc0af1bece29456e78e5a7e45f7c48998b61428d",
+      "contentHash": "c71a1e2c61362f77eaec4650c70f9b32596b367764c58cc5b17aecb763c59484",
       "since": "2025-01-01"
     },
     "route-group:relationships": {
@@ -463,7 +463,7 @@
       "type": "route-group",
       "domain": "relationships",
       "sourcePath": "src/server/routes.ts",
-      "contentHash": "2b1bcf04dd5a0ceaebefe3d4dc0af1bece29456e78e5a7e45f7c48998b61428d",
+      "contentHash": "c71a1e2c61362f77eaec4650c70f9b32596b367764c58cc5b17aecb763c59484",
       "since": "2025-01-01"
     },
     "route-group:feedback": {
@@ -471,7 +471,7 @@
       "type": "route-group",
       "domain": "feedback",
       "sourcePath": "src/server/routes.ts",
-      "contentHash": "2b1bcf04dd5a0ceaebefe3d4dc0af1bece29456e78e5a7e45f7c48998b61428d",
+      "contentHash": "c71a1e2c61362f77eaec4650c70f9b32596b367764c58cc5b17aecb763c59484",
       "since": "2025-01-01"
     },
     "route-group:updates": {
@@ -479,7 +479,7 @@
       "type": "route-group",
       "domain": "updates",
       "sourcePath": "src/server/routes.ts",
-      "contentHash": "2b1bcf04dd5a0ceaebefe3d4dc0af1bece29456e78e5a7e45f7c48998b61428d",
+      "contentHash": "c71a1e2c61362f77eaec4650c70f9b32596b367764c58cc5b17aecb763c59484",
       "since": "2025-01-01"
     },
     "route-group:dispatches": {
@@ -487,7 +487,7 @@
       "type": "route-group",
       "domain": "dispatches",
       "sourcePath": "src/server/routes.ts",
-      "contentHash": "2b1bcf04dd5a0ceaebefe3d4dc0af1bece29456e78e5a7e45f7c48998b61428d",
+      "contentHash": "c71a1e2c61362f77eaec4650c70f9b32596b367764c58cc5b17aecb763c59484",
       "since": "2025-01-01"
     },
     "route-group:quota": {
@@ -495,7 +495,7 @@
       "type": "route-group",
       "domain": "monitoring",
       "sourcePath": "src/server/routes.ts",
-      "contentHash": "2b1bcf04dd5a0ceaebefe3d4dc0af1bece29456e78e5a7e45f7c48998b61428d",
+      "contentHash": "c71a1e2c61362f77eaec4650c70f9b32596b367764c58cc5b17aecb763c59484",
       "since": "2025-01-01"
     },
     "route-group:publishing": {
@@ -503,7 +503,7 @@
       "type": "route-group",
       "domain": "publishing",
       "sourcePath": "src/server/routes.ts",
-      "contentHash": "2b1bcf04dd5a0ceaebefe3d4dc0af1bece29456e78e5a7e45f7c48998b61428d",
+      "contentHash": "c71a1e2c61362f77eaec4650c70f9b32596b367764c58cc5b17aecb763c59484",
       "since": "2025-01-01"
     },
     "route-group:private-views": {
@@ -511,7 +511,7 @@
       "type": "route-group",
       "domain": "publishing",
       "sourcePath": "src/server/routes.ts",
-      "contentHash": "2b1bcf04dd5a0ceaebefe3d4dc0af1bece29456e78e5a7e45f7c48998b61428d",
+      "contentHash": "c71a1e2c61362f77eaec4650c70f9b32596b367764c58cc5b17aecb763c59484",
       "since": "2025-01-01"
     },
     "route-group:tunnel": {
@@ -519,7 +519,7 @@
       "type": "route-group",
       "domain": "networking",
       "sourcePath": "src/server/routes.ts",
-      "contentHash": "2b1bcf04dd5a0ceaebefe3d4dc0af1bece29456e78e5a7e45f7c48998b61428d",
+      "contentHash": "c71a1e2c61362f77eaec4650c70f9b32596b367764c58cc5b17aecb763c59484",
       "since": "2025-01-01"
     },
     "route-group:events": {
@@ -527,7 +527,7 @@
       "type": "route-group",
       "domain": "networking",
       "sourcePath": "src/server/routes.ts",
-      "contentHash": "2b1bcf04dd5a0ceaebefe3d4dc0af1bece29456e78e5a7e45f7c48998b61428d",
+      "contentHash": "c71a1e2c61362f77eaec4650c70f9b32596b367764c58cc5b17aecb763c59484",
       "since": "2025-01-01"
     },
     "route-group:evolution": {
@@ -535,7 +535,7 @@
       "type": "route-group",
       "domain": "evolution",
       "sourcePath": "src/server/routes.ts",
-      "contentHash": "2b1bcf04dd5a0ceaebefe3d4dc0af1bece29456e78e5a7e45f7c48998b61428d",
+      "contentHash": "c71a1e2c61362f77eaec4650c70f9b32596b367764c58cc5b17aecb763c59484",
       "since": "2025-01-01"
     },
     "route-group:watchdog": {
@@ -543,7 +543,7 @@
       "type": "route-group",
       "domain": "monitoring",
       "sourcePath": "src/server/routes.ts",
-      "contentHash": "2b1bcf04dd5a0ceaebefe3d4dc0af1bece29456e78e5a7e45f7c48998b61428d",
+      "contentHash": "c71a1e2c61362f77eaec4650c70f9b32596b367764c58cc5b17aecb763c59484",
       "since": "2025-01-01"
     },
     "route-group:topic-memory": {
@@ -551,7 +551,7 @@
       "type": "route-group",
       "domain": "memory",
       "sourcePath": "src/server/routes.ts",
-      "contentHash": "2b1bcf04dd5a0ceaebefe3d4dc0af1bece29456e78e5a7e45f7c48998b61428d",
+      "contentHash": "c71a1e2c61362f77eaec4650c70f9b32596b367764c58cc5b17aecb763c59484",
       "since": "2025-01-01"
     },
     "route-group:state-sync": {
@@ -559,7 +559,7 @@
       "type": "route-group",
       "domain": "coordination",
       "sourcePath": "src/server/routes.ts",
-      "contentHash": "2b1bcf04dd5a0ceaebefe3d4dc0af1bece29456e78e5a7e45f7c48998b61428d",
+      "contentHash": "c71a1e2c61362f77eaec4650c70f9b32596b367764c58cc5b17aecb763c59484",
       "since": "2025-01-01"
     },
     "route-group:intent": {
@@ -567,7 +567,7 @@
       "type": "route-group",
       "domain": "intent",
       "sourcePath": "src/server/routes.ts",
-      "contentHash": "2b1bcf04dd5a0ceaebefe3d4dc0af1bece29456e78e5a7e45f7c48998b61428d",
+      "contentHash": "c71a1e2c61362f77eaec4650c70f9b32596b367764c58cc5b17aecb763c59484",
       "since": "2025-01-01"
     },
     "route-group:triage": {
@@ -575,7 +575,7 @@
       "type": "route-group",
       "domain": "safety",
       "sourcePath": "src/server/routes.ts",
-      "contentHash": "2b1bcf04dd5a0ceaebefe3d4dc0af1bece29456e78e5a7e45f7c48998b61428d",
+      "contentHash": "c71a1e2c61362f77eaec4650c70f9b32596b367764c58cc5b17aecb763c59484",
       "since": "2025-01-01"
     },
     "route-group:operations": {
@@ -583,7 +583,7 @@
       "type": "route-group",
       "domain": "safety",
       "sourcePath": "src/server/routes.ts",
-      "contentHash": "2b1bcf04dd5a0ceaebefe3d4dc0af1bece29456e78e5a7e45f7c48998b61428d",
+      "contentHash": "c71a1e2c61362f77eaec4650c70f9b32596b367764c58cc5b17aecb763c59484",
       "since": "2025-01-01"
     },
     "route-group:sentinel": {
@@ -591,7 +591,7 @@
       "type": "route-group",
       "domain": "safety",
       "sourcePath": "src/server/routes.ts",
-      "contentHash": "2b1bcf04dd5a0ceaebefe3d4dc0af1bece29456e78e5a7e45f7c48998b61428d",
+      "contentHash": "c71a1e2c61362f77eaec4650c70f9b32596b367764c58cc5b17aecb763c59484",
       "since": "2025-01-01"
     },
     "route-group:trust": {
@@ -599,7 +599,7 @@
       "type": "route-group",
       "domain": "safety",
       "sourcePath": "src/server/routes.ts",
-      "contentHash": "2b1bcf04dd5a0ceaebefe3d4dc0af1bece29456e78e5a7e45f7c48998b61428d",
+      "contentHash": "c71a1e2c61362f77eaec4650c70f9b32596b367764c58cc5b17aecb763c59484",
       "since": "2025-01-01"
     },
     "route-group:monitoring": {
@@ -607,7 +607,7 @@
       "type": "route-group",
       "domain": "monitoring",
       "sourcePath": "src/server/routes.ts",
-      "contentHash": "2b1bcf04dd5a0ceaebefe3d4dc0af1bece29456e78e5a7e45f7c48998b61428d",
+      "contentHash": "c71a1e2c61362f77eaec4650c70f9b32596b367764c58cc5b17aecb763c59484",
       "since": "2025-01-01"
     },
     "route-group:commitments": {
@@ -615,7 +615,7 @@
       "type": "route-group",
       "domain": "commitments",
       "sourcePath": "src/server/routes.ts",
-      "contentHash": "2b1bcf04dd5a0ceaebefe3d4dc0af1bece29456e78e5a7e45f7c48998b61428d",
+      "contentHash": "c71a1e2c61362f77eaec4650c70f9b32596b367764c58cc5b17aecb763c59484",
       "since": "2025-01-01"
     },
     "route-group:episodes": {
@@ -623,7 +623,7 @@
       "type": "route-group",
       "domain": "memory",
       "sourcePath": "src/server/routes.ts",
-      "contentHash": "2b1bcf04dd5a0ceaebefe3d4dc0af1bece29456e78e5a7e45f7c48998b61428d",
+      "contentHash": "c71a1e2c61362f77eaec4650c70f9b32596b367764c58cc5b17aecb763c59484",
       "since": "2025-01-01"
     },
     "route-group:messages": {
@@ -631,7 +631,7 @@
       "type": "route-group",
       "domain": "coordination",
       "sourcePath": "src/server/routes.ts",
-      "contentHash": "2b1bcf04dd5a0ceaebefe3d4dc0af1bece29456e78e5a7e45f7c48998b61428d",
+      "contentHash": "c71a1e2c61362f77eaec4650c70f9b32596b367764c58cc5b17aecb763c59484",
       "since": "2025-01-01"
     },
     "route-group:system-reviews": {
@@ -639,7 +639,7 @@
       "type": "route-group",
       "domain": "monitoring",
       "sourcePath": "src/server/routes.ts",
-      "contentHash": "2b1bcf04dd5a0ceaebefe3d4dc0af1bece29456e78e5a7e45f7c48998b61428d",
+      "contentHash": "c71a1e2c61362f77eaec4650c70f9b32596b367764c58cc5b17aecb763c59484",
       "since": "2025-01-01"
     },
     "route-group:machine-mesh": {
