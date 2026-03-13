@@ -2,7 +2,7 @@
 
 > Integrated file browsing and editing as a first-class dashboard tab, accessible from any device.
 
-**Status**: Draft v3 (post-crossreview)
+**Status**: Implemented (all 3 phases complete)
 **Author**: Dawn (with Justin's direction)
 **Date**: 2026-03-12
 **Related specs**: DASHBOARD_ACCESS_SPEC.md

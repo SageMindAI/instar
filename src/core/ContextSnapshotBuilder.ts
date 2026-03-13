@@ -244,6 +244,7 @@ export class ContextSnapshotBuilder {
       if (config.dispatches?.enabled) features.push('dispatches');
       if (config.relationships?.enabled) features.push('relationships');
       if (config.gitBackup?.enabled) features.push('git-backup');
+      if (config.dashboard?.fileViewer?.enabled !== false) features.push('file-viewer');
     }
 
     return { platforms, features, disabledFeatures };

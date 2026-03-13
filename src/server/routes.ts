@@ -62,6 +62,8 @@ import type { SessionSummarySentinel } from '../messaging/SessionSummarySentinel
 import type { SpawnRequestManager } from '../messaging/SpawnRequestManager.js';
 import { getOutboundQueueStatus, cleanupDeliveredOutbound, buildAgentList } from '../messaging/GitSyncTransport.js';
 import type { CapabilityMapper } from '../core/CapabilityMapper.js';
+import type { SelfKnowledgeTree } from '../knowledge/SelfKnowledgeTree.js';
+import type { CoverageAuditor } from '../knowledge/CoverageAuditor.js';
 import type { TopicResumeMap } from '../core/TopicResumeMap.js';
 import type { MessageType, MessagePriority, MessageFilter } from '../messaging/types.js';
 import { verifyAgentToken } from '../messaging/AgentTokenManager.js';
@@ -119,6 +121,8 @@ export interface RouteContext {
   quotaManager: QuotaManager | null;
   systemReviewer: SystemReviewer | null;
   capabilityMapper: CapabilityMapper | null;
+  selfKnowledgeTree: SelfKnowledgeTree | null;
+  coverageAuditor: CoverageAuditor | null;
   topicResumeMap: TopicResumeMap | null;
   autonomyManager: AutonomyProfileManager | null;
   trustElevationTracker: TrustElevationTracker | null;
@@ -1544,6 +1548,113 @@ export function createRoutes(ctx: RouteContext): Router {
         message: err instanceof Error ? err.message : String(err),
       });
     }
+  });
+
+  // ── Self-Knowledge Tree ────────────────────────────────────────────
+  //
+  // Tree-based agent self-knowledge with LLM triage, tiered caching,
+  // and cross-layer synthesis. Agents use this to answer "who am I?"
+
+  router.get('/self-knowledge/search', async (req, res) => {
+    if (!ctx.selfKnowledgeTree) {
+      res.status(501).json({ error: 'SelfKnowledgeTree not initialized' });
+      return;
+    }
+
+    const query = req.query.q as string;
+    if (!query) {
+      res.status(400).json({ error: 'Missing required query parameter: q' });
+      return;
+    }
+
+    try {
+      const dryRun = req.query.dry_run === 'true';
+      if (dryRun) {
+        const plan = await ctx.selfKnowledgeTree.dryRun(query);
+        res.json(plan);
+      } else {
+        const result = await ctx.selfKnowledgeTree.search(query);
+        res.json(result);
+      }
+    } catch (err) {
+      res.status(500).json({
+        error: 'SEARCH_FAILED',
+        message: err instanceof Error ? err.message : String(err),
+      });
+    }
+  });
+
+  router.get('/self-knowledge/validate', (_req, res) => {
+    if (!ctx.selfKnowledgeTree) {
+      res.status(501).json({ error: 'SelfKnowledgeTree not initialized' });
+      return;
+    }
+
+    try {
+      const validation = ctx.selfKnowledgeTree.validate();
+      const cacheStats = ctx.selfKnowledgeTree.cacheStats();
+      res.json({ ...validation, cacheStats });
+    } catch (err) {
+      res.status(500).json({
+        error: 'VALIDATION_FAILED',
+        message: err instanceof Error ? err.message : String(err),
+      });
+    }
+  });
+
+  router.get('/self-knowledge/health', (_req, res) => {
+    if (!ctx.selfKnowledgeTree || !ctx.coverageAuditor) {
+      res.status(501).json({ error: 'SelfKnowledgeTree not initialized' });
+      return;
+    }
+
+    try {
+      const config = ctx.selfKnowledgeTree.getConfig();
+      if (!config) {
+        res.json({ status: 'no_tree', message: 'Tree not generated yet' });
+        return;
+      }
+
+      const validation = ctx.selfKnowledgeTree.validate();
+      const health = ctx.coverageAuditor.healthSummary();
+      const totalNodes = config.layers.reduce((s: number, l: { children: unknown[] }) => s + l.children.length, 0);
+      const detectedPlatforms = ctx.coverageAuditor.detectPlatforms();
+      const audit = ctx.coverageAuditor.audit(config, validation, detectedPlatforms);
+
+      res.json({
+        status: 'ok',
+        totalNodes,
+        coverageScore: validation.coverageScore,
+        cacheHitRate: health.cacheHitRate,
+        avgLatencyMs: health.avgLatencyMs,
+        errorRate: health.errorRate,
+        searchCount: health.searchCount,
+        degradedSearches: health.degradedSearches,
+        gaps: audit.gaps,
+        warnings: validation.warnings.length,
+        errors: validation.errors.length,
+      });
+    } catch (err) {
+      res.status(500).json({
+        error: 'HEALTH_CHECK_FAILED',
+        message: err instanceof Error ? err.message : String(err),
+      });
+    }
+  });
+
+  router.get('/self-knowledge/tree', (_req, res) => {
+    if (!ctx.selfKnowledgeTree) {
+      res.status(501).json({ error: 'SelfKnowledgeTree not initialized' });
+      return;
+    }
+
+    const config = ctx.selfKnowledgeTree.getConfig();
+    if (!config) {
+      res.status(404).json({ error: 'Tree not generated yet' });
+      return;
+    }
+
+    res.json(config);
   });
 
   // ── Project Map ───────────────────────────────────────────────────

@@ -617,6 +617,45 @@ The user has been talking to you (possibly for days). A generic greeting like "H
       result.skipped.push('CLAUDE.md: Session Continuity section already present');
     }
 
+    // File Viewer — browse and edit files from the dashboard
+    if (!content.includes('File Viewer') && !content.includes('/api/files/')) {
+      const section = `
+**File Viewer (Dashboard Tab)** — Browse and edit project files from any device via the Files tab.
+- **Browse files**: Files tab in the dashboard shows configured directories with rendered markdown and syntax-highlighted code
+- **Edit files**: Files in editable paths can be edited inline from your phone. Save with Cmd/Ctrl+S.
+- **Link to files**: Generate deep links: \`{dashboardUrl}?tab=files&path=.claude/CLAUDE.md\`
+- **When to link vs inline**: Prefer dashboard links for long files (>50 lines) and when editing is needed. Show short files inline AND provide a link.
+- **Config API**: View: \`curl -H "Authorization: Bearer $AUTH" http://localhost:${port}/api/files/config\`
+- **Update paths conversationally**: \`curl -X PATCH -H "Authorization: Bearer $AUTH" -H "X-Instar-Request: 1" -H "Content-Type: application/json" http://localhost:${port}/api/files/config -d '{"allowedPaths":[".claude/","docs/","src/"]}'\`
+- **Generate a file link**: \`curl -H "Authorization: Bearer $AUTH" "http://localhost:${port}/api/files/link?path=.claude/CLAUDE.md"\`
+- **Default config**: Browsing enabled for \`.claude/\` and \`docs/\`. Editing disabled by default — prompt the user to enable it for safe paths.
+- **Never editable**: \`.claude/hooks/\`, \`.claude/scripts/\`, \`node_modules/\` are always read-only regardless of config.
+`;
+      // Insert after Dashboard section
+      const dashboardIdx = content.indexOf('**Dashboard**');
+      if (dashboardIdx >= 0) {
+        // Find the end of the Dashboard section (next empty line followed by **Bold** or ###)
+        const afterDashboard = content.indexOf('\n\n**', dashboardIdx + 15);
+        const afterDashboardH3 = content.indexOf('\n\n###', dashboardIdx + 15);
+        const insertIdx = Math.min(
+          afterDashboard >= 0 ? afterDashboard : Infinity,
+          afterDashboardH3 >= 0 ? afterDashboardH3 : Infinity,
+        );
+        if (isFinite(insertIdx)) {
+          content = content.slice(0, insertIdx) + '\n' + section + content.slice(insertIdx);
+        } else {
+          content += '\n' + section;
+        }
+      } else {
+        // No Dashboard section — append
+        content += '\n' + section;
+      }
+      patched = true;
+      result.upgraded.push('CLAUDE.md: added File Viewer section');
+    } else {
+      result.skipped.push('CLAUDE.md: File Viewer section already present');
+    }
+
     if (patched) {
       try {
         fs.writeFileSync(claudeMdPath, content);

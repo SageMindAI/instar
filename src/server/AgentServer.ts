@@ -94,6 +94,8 @@ export class AgentServer {
     spawnManager?: import('../messaging/SpawnRequestManager.js').SpawnRequestManager;
     systemReviewer?: import('../monitoring/SystemReviewer.js').SystemReviewer;
     capabilityMapper?: import('../core/CapabilityMapper.js').CapabilityMapper;
+    selfKnowledgeTree?: import('../knowledge/SelfKnowledgeTree.js').SelfKnowledgeTree;
+    coverageAuditor?: import('../knowledge/CoverageAuditor.js').CoverageAuditor;
     topicResumeMap?: import('../core/TopicResumeMap.js').TopicResumeMap;
     autonomyManager?: import('../core/AutonomyProfileManager.js').AutonomyProfileManager;
     trustElevationTracker?: import('../core/TrustElevationTracker.js').TrustElevationTracker;
@@ -112,6 +114,7 @@ export class AgentServer {
     threadlineRelayClient?: import('../threadline/client/ThreadlineClient.js').ThreadlineClient;
     responseReviewGate?: import('../core/CoherenceGate.js').CoherenceGate;
     telemetryHeartbeat?: import('../monitoring/TelemetryHeartbeat.js').TelemetryHeartbeat;
+    liveConfig?: { set(path: string, value: unknown): void };
   }) {
     this.config = options.config;
     this.startTime = new Date();
@@ -270,6 +273,8 @@ export class AgentServer {
       spawnManager: options.spawnManager ?? null,
       systemReviewer: options.systemReviewer ?? null,
       capabilityMapper: options.capabilityMapper ?? null,
+      selfKnowledgeTree: options.selfKnowledgeTree ?? null,
+      coverageAuditor: options.coverageAuditor ?? null,
       topicResumeMap: options.topicResumeMap ?? null,
       autonomyManager: options.autonomyManager ?? null,
       trustElevationTracker: options.trustElevationTracker ?? null,
@@ -290,7 +295,7 @@ export class AgentServer {
     this.app.use(routes);
 
     // File viewer routes (after auth middleware)
-    const fileRoutes = createFileRoutes({ config: options.config });
+    const fileRoutes = createFileRoutes({ config: options.config, liveConfig: options.liveConfig });
     this.app.use(fileRoutes);
 
     // Error handler (must be last)

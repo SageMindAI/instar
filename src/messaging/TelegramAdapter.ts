@@ -1114,14 +1114,23 @@ export class TelegramAdapter implements MessagingAdapter {
   }
 
   private formatDashboardMessage(url: string, pin: string, isNamed: boolean): string {
+    const dashboardUrl = url + '/dashboard';
+    const quickLinks = [
+      `Sessions: ${dashboardUrl}?tab=sessions`,
+      `Files: ${dashboardUrl}?tab=files`,
+    ];
+
     if (isNamed) {
       return [
         '*Dashboard*',
         '',
         `Your permanent dashboard link:`,
-        url + '/dashboard',
+        dashboardUrl,
         '',
         `PIN: \`${pin}\``,
+        '',
+        `Quick links:`,
+        ...quickLinks.map(l => `  ${l}`),
         '',
         `_This link is permanent — it won't change on restart._`,
       ].join('\n');
@@ -1130,9 +1139,12 @@ export class TelegramAdapter implements MessagingAdapter {
       '*Dashboard*',
       '',
       `Your dashboard is live:`,
-      url + '/dashboard',
+      dashboardUrl,
       '',
       `PIN: \`${pin}\``,
+      '',
+      `Quick links:`,
+      ...quickLinks.map(l => `  ${l}`),
       '',
       `_This link changes when the server restarts._`,
       `_For a permanent link, ask me to set up a named tunnel._`,

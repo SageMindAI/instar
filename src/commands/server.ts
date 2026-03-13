@@ -66,6 +66,8 @@ import { AutonomousEvolution } from '../core/AutonomousEvolution.js';
 import { DispatchScopeEnforcer } from '../core/DispatchScopeEnforcer.js';
 import { TrustRecovery } from '../core/TrustRecovery.js';
 import { DegradationReporter } from '../monitoring/DegradationReporter.js';
+import { SelfKnowledgeTree } from '../knowledge/SelfKnowledgeTree.js';
+import { CoverageAuditor } from '../knowledge/CoverageAuditor.js';
 import { LiveConfig } from '../config/LiveConfig.js';
 import { CoherenceMonitor } from '../monitoring/CoherenceMonitor.js';
 import { ProcessIntegrity } from '../core/ProcessIntegrity.js';
@@ -297,6 +299,7 @@ let _fixDeps: FixCommandDeps | null = null;
 let _topicResumeMap: import('../core/TopicResumeMap.js').TopicResumeMap | null = null;
 let _projectDir: string = process.cwd();
 let _sharedIntelligence: import('../core/types.js').IntelligenceProvider | null = null;
+let _selfKnowledgeTree: SelfKnowledgeTree | null = null;
 
 async function spawnSessionForTopic(
   sessionManager: SessionManager,
@@ -379,6 +382,25 @@ async function spawnSessionForTopic(
     });
   }
 
+  // ── Agent Self-Knowledge Injection ──────────────────────────────
+  // If the self-knowledge tree is loaded, inject a compact agent identity
+  // snapshot into the bootstrap. This gives the session awareness of
+  // WHO the agent is — name, description, capabilities, autonomy level.
+  let agentContextBlock = '';
+  if (_selfKnowledgeTree) {
+    try {
+      const { ContextSnapshotBuilder } = await import('../core/ContextSnapshotBuilder.js');
+      const snapshotBuilder = new ContextSnapshotBuilder({
+        projectName: _selfKnowledgeTree.getConfig()?.agentName || '',
+        projectDir: _projectDir,
+        stateDir: path.join(_projectDir, '.instar'),
+      }, { detailLevel: 'concise' });
+      agentContextBlock = `--- Agent Identity ---\n${snapshotBuilder.renderForPrompt()}\n--- End Agent Identity ---`;
+    } catch {
+      // @silent-fallback-ok — agent context non-critical
+    }
+  }
+
   // ── User Context Injection (Gap 8) ──────────────────────────────
   // If we have a resolved UserProfile with meaningful context, format it
   // for injection into the bootstrap message. This gives the agent awareness
@@ -422,7 +444,13 @@ async function spawnSessionForTopic(
       ``,
     ];
 
-    // User context comes FIRST — before conversation history.
+    // Agent identity comes FIRST — the agent needs to know WHO IT IS.
+    if (agentContextBlock) {
+      parts.push(agentContextBlock);
+      parts.push(``);
+    }
+
+    // User context comes SECOND — before conversation history.
     // The agent needs to know WHO it's talking to before reading WHAT was said.
     if (userContextBlock) {
       parts.push(userContextBlock);
@@ -441,13 +469,20 @@ async function spawnSessionForTopic(
     bootstrapMessage = parts.join('\n');
   } else {
     // No conversation history — new session.
-    // Still inject user context if available.
+    // Still inject agent + user context if available.
+    const newSessionParts: string[] = [];
+    if (agentContextBlock) {
+      newSessionParts.push(agentContextBlock);
+      newSessionParts.push(``);
+    }
     if (userContextBlock) {
-      bootstrapMessage = [
-        userContextBlock,
-        ``,
-        `[telegram:${topicId}] ${msg}`,
-      ].join('\n');
+      newSessionParts.push(userContextBlock);
+      newSessionParts.push(``);
+    }
+    newSessionParts.push(`[telegram:${topicId}] ${msg}`);
+
+    if (newSessionParts.length > 1) {
+      bootstrapMessage = newSessionParts.join('\n');
     } else {
       bootstrapMessage = `[telegram:${topicId}] ${msg}`;
     }
@@ -2739,6 +2774,31 @@ export async function startServer(options: StartOptions): Promise<void> {
       console.error(`  Project map generation failed (non-critical): ${err instanceof Error ? err.message : err}`);
     }
 
+    // Self-Knowledge Tree — tree-based agent self-knowledge with LLM triage
+    let selfKnowledgeTree: SelfKnowledgeTree | undefined;
+    let coverageAuditor: CoverageAuditor | undefined;
+    try {
+      selfKnowledgeTree = new SelfKnowledgeTree({
+        projectDir: config.projectDir,
+        stateDir: config.stateDir,
+        intelligence: sharedIntelligence ?? null,
+        memoryIndex: semanticMemory ?? undefined,
+      });
+      coverageAuditor = new CoverageAuditor(config.projectDir, config.stateDir);
+      _selfKnowledgeTree = selfKnowledgeTree;
+
+      const treeConfig = selfKnowledgeTree.getConfig();
+      if (treeConfig) {
+        const totalNodes = treeConfig.layers.reduce((s: number, l: { children: unknown[] }) => s + l.children.length, 0);
+        console.log(pc.green(`  Self-knowledge tree loaded (${totalNodes} nodes)`));
+      } else {
+        console.log(pc.dim('  Self-knowledge tree: not generated yet (run instar init or doctor)'));
+      }
+    } catch (err) {
+      // @silent-fallback-ok — self-knowledge tree non-critical at startup
+      console.error(`  Self-knowledge tree init failed (non-critical): ${err instanceof Error ? err.message : String(err)}`);
+    }
+
     // Capability Map — fractal self-knowledge for agent introspection
     const capabilityMapper = new CapabilityMapper({
       projectDir: config.projectDir,
@@ -3251,7 +3311,7 @@ export async function startServer(options: StartOptions): Promise<void> {
       }
     }
 
-    const server = new AgentServer({ config, sessionManager, state, scheduler, telegram, relationships, feedback, feedbackAnomalyDetector, dispatches, updateChecker, autoUpdater, autoDispatcher, quotaTracker, quotaManager, publisher, viewer, tunnel, evolution, watchdog, topicMemory, triageNurse, projectMapper, coherenceGate: scopeVerifier, contextHierarchy, canonicalState, operationGate, sentinel, adaptiveTrust, memoryMonitor, orphanReaper, coherenceMonitor, commitmentTracker, semanticMemory, activitySentinel, messageRouter, summarySentinel, spawnManager, systemReviewer, capabilityMapper, topicResumeMap: _topicResumeMap ?? undefined, autonomyManager, trustElevationTracker, autonomousEvolution, coordinator: coordinator.enabled ? coordinator : undefined, localSigningKeyPem, whatsapp: whatsappAdapter, whatsappBusinessBackend, messageBridge, hookEventReceiver, worktreeMonitor, subagentTracker, instructionsVerifier, handshakeManager: threadlineHandshake, threadlineRelayClient, responseReviewGate, telemetryHeartbeat });
+    const server = new AgentServer({ config, sessionManager, state, scheduler, telegram, relationships, feedback, feedbackAnomalyDetector, dispatches, updateChecker, autoUpdater, autoDispatcher, quotaTracker, quotaManager, publisher, viewer, tunnel, evolution, watchdog, topicMemory, triageNurse, projectMapper, coherenceGate: scopeVerifier, contextHierarchy, canonicalState, operationGate, sentinel, adaptiveTrust, memoryMonitor, orphanReaper, coherenceMonitor, commitmentTracker, semanticMemory, activitySentinel, messageRouter, summarySentinel, spawnManager, systemReviewer, capabilityMapper, selfKnowledgeTree, coverageAuditor, topicResumeMap: _topicResumeMap ?? undefined, autonomyManager, trustElevationTracker, autonomousEvolution, coordinator: coordinator.enabled ? coordinator : undefined, localSigningKeyPem, whatsapp: whatsappAdapter, whatsappBusinessBackend, messageBridge, hookEventReceiver, worktreeMonitor, subagentTracker, instructionsVerifier, handshakeManager: threadlineHandshake, threadlineRelayClient, responseReviewGate, telemetryHeartbeat, liveConfig });
     await server.start();
 
     // Connect DegradationReporter downstream systems now that everything is initialized.

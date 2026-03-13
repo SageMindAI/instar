@@ -122,6 +122,7 @@ describe('Feature Delivery Completeness', () => {
       'Self-Discovery',
       'Private Viewing',
       'Dashboard',
+      'File Viewer',
       'Threadline Network',
       'Playbook',
     ];

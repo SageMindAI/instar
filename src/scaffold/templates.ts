@@ -355,9 +355,27 @@ This routes feedback to the Instar maintainers automatically. Valid types: \`bug
 - Local: \`http://localhost:${port}/dashboard\`
 - Remote: When a tunnel is running, the dashboard is accessible at \`{tunnelUrl}/dashboard\`
 - Authentication: Uses a 6-digit PIN (auto-generated in \`dashboardPin\` in \`.instar/config.json\`). NEVER mention "bearer tokens" or "auth tokens" to users — just give them the PIN.
-- Features: Real-time terminal streaming of all running sessions, session management, model badges, mobile-responsive
+- Features: Real-time terminal streaming, session management, file browser/editor, model badges, mobile-responsive
 - **Sharing the dashboard**: When the user wants to check on sessions from their phone, give them the tunnel URL + PIN. Read the PIN from your config.json. Check tunnel status: \`curl -H "Authorization: Bearer $AUTH" http://localhost:${port}/tunnel\`
 - **Dashboard Telegram Topic**: A dedicated "Dashboard" topic is auto-created in your Telegram group on server startup. It always contains the latest dashboard URL + PIN, pinned for instant access. If your tunnel URL changes (quick tunnel restart), a new message is posted and pinned automatically. Users should check this topic for the current dashboard link. If you have a named tunnel (persistent URL), the link never changes.
+
+**File Viewer (Dashboard Tab)** — Browse and edit project files from any device via the Files tab.
+- **Browse files**: Files tab in the dashboard shows configured directories with rendered markdown and syntax-highlighted code
+- **Edit files**: Files in editable paths can be edited inline from your phone. Save with Cmd/Ctrl+S.
+- **Link to files**: Generate deep links to specific files: \`{dashboardUrl}?tab=files&path=.claude/CLAUDE.md\`
+- **When to link vs inline**: Prefer dashboard links for long files (>50 lines) and when editing is needed. Show short files inline AND provide a link.
+- **Config API**: View: \`curl -H "Authorization: Bearer $AUTH" http://localhost:${port}/api/files/config\`
+- **Update paths conversationally**: When a user asks to browse or edit new directories:
+  \`\`\`bash
+  curl -X PATCH -H "Authorization: Bearer $AUTH" -H "X-Instar-Request: 1" \\
+    -H "Content-Type: application/json" \\
+    http://localhost:${port}/api/files/config \\
+    -d '{"allowedPaths":[".claude/","docs/","src/"]}'
+  \`\`\`
+- **Generate a file link**: \`curl -H "Authorization: Bearer $AUTH" "http://localhost:${port}/api/files/link?path=.claude/CLAUDE.md"\`
+- **Default config**: Browsing enabled for \`.claude/\` and \`docs/\`. Editing disabled by default — prompt the user to enable it for safe paths.
+- **Never editable**: \`.claude/hooks/\`, \`.claude/scripts/\`, \`node_modules/\` are always read-only regardless of config.
+- **Tunnel URL awareness**: Quick tunnel URLs change on restart. Frame file links as session-scoped unless using a named tunnel. Don't promise permanent URLs with quick tunnels.
 
 **Backup System** — Snapshot and restore agent state. Use before risky changes, after major progress, or to recover from corruption.
 - List snapshots: \`curl -H "Authorization: Bearer $AUTH" http://localhost:${port}/backups\`

@@ -206,13 +206,15 @@ async function appendAuditLog(
 
 // ── Route factory ────────────────────────────────────────────────────
 
-export function createFileRoutes(options: { config: InstarConfig }): Router {
+export function createFileRoutes(options: { config: InstarConfig; liveConfig?: { set(path: string, value: unknown): void } }): Router {
   const router = Router();
   const projectDir = options.config.projectDir;
   const config: FileViewerConfig = {
     ...DEFAULT_FILE_VIEWER_CONFIG,
     ...options.config.dashboard?.fileViewer,
   };
+
+  const liveConfig = options.liveConfig ?? null;
 
   // If file viewer is disabled, return empty router
   if (!config.enabled) return router;
@@ -563,6 +565,111 @@ export function createFileRoutes(options: { config: InstarConfig }): Router {
       editablePaths: config.editablePaths,
       maxFileSize: config.maxFileSize,
       maxEditableFileSize: config.maxEditableFileSize,
+    });
+  });
+
+  // ── PATCH /api/files/config ─────────────────────────────────────
+  // Phase 3: Conversational config updates — agent can add/remove paths
+
+  router.patch('/api/files/config', (req: Request, res: Response) => {
+    res.setHeader('Cache-Control', 'no-store');
+
+    if (req.headers['x-instar-request'] !== '1') {
+      res.status(403).json({ error: 'Missing CSRF header' });
+      return;
+    }
+
+    if (!liveConfig) {
+      res.status(501).json({ error: 'Config updates not available (no LiveConfig)' });
+      return;
+    }
+
+    const { allowedPaths, editablePaths } = req.body || {};
+
+    // Validate allowedPaths
+    if (allowedPaths !== undefined) {
+      if (!Array.isArray(allowedPaths) || !allowedPaths.every((p: unknown) => typeof p === 'string')) {
+        res.status(400).json({ error: 'allowedPaths must be an array of strings' });
+        return;
+      }
+      // Reject paths that try to escape project root
+      for (const p of allowedPaths) {
+        const normalized = path.normalize(p);
+        if (normalized.startsWith('/') || normalized.includes('..')) {
+          res.status(400).json({ error: `Invalid path: ${p} — must be relative without ..` });
+          return;
+        }
+      }
+    }
+
+    // Validate editablePaths
+    if (editablePaths !== undefined) {
+      if (!Array.isArray(editablePaths) || !editablePaths.every((p: unknown) => typeof p === 'string')) {
+        res.status(400).json({ error: 'editablePaths must be an array of strings' });
+        return;
+      }
+      for (const p of editablePaths) {
+        const normalized = path.normalize(p);
+        if (normalized.startsWith('/') || normalized.includes('..')) {
+          res.status(400).json({ error: `Invalid path: ${p} — must be relative without ..` });
+          return;
+        }
+        // Never-editable enforcement
+        if (isNeverEditable(normalized)) {
+          res.status(400).json({ error: `Path ${p} is never editable for security reasons` });
+          return;
+        }
+      }
+    }
+
+    // Apply updates
+    if (allowedPaths !== undefined) {
+      config.allowedPaths = allowedPaths;
+      liveConfig.set('dashboard.fileViewer.allowedPaths', allowedPaths);
+    }
+    if (editablePaths !== undefined) {
+      config.editablePaths = editablePaths;
+      liveConfig.set('dashboard.fileViewer.editablePaths', editablePaths);
+    }
+
+    res.json({
+      allowedPaths: config.allowedPaths,
+      editablePaths: config.editablePaths,
+      updated: true,
+    });
+  });
+
+  // ── GET /api/files/link ─────────────────────────────────────────
+  // Phase 3: Generate a deep link URL for a file in the dashboard
+
+  router.get('/api/files/link', (req: Request, res: Response) => {
+    res.setHeader('Cache-Control', 'no-store');
+
+    const filePath = typeof req.query.path === 'string' ? req.query.path : '';
+    if (!filePath) {
+      res.status(400).json({ error: 'Missing path parameter' });
+      return;
+    }
+
+    // Validate path is within allowed directories
+    const normalized = path.normalize(filePath);
+    const inAllowed = config.allowedPaths.some(ap => {
+      const normalizedAllowed = path.normalize(ap);
+      return normalized.startsWith(normalizedAllowed) || normalized === normalizedAllowed.replace(/\/$/, '');
+    });
+
+    if (!inAllowed) {
+      res.status(403).json({ error: 'Path not in allowed directories' });
+      return;
+    }
+
+    const encodedPath = encodeURIComponent(normalized);
+    const relativePath = `/dashboard?tab=files&path=${encodedPath}`;
+
+    res.json({
+      path: normalized,
+      relative: relativePath,
+      editable: isEditable(normalized, config),
     });
   });
 

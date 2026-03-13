@@ -1,6 +1,6 @@
 # Upgrade Guide — vNEXT
 
-<!-- bump: patch -->
+<!-- bump: minor -->
 <!-- Valid values: patch, minor, major -->
 <!-- patch = bug fixes, refactors, test additions, doc updates -->
 <!-- minor = new features, new APIs, new capabilities (backwards-compatible) -->
@@ -8,28 +8,31 @@
 
 ## What Changed
 
-<!-- Describe what changed technically. What new features, APIs, behavioral changes? -->
-<!-- Write this for the AGENT — they need to understand the system deeply. -->
+### Dashboard File Viewer — Phase 3: Conversational UX + Polish
+
+The file viewer is now a seamless part of the agent-user conversation:
+
+1. **Conversational config updates** — `PATCH /api/files/config` lets agents update `allowedPaths` and `editablePaths` without restarting the server. When a user says "I want to browse my src/ directory," the agent can add it immediately with server-side validation (project root boundary, never-editable enforcement).
+
+2. **Link generation API** — `GET /api/files/link?path=.claude/CLAUDE.md` returns a structured response with the relative dashboard URL and editability status. Agents can use this to generate deep links to files mid-conversation.
+
+3. **Dashboard broadcast with quick links** — The Telegram Dashboard topic message now includes quick links to Sessions and Files tabs, not just the main dashboard URL.
+
+4. **CLAUDE.md template updated** — New agents get full file viewer documentation in their CLAUDE.md, including when to link vs inline, how to update config conversationally, and tunnel URL awareness.
+
+5. **Context snapshot awareness** — The `file-viewer` feature is now included in the agent's capability snapshot for dispatch evaluation.
 
 ## What to Tell Your User
 
-<!-- Write talking points the agent should relay to their user. -->
-<!-- This should be warm, conversational, user-facing — not a changelog. -->
-<!-- Focus on what THEY can now do, not internal plumbing. -->
-<!--                                                                    -->
-<!-- PROHIBITED in this section (will fail validation):                 -->
-<!--   camelCase config keys: silentReject, maxRetries, telegramNotify -->
-<!--   Inline code backtick references like silentReject: false        -->
-<!--   Fenced code blocks                                              -->
-<!--   Instructions to edit files or run commands                      -->
-<!--                                                                    -->
-<!-- CORRECT style: "I can turn that on for you" not "set X to false"  -->
-<!-- The agent relays this to their user — keep it human.              -->
+- **"You can now ask me to add directories to your file browser."** If you want to browse or edit files in a new folder, just tell me — I'll update the config instantly without needing a restart.
 
-- **[Feature name]**: "[Brief, friendly description of what this means for the user]"
+- **"When I share a file, I'll link you right to it."** Long files get a dashboard link instead of a wall of text in chat. One tap opens the file, ready to view or edit.
 
 ## Summary of New Capabilities
 
 | Capability | How to Use |
 |-----------|-----------|
-| [Capability] | [Endpoint, command, or "automatic"] |
+| Update file viewer paths | `PATCH /api/files/config` with `allowedPaths` or `editablePaths` |
+| Generate file deep link | `GET /api/files/link?path=<relative-path>` |
+| Quick links in dashboard broadcast | Automatic — included in Telegram Dashboard topic |
+| File viewer in context snapshot | Automatic — appears in capabilities when enabled |
