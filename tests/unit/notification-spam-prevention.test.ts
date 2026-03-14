@@ -185,7 +185,7 @@ describe('AutoUpdater loop prevention', () => {
     await vi.advanceTimersByTimeAsync(15_000);
     const firstCallCount = telegram.sendToTopic.mock.calls.length;
     expect(firstCallCount).toBe(1);
-    expect(telegram.sendToTopic.mock.calls[0][1]).toContain('still on v0.9.8');
+    expect(telegram.sendToTopic.mock.calls[0][1]).toContain('still running v0.9.8');
 
     // Second tick — should NOT send duplicate mismatch notification
     await vi.advanceTimersByTimeAsync(65_000);

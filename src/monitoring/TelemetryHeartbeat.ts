@@ -25,6 +25,7 @@ import { createHash } from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { execFileSync } from 'node:child_process';
 import { EventEmitter } from 'node:events';
 import type { TelemetryConfig, TelemetryLevel } from '../core/types.js';
 
@@ -232,7 +233,6 @@ export class TelemetryHeartbeat extends EventEmitter {
 
     // macOS: use hardware UUID
     try {
-      const { execFileSync } = require('node:child_process');
       const output = execFileSync('ioreg', ['-rd1', '-c', 'IOPlatformExpertDevice'], { encoding: 'utf-8' });
       const match = output.match(/"IOPlatformUUID"\s*=\s*"([^"]+)"/);
       if (match) return match[1];

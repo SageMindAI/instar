@@ -20,6 +20,11 @@ import { ExecutionJournal } from '../../src/core/ExecutionJournal.js';
 import { EvolutionManager } from '../../src/core/EvolutionManager.js';
 import type { ExecutionRecord } from '../../src/core/types.js';
 
+/** Return an ISO timestamp for N days ago */
+function daysAgo(n: number): string {
+  return new Date(Date.now() - n * 86_400_000).toISOString();
+}
+
 function makeRecord(overrides: Partial<ExecutionRecord> = {}): ExecutionRecord {
   return {
     executionId: `exec-${Math.random().toString(36).slice(2, 8)}`,
@@ -85,15 +90,18 @@ describe('ReflectionConsolidator', () => {
   describe('proposal creation', () => {
     it('creates proposals for consistent patterns', () => {
       // 5 runs with consistent addition: "extra-step" in all runs
-      const records = Array.from({ length: 5 }, (_, i) => makeRecord({
-        jobSlug: 'my-job',
-        definedSteps: ['step-a'],
-        actualSteps: [
-          { step: 'step-a', timestamp: `2026-03-0${i + 1}T10:00:00Z`, source: 'hook' },
-          { step: 'extra-step', timestamp: `2026-03-0${i + 1}T10:01:00Z`, source: 'hook' },
-        ],
-        timestamp: `2026-03-0${i + 1}T10:00:00Z`,
-      }));
+      const records = Array.from({ length: 5 }, (_, i) => {
+        const ts = daysAgo(i + 1);
+        return makeRecord({
+          jobSlug: 'my-job',
+          definedSteps: ['step-a'],
+          actualSteps: [
+            { step: 'step-a', timestamp: ts, source: 'hook' },
+            { step: 'extra-step', timestamp: ts, source: 'hook' },
+          ],
+          timestamp: ts,
+        });
+      });
       writeRecords(stateDir, 'my-job', records);
 
       const result = consolidator.consolidate();
@@ -109,14 +117,17 @@ describe('ReflectionConsolidator', () => {
     });
 
     it('writes proposals to EvolutionManager state', () => {
-      const records = Array.from({ length: 5 }, (_, i) => makeRecord({
-        jobSlug: 'evo-job',
-        definedSteps: [],
-        actualSteps: [
-          { step: 'always-here', timestamp: `2026-03-0${i + 1}T10:00:00Z`, source: 'hook' },
-        ],
-        timestamp: `2026-03-0${i + 1}T10:00:00Z`,
-      }));
+      const records = Array.from({ length: 5 }, (_, i) => {
+        const ts = daysAgo(i + 1);
+        return makeRecord({
+          jobSlug: 'evo-job',
+          definedSteps: [],
+          actualSteps: [
+            { step: 'always-here', timestamp: ts, source: 'hook' },
+          ],
+          timestamp: ts,
+        });
+      });
       writeRecords(stateDir, 'evo-job', records);
 
       consolidator.consolidate();
@@ -134,14 +145,17 @@ describe('ReflectionConsolidator', () => {
 
   describe('deduplication', () => {
     it('skips proposals that already exist', () => {
-      const records = Array.from({ length: 5 }, (_, i) => makeRecord({
-        jobSlug: 'dedup-job',
-        definedSteps: [],
-        actualSteps: [
-          { step: 'repeated-step', timestamp: `2026-03-0${i + 1}T10:00:00Z`, source: 'hook' },
-        ],
-        timestamp: `2026-03-0${i + 1}T10:00:00Z`,
-      }));
+      const records = Array.from({ length: 5 }, (_, i) => {
+        const ts = daysAgo(i + 1);
+        return makeRecord({
+          jobSlug: 'dedup-job',
+          definedSteps: [],
+          actualSteps: [
+            { step: 'repeated-step', timestamp: ts, source: 'hook' },
+          ],
+          timestamp: ts,
+        });
+      });
       writeRecords(stateDir, 'dedup-job', records);
 
       // Pre-create the proposal
@@ -163,14 +177,17 @@ describe('ReflectionConsolidator', () => {
     });
 
     it('does not deduplicate against rejected proposals', () => {
-      const records = Array.from({ length: 5 }, (_, i) => makeRecord({
-        jobSlug: 'rejected-job',
-        definedSteps: [],
-        actualSteps: [
-          { step: 'try-again-step', timestamp: `2026-03-0${i + 1}T10:00:00Z`, source: 'hook' },
-        ],
-        timestamp: `2026-03-0${i + 1}T10:00:00Z`,
-      }));
+      const records = Array.from({ length: 5 }, (_, i) => {
+        const ts = daysAgo(i + 1);
+        return makeRecord({
+          jobSlug: 'rejected-job',
+          definedSteps: [],
+          actualSteps: [
+            { step: 'try-again-step', timestamp: ts, source: 'hook' },
+          ],
+          timestamp: ts,
+        });
+      });
       writeRecords(stateDir, 'rejected-job', records);
 
       // Create and reject a proposal
@@ -195,22 +212,28 @@ describe('ReflectionConsolidator', () => {
       // Two jobs both with the same "deploy-check" step (different sources though)
       // Should not matter for self-dedup since sources differ
 
-      const recordsA = Array.from({ length: 5 }, (_, i) => makeRecord({
-        jobSlug: 'job-a',
-        definedSteps: [],
-        actualSteps: [
-          { step: 'common-step', timestamp: `2026-03-0${i + 1}T10:00:00Z`, source: 'hook' },
-        ],
-        timestamp: `2026-03-0${i + 1}T10:00:00Z`,
-      }));
-      const recordsB = Array.from({ length: 5 }, (_, i) => makeRecord({
-        jobSlug: 'job-b',
-        definedSteps: [],
-        actualSteps: [
-          { step: 'common-step', timestamp: `2026-03-0${i + 1}T10:00:00Z`, source: 'hook' },
-        ],
-        timestamp: `2026-03-0${i + 1}T10:00:00Z`,
-      }));
+      const recordsA = Array.from({ length: 5 }, (_, i) => {
+        const ts = daysAgo(i + 1);
+        return makeRecord({
+          jobSlug: 'job-a',
+          definedSteps: [],
+          actualSteps: [
+            { step: 'common-step', timestamp: ts, source: 'hook' },
+          ],
+          timestamp: ts,
+        });
+      });
+      const recordsB = Array.from({ length: 5 }, (_, i) => {
+        const ts = daysAgo(i + 1);
+        return makeRecord({
+          jobSlug: 'job-b',
+          definedSteps: [],
+          actualSteps: [
+            { step: 'common-step', timestamp: ts, source: 'hook' },
+          ],
+          timestamp: ts,
+        });
+      });
       writeRecords(stateDir, 'job-a', recordsA);
       writeRecords(stateDir, 'job-b', recordsB);
 
@@ -230,24 +253,24 @@ describe('ReflectionConsolidator', () => {
         makeRecord({
           jobSlug: 'learn-job',
           actualSteps: [
-            { step: 'existing', timestamp: '2026-03-03T10:00:00Z', source: 'hook' },
-            { step: 'brand-new', timestamp: '2026-03-03T10:01:00Z', source: 'hook' },
+            { step: 'existing', timestamp: daysAgo(1), source: 'hook' },
+            { step: 'brand-new', timestamp: daysAgo(1), source: 'hook' },
           ],
-          timestamp: '2026-03-03T10:00:00Z',
+          timestamp: daysAgo(1),
         }),
         makeRecord({
           jobSlug: 'learn-job',
           actualSteps: [
-            { step: 'existing', timestamp: '2026-03-02T10:00:00Z', source: 'hook' },
+            { step: 'existing', timestamp: daysAgo(2), source: 'hook' },
           ],
-          timestamp: '2026-03-02T10:00:00Z',
+          timestamp: daysAgo(2),
         }),
         makeRecord({
           jobSlug: 'learn-job',
           actualSteps: [
-            { step: 'existing', timestamp: '2026-03-01T10:00:00Z', source: 'hook' },
+            { step: 'existing', timestamp: daysAgo(3), source: 'hook' },
           ],
-          timestamp: '2026-03-01T10:00:00Z',
+          timestamp: daysAgo(3),
         }),
       ];
       writeRecords(stateDir, 'learn-job', records);
@@ -270,14 +293,17 @@ describe('ReflectionConsolidator', () => {
 
   describe('dry run', () => {
     it('does not write to EvolutionManager in dry-run mode', () => {
-      const records = Array.from({ length: 5 }, (_, i) => makeRecord({
-        jobSlug: 'dry-job',
-        definedSteps: [],
-        actualSteps: [
-          { step: 'would-be-proposed', timestamp: `2026-03-0${i + 1}T10:00:00Z`, source: 'hook' },
-        ],
-        timestamp: `2026-03-0${i + 1}T10:00:00Z`,
-      }));
+      const records = Array.from({ length: 5 }, (_, i) => {
+        const ts = daysAgo(i + 1);
+        return makeRecord({
+          jobSlug: 'dry-job',
+          definedSteps: [],
+          actualSteps: [
+            { step: 'would-be-proposed', timestamp: ts, source: 'hook' },
+          ],
+          timestamp: ts,
+        });
+      });
       writeRecords(stateDir, 'dry-job', records);
 
       const result = consolidator.consolidate({ commit: false });
@@ -291,14 +317,17 @@ describe('ReflectionConsolidator', () => {
     });
 
     it('dry-run proposals have DRY- prefix IDs', () => {
-      const records = Array.from({ length: 5 }, (_, i) => makeRecord({
-        jobSlug: 'dry-id-job',
-        definedSteps: [],
-        actualSteps: [
-          { step: 'test-step', timestamp: `2026-03-0${i + 1}T10:00:00Z`, source: 'hook' },
-        ],
-        timestamp: `2026-03-0${i + 1}T10:00:00Z`,
-      }));
+      const records = Array.from({ length: 5 }, (_, i) => {
+        const ts = daysAgo(i + 1);
+        return makeRecord({
+          jobSlug: 'dry-id-job',
+          definedSteps: [],
+          actualSteps: [
+            { step: 'test-step', timestamp: ts, source: 'hook' },
+          ],
+          timestamp: ts,
+        });
+      });
       writeRecords(stateDir, 'dry-id-job', records);
 
       const result = consolidator.consolidate({ commit: false });
@@ -323,7 +352,7 @@ describe('ReflectionConsolidator', () => {
         jobSlug: 'highlight-job',
         definedSteps: ['never-done'],
         actualSteps: [],
-        timestamp: `2026-03-0${i + 1}T10:00:00Z`,
+        timestamp: daysAgo(i + 1),
       }));
       writeRecords(stateDir, 'highlight-job', records);
 
@@ -345,14 +374,17 @@ describe('ReflectionConsolidator', () => {
     });
 
     it('formats summary with proposals', () => {
-      const records = Array.from({ length: 5 }, (_, i) => makeRecord({
-        jobSlug: 'summary-job',
-        definedSteps: [],
-        actualSteps: [
-          { step: 'frequent-step', timestamp: `2026-03-0${i + 1}T10:00:00Z`, source: 'hook' },
-        ],
-        timestamp: `2026-03-0${i + 1}T10:00:00Z`,
-      }));
+      const records = Array.from({ length: 5 }, (_, i) => {
+        const ts = daysAgo(i + 1);
+        return makeRecord({
+          jobSlug: 'summary-job',
+          definedSteps: [],
+          actualSteps: [
+            { step: 'frequent-step', timestamp: ts, source: 'hook' },
+          ],
+          timestamp: ts,
+        });
+      });
       writeRecords(stateDir, 'summary-job', records);
 
       const result = consolidator.consolidate();
@@ -369,17 +401,17 @@ describe('ReflectionConsolidator', () => {
         makeRecord({
           jobSlug: 'mixed-job',
           actualSteps: [
-            { step: 'old-step', timestamp: '2026-03-05T10:00:00Z', source: 'hook' },
-            { step: 'novel-thing', timestamp: '2026-03-05T10:01:00Z', source: 'hook' },
+            { step: 'old-step', timestamp: daysAgo(1), source: 'hook' },
+            { step: 'novel-thing', timestamp: daysAgo(1), source: 'hook' },
           ],
-          timestamp: '2026-03-05T10:00:00Z',
+          timestamp: daysAgo(1),
         }),
         ...Array.from({ length: 4 }, (_, i) => makeRecord({
           jobSlug: 'mixed-job',
           actualSteps: [
-            { step: 'old-step', timestamp: `2026-03-0${i + 1}T10:00:00Z`, source: 'hook' },
+            { step: 'old-step', timestamp: daysAgo(i + 2), source: 'hook' },
           ],
-          timestamp: `2026-03-0${i + 1}T10:00:00Z`,
+          timestamp: daysAgo(i + 2),
         })),
       ];
       writeRecords(stateDir, 'mixed-job', records);
@@ -399,21 +431,24 @@ describe('ReflectionConsolidator', () => {
   describe('multi-job consolidation', () => {
     it('consolidates across multiple jobs', () => {
       // Job A: consistent addition
-      writeRecords(stateDir, 'job-alpha', Array.from({ length: 5 }, (_, i) => makeRecord({
-        jobSlug: 'job-alpha',
-        definedSteps: [],
-        actualSteps: [
-          { step: 'alpha-step', timestamp: `2026-03-0${i + 1}T10:00:00Z`, source: 'hook' },
-        ],
-        timestamp: `2026-03-0${i + 1}T10:00:00Z`,
-      })));
+      writeRecords(stateDir, 'job-alpha', Array.from({ length: 5 }, (_, i) => {
+        const ts = daysAgo(i + 1);
+        return makeRecord({
+          jobSlug: 'job-alpha',
+          definedSteps: [],
+          actualSteps: [
+            { step: 'alpha-step', timestamp: ts, source: 'hook' },
+          ],
+          timestamp: ts,
+        });
+      }));
 
       // Job B: consistent omission
       writeRecords(stateDir, 'job-beta', Array.from({ length: 5 }, (_, i) => makeRecord({
         jobSlug: 'job-beta',
         definedSteps: ['never-executed'],
         actualSteps: [],
-        timestamp: `2026-03-0${i + 1}T10:00:00Z`,
+        timestamp: daysAgo(i + 1),
       })));
 
       const result = consolidator.consolidate();
