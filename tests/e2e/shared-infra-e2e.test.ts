@@ -1425,8 +1425,8 @@ describe('Phase 1 Shared Infrastructure — E2E', () => {
       expect(gate.authorizedCount).toBe(1); // Set deduplicates
 
       gate.deauthorize('user-1');
-      // After deauthorizing the only user, set is empty → allows all (by design)
-      expect(gate.isAuthorized('user-1')).toBe(true);
+      // After deauthorizing the only user, set is empty → denies all (safe default)
+      expect(gate.isAuthorized('user-1')).toBe(false);
       expect(gate.authorizedCount).toBe(0);
     });
 
