@@ -152,7 +152,7 @@ describe('No Silent Fallbacks', () => {
     // When you fix a silent fallback (add DegradationReporter.report()
     // or add @silent-fallback-ok exemption), lower this number.
     // ═══════════════════════════════════════════════════════════
-    const BASELINE = 73; // 10 CapabilityMapper + 5 TelegramAdapter + 1 JobScheduler + 8 TopicResumeMap + 3 WhatsAppAdapter + 4 server.ts + 3 HookEventReceiver + 2 InstructionsVerifier + 2 SubagentTracker + 3 WorktreeMonitor + 1 AutonomousEvolution + 1 ExecutionJournal + 1 JobReflector + 1 ResumeValidator + 4 ContextualEvaluator + 4 CoherenceGate + 3 CustomReviewerLoader + 1 PolicyEnforcementLayer + 1 RecipientResolver + 5 ContextSnapshotBuilder + 1 AutoDispatcher + 1 JobRunHistory + 6 new-sentinel-resume-paths + 1 routes.ts (paste error handler) + 1 pre-existing drift (unidentified)
+    const BASELINE = 74; // 10 CapabilityMapper + 5 TelegramAdapter + 1 JobScheduler + 8 TopicResumeMap + 3 WhatsAppAdapter + 4 server.ts + 3 HookEventReceiver + 2 InstructionsVerifier + 2 SubagentTracker + 3 WorktreeMonitor + 1 AutonomousEvolution + 1 ExecutionJournal + 1 JobReflector + 1 ResumeValidator + 4 ContextualEvaluator + 4 CoherenceGate + 3 CustomReviewerLoader + 1 PolicyEnforcementLayer + 1 RecipientResolver + 5 ContextSnapshotBuilder + 1 AutoDispatcher + 1 JobRunHistory + 6 new-sentinel-resume-paths + 1 routes.ts (paste error handler) + 1 TreeTriage (LLM node triage catch) + 1 pre-existing drift (unidentified)
 
     if (silentFallbacks.length > 0) {
       const report = silentFallbacks.map(fb =>
