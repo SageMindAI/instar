@@ -19,6 +19,7 @@ import { rateLimiter, signViewPath } from './middleware.js';
 import type { WriteOperation, WriteToken } from '../core/StateWriteAuthority.js';
 import { validateWriteToken, canPerformOperation } from '../core/StateWriteAuthority.js';
 import { DegradationReporter } from '../monitoring/DegradationReporter.js';
+import { ReflectionMetrics } from '../monitoring/ReflectionMetrics.js';
 import type { TelegramAdapter } from '../messaging/TelegramAdapter.js';
 import type { RelationshipManager } from '../core/RelationshipManager.js';
 import type { FeedbackManager } from '../core/FeedbackManager.js';
@@ -156,6 +157,9 @@ const VALID_SORTS = ['significance', 'recent', 'name'] as const;
 
 export function createRoutes(ctx: RouteContext): Router {
   const router = Router();
+
+  // Reflection metrics — usage-based reflection trigger (ported from Dawn)
+  const reflectionMetrics = new ReflectionMetrics(ctx.config.stateDir);
 
   // Truncation detector for Telegram messages (Drop Zone integration)
   const truncationDetector = new TruncationDetector();
@@ -429,6 +433,11 @@ export function createRoutes(ctx: RouteContext): Router {
       return;
     }
 
+    // Track tool calls for reflection metrics
+    if (payload.event === 'PostToolUse') {
+      reflectionMetrics.recordToolCall();
+    }
+
     // Dispatch to specialized trackers
     if (ctx.subagentTracker && payload.session_id) {
       if (payload.event === 'SubagentStart' && payload.agent_id && payload.agent_type) {
@@ -499,6 +508,38 @@ export function createRoutes(ctx: RouteContext): Router {
     const records = ctx.subagentTracker.getSessionRecords(sessionId);
     const summary = ctx.subagentTracker.getSessionSummary(sessionId);
     res.json({ sessionId, records, summary });
+  });
+
+  // ── Reflection Metrics (Usage-Based Trigger) ─────────────────
+
+  router.get('/reflection/metrics', (_req, res) => {
+    const check = reflectionMetrics.check();
+    res.json(check);
+  });
+
+  router.post('/reflection/record', (req, res) => {
+    const { type } = req.body;
+    if (!type || typeof type !== 'string') {
+      res.status(400).json({ error: 'Missing "type" field (e.g., "quick", "deep", "grounding")' });
+      return;
+    }
+    reflectionMetrics.recordReflection(type);
+    res.json({ ok: true, message: `Reflection recorded (type: ${type}). Counters reset.` });
+  });
+
+  router.post('/reflection/session-start', (_req, res) => {
+    reflectionMetrics.recordSessionStart();
+    res.json({ ok: true });
+  });
+
+  router.put('/reflection/thresholds', (req, res) => {
+    const { toolCalls, sessions, minutes } = req.body;
+    reflectionMetrics.updateThresholds({
+      toolCalls: typeof toolCalls === 'number' ? toolCalls : undefined,
+      sessions: typeof sessions === 'number' ? sessions : undefined,
+      minutes: typeof minutes === 'number' ? minutes : undefined,
+    });
+    res.json({ ok: true, thresholds: reflectionMetrics.getData().thresholds });
   });
 
   // ── Worktree Monitoring ───────────────────────────────────────

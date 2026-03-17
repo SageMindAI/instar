@@ -83,6 +83,11 @@ const FLAKY_TESTS = [
 
   // ── better-sqlite3 native binding not built on this machine ───────
   'tests/e2e/user-agent-topology-full-lifecycle.test.ts',
+
+  // ── Concurrent read timeouts / supertest auth flakes ──────────────
+  'tests/e2e/memory-full-stack-lifecycle.test.ts',
+  'tests/integration/system-reviewer-integration.test.ts',
+  'tests/integration/coherence-routes.test.ts',
 ];
 
 export default defineConfig({

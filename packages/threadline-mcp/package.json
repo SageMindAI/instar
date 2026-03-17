@@ -1,7 +1,7 @@
 {
   "name": "threadline-mcp",
   "mcpName": "io.github.JKHeadley/threadline-mcp",
-  "version": "0.4.1",
+  "version": "0.4.2",
   "description": "MCP server for agent-to-agent messaging with relational persistence. Discover agents, exchange messages, build relationships, and remember contacts across sessions.",
   "type": "module",
   "main": "dist/server.js",

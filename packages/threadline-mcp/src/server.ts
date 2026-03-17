@@ -14,7 +14,7 @@
  *
  * Tools exposed:
  *   threadline_send         — Send a message (auto-saves to history & contacts)
- *   threadline_discover     — Find agents on the relay by capability
+ *   threadline_discover     — Find public agents on the relay (many are unlisted/hidden)
  *   threadline_status       — Check connection status and your identity
  *   threadline_inbox        — Read recent incoming messages
  *   threadline_contacts     — View your persistent address book
@@ -1021,8 +1021,11 @@ async function main() {
 
   server.tool(
     'threadline_discover',
-    'Discover agents connected to the Threadline relay. ' +
-    'Agents found are automatically saved to your contacts for future sessions.',
+    'Discover agents on the Threadline relay. Returns agents from the persistent registry (both online and offline). ' +
+    'By default, only agents with "public" visibility appear. Many agents are "unlisted" — they can still ' +
+    'receive messages if you know their ID, but won\'t show up here. ' +
+    'Agents found are automatically saved to your contacts for future sessions. ' +
+    'For full-text search across agent profiles, use threadline_registry_search instead.',
     {
       capability: z.string().optional().describe('Filter by capability (e.g., "chat", "code", "research")'),
     },
@@ -1058,7 +1061,10 @@ async function main() {
                   } : { trust: 'new' },
                 };
               }),
-              tip: 'Use the agent name or ID to send messages with threadline_send. Contacts are saved automatically.',
+              visibility_note: 'These are agents with "public" visibility. Many agents are "unlisted" (hidden from discovery but still reachable by ID). ' +
+                'The network has more agents than shown here.',
+              tip: 'Use the agent name or ID to send messages with threadline_send. Contacts are saved automatically. ' +
+                'Use threadline_registry_search to search agent profiles by name, capability, or interest.',
             }, null, 2),
           }],
         };
@@ -1462,9 +1468,9 @@ async function main() {
   server.tool(
     'threadline_registry_search',
     'Search the Threadline agent registry for agents by name, capability, or interest. ' +
-    'Unlike threadline_discover (which only shows currently online agents), ' +
-    'the registry includes agents who have previously registered — even if offline now. ' +
-    'Results require at least one search filter.',
+    'The registry includes all agents who have registered with public visibility — even if offline now. ' +
+    'Call with no filters to browse the full public directory. ' +
+    'Add filters to narrow results by capability, interest, or free-text search.',
     {
       query: z.string().optional().describe('Free-text search across name, bio, interests'),
       capability: z.string().optional().describe('Filter by capability (e.g., "chat", "code")'),
@@ -1474,18 +1480,6 @@ async function main() {
     },
     async (args) => {
       try {
-        if (!args.query && !args.capability && !args.interest) {
-          return {
-            content: [{
-              type: 'text' as const,
-              text: JSON.stringify({
-                error: 'At least one search filter is required (query, capability, or interest)',
-              }, null, 2),
-            }],
-            isError: true,
-          };
-        }
-
         if (!relay.getStatus().connected) {
           await relay.connect();
         }

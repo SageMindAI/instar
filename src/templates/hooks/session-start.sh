@@ -40,6 +40,38 @@ fi
 # leaking into this session and causing false-positive hook triggers.
 curl -s -X POST "http://localhost:${PORT}/scope-coherence/reset" -o /dev/null 2>/dev/null || true
 
+# Record session start for reflection metrics (usage-based reflection trigger)
+curl -s -X POST "http://localhost:${PORT}/reflection/session-start" \
+  -H "Authorization: Bearer ${AUTH_TOKEN}" \
+  -H "Content-Type: application/json" -o /dev/null 2>/dev/null || true
+
+# Check reflection metrics — usage-based reflection suggestion
+REFLECTION_CHECK=$(curl -s -H "Authorization: Bearer ${AUTH_TOKEN}" \
+  "http://localhost:${PORT}/reflection/metrics" 2>/dev/null)
+if [ -n "$REFLECTION_CHECK" ]; then
+  SUGGESTED=$(echo "$REFLECTION_CHECK" | python3 -c "import sys,json; print(json.load(sys.stdin).get('suggested',False))" 2>/dev/null)
+  if [ "$SUGGESTED" = "True" ]; then
+    EXCEEDED=$(echo "$REFLECTION_CHECK" | python3 -c "
+import sys, json
+d = json.load(sys.stdin)
+m = d.get('metrics', {})
+exceeded = d.get('exceededThresholds', [])
+parts = []
+if 'toolCalls' in exceeded: parts.append(f'{m.get(\"toolCalls\",0)} tool calls')
+if 'sessions' in exceeded: parts.append(f'{m.get(\"sessions\",0)} sessions')
+if 'minutes' in exceeded: parts.append(f'{m.get(\"minutesSinceReflection\",0)} min')
+print(', '.join(parts))
+" 2>/dev/null)
+    echo "=== REFLECTION SUGGESTED ==="
+    echo "Usage thresholds exceeded: ${EXCEEDED}"
+    echo "Consider reflecting before diving into work."
+    echo "After reflecting, record it: POST http://localhost:${PORT}/reflection/record"
+    echo '  Body: {"type": "quick"} or {"type": "deep"}'
+    echo "=== END REFLECTION SUGGESTED ==="
+    echo ""
+  fi
+fi
+
 # Check for pending serendipity findings
 SERENDIPITY_DIR="$INSTAR_DIR/state/serendipity"
 if [ -d "$SERENDIPITY_DIR" ]; then
