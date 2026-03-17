@@ -445,14 +445,13 @@ export class ThreadlineRouter {
       : 'No previous history available.\n';
 
     const basePrompt = THREAD_SPAWN_PROMPT_TEMPLATE
-      .replace('{remote_agent}', remoteAgent)
-      .replace('{remote_agent}', remoteAgent)
-      .replace('{thread_id}', threadId)
-      .replace('{subject}', subject)
-      .replace('{message_count}', String(messageCount))
-      .replace('{history_section}', historySection)
-      .replace('{latest_subject}', latestMessage.subject)
-      .replace('{latest_body}', latestMessage.body);
+      .replaceAll('{remote_agent}', remoteAgent)
+      .replaceAll('{thread_id}', threadId)
+      .replaceAll('{subject}', subject)
+      .replaceAll('{message_count}', String(messageCount))
+      .replaceAll('{history_section}', historySection)
+      .replaceAll('{latest_subject}', latestMessage.subject)
+      .replaceAll('{latest_body}', latestMessage.body);
 
     // If relay context is present, wrap with grounding preamble
     if (relayContext) {

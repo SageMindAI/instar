@@ -201,6 +201,10 @@ export class RelayClient extends EventEmitter {
           case 'auth_error':
             clearTimeout(connectTimeout);
             this.state = 'disconnected';
+            // If rate-limited, enforce longer backoff before retrying
+            if (frame.message?.includes('Too many') || frame.message?.includes('rate')) {
+              this.reconnectAttempt = Math.max(this.reconnectAttempt, 5); // Start at ~32s backoff
+            }
             reject(new Error(`Auth failed: ${frame.message}`));
             break;
 

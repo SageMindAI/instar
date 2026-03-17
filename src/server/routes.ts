@@ -7,7 +7,7 @@
 
 import { Router } from 'express';
 import { execFileSync } from 'node:child_process';
-import { createHash, timingSafeEqual } from 'node:crypto';
+import { createHash, timingSafeEqual, randomUUID } from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -67,7 +67,7 @@ import type { SelfKnowledgeTree } from '../knowledge/SelfKnowledgeTree.js';
 import type { CoverageAuditor } from '../knowledge/CoverageAuditor.js';
 import type { TopicResumeMap } from '../core/TopicResumeMap.js';
 import type { MessageType, MessagePriority, MessageFilter } from '../messaging/types.js';
-import { verifyAgentToken } from '../messaging/AgentTokenManager.js';
+import { verifyAgentToken, getAgentToken } from '../messaging/AgentTokenManager.js';
 import type { WorkingMemoryAssembler } from '../memory/WorkingMemoryAssembler.js';
 import type { QuotaManager } from '../monitoring/QuotaManager.js';
 import type { ThreadlineRouter } from '../threadline/ThreadlineRouter.js';
@@ -6152,17 +6152,15 @@ export function createRoutes(ctx: RouteContext): Router {
 
   // ── Threadline Relay Send ────────────────────────────────────────────
   // Used by the MCP server's threadline_send tool to route messages through
-  // the relay WebSocket. The MCP server runs as a stdio child process and
-  // can't access the relay client directly, so it calls this HTTP endpoint.
+  // the relay WebSocket. Tries local delivery first for co-located agents,
+  // then falls back to the relay. The MCP server runs as a stdio child
+  // process and can't access the relay client directly, so it calls this
+  // HTTP endpoint.
 
   router.post('/threadline/relay-send', async (req, res) => {
     const relayClient = ctx.threadlineRelayClient;
-    if (!relayClient || relayClient.connectionState !== 'connected') {
-      res.status(503).json({ success: false, error: 'Relay not connected' });
-      return;
-    }
-
     const { targetAgent, message, threadId } = req.body;
+
     if (!targetAgent || !message) {
       res.status(400).json({ success: false, error: 'Missing required fields: targetAgent, message' });
       return;
@@ -6171,6 +6169,110 @@ export function createRoutes(ctx: RouteContext): Router {
     // Validate message size (64KB limit matching inbound)
     if (Buffer.byteLength(message, 'utf-8') > 64 * 1024) {
       res.status(413).json({ success: false, error: 'Message too large (64KB limit)' });
+      return;
+    }
+
+    const msgId = `msg-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    const effectiveThreadId = threadId ?? msgId;
+
+    // ── Try local delivery first (same-machine agents) ──────────────
+    // Read known-agents.json for local agent info. If the target is local,
+    // deliver directly via their /messages/relay-agent endpoint, bypassing
+    // the relay entirely. This avoids stale relay WebSocket issues.
+    try {
+      const knownAgentsPath = path.join(ctx.config.stateDir, 'threadline', 'known-agents.json');
+      if (fs.existsSync(knownAgentsPath)) {
+        const knownData = JSON.parse(fs.readFileSync(knownAgentsPath, 'utf-8'));
+        const agents: Array<{ name: string; port: number; path?: string; fingerprint?: string; publicKey?: string }> = knownData.agents ?? [];
+        const localTarget = agents.find(a =>
+          a.name === targetAgent || a.name?.toLowerCase() === targetAgent?.toLowerCase()
+        );
+
+        if (localTarget?.port && localTarget.name !== ctx.config.projectName) {
+          // Check if the local agent is actually running
+          try {
+            const healthResp = await fetch(`http://localhost:${localTarget.port}/threadline/health`, {
+              signal: AbortSignal.timeout(3000),
+            });
+
+            if (healthResp.ok) {
+              // Agent is alive — deliver locally via relay-agent endpoint
+              const targetToken = getAgentToken(localTarget.name);
+              if (targetToken) {
+                const senderFingerprint = (() => {
+                  try {
+                    const idPath = path.join(ctx.config.stateDir, 'threadline', 'identity.json');
+                    const idData = JSON.parse(fs.readFileSync(idPath, 'utf-8'));
+                    return idData.fingerprint ?? ctx.config.projectName;
+                  } catch { return ctx.config.projectName; }
+                })();
+
+                const now = new Date().toISOString();
+                const envelope = {
+                  schemaVersion: 1,
+                  message: {
+                    id: msgId,
+                    from: { agent: ctx.config.projectName, session: 'threadline', machine: 'local' },
+                    to: { agent: localTarget.name, session: 'best', machine: 'local' },
+                    type: 'request' as const,
+                    priority: 'medium' as const,
+                    subject: 'Relay message',
+                    body: message,
+                    threadId: effectiveThreadId,
+                    createdAt: now,
+                  },
+                  transport: {
+                    relayChain: ['local'],
+                    originServer: `http://localhost:${ctx.config.port ?? 4042}`,
+                    nonce: `${randomUUID()}:${now}`,
+                    timestamp: now,
+                  },
+                  delivery: {
+                    phase: 'received' as const,
+                    transitions: [
+                      { from: 'created' as const, to: 'received' as const, at: now, reason: 'local delivery' },
+                    ],
+                    attempts: 1,
+                  },
+                };
+
+                const localResp = await fetch(`http://localhost:${localTarget.port}/messages/relay-agent`, {
+                  method: 'POST',
+                  headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${targetToken}`,
+                  },
+                  body: JSON.stringify(envelope),
+                  signal: AbortSignal.timeout(10000),
+                });
+
+                if (localResp.ok) {
+                  console.log(`[relay-send] Local delivery to ${localTarget.name}:${localTarget.port} (thread: ${effectiveThreadId})`);
+                  res.json({
+                    success: true,
+                    messageId: msgId,
+                    threadId: effectiveThreadId,
+                    resolvedAgent: localTarget.name,
+                    deliveryPath: 'local',
+                  });
+                  return;
+                }
+                // Local delivery failed — fall through to relay
+                console.warn(`[relay-send] Local delivery to ${localTarget.name} failed (${localResp.status}), falling back to relay`);
+              }
+            }
+          } catch {
+            // Local agent not reachable — fall through to relay
+          }
+        }
+      }
+    } catch {
+      // Known-agents read failed — fall through to relay
+    }
+
+    // ── Fall back to relay delivery ─────────────────────────────────
+    if (!relayClient || relayClient.connectionState !== 'connected') {
+      res.status(503).json({ success: false, error: 'Relay not connected and local delivery unavailable' });
       return;
     }
 
@@ -6185,12 +6287,13 @@ export function createRoutes(ctx: RouteContext): Router {
         return;
       }
 
-      const msgId = relayClient.sendAuto(resolvedId, message, threadId);
+      const relayMsgId = relayClient.sendAuto(resolvedId, message, threadId);
       res.json({
         success: true,
-        messageId: msgId,
-        threadId: threadId ?? msgId,
+        messageId: relayMsgId,
+        threadId: threadId ?? relayMsgId,
         resolvedAgent: resolvedId,
+        deliveryPath: 'relay',
       });
     } catch (err) {
       res.status(500).json({
