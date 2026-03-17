@@ -1,11 +1,12 @@
 /**
- * `instar job add|list` — Manage scheduled jobs.
+ * `instar job add|list|handoff` — Manage scheduled jobs.
  */
 
 import fs from 'node:fs';
 import pc from 'picocolors';
 import { loadConfig, ensureStateDir } from '../core/Config.js';
 import { loadJobs, validateJob } from '../scheduler/JobLoader.js';
+import { JobRunHistory } from '../scheduler/JobRunHistory.js';
 import { StateManager } from '../core/StateManager.js';
 import type { JobDefinition, JobPriority, ModelTier } from '../core/types.js';
 
@@ -115,4 +116,48 @@ export async function listJobs(_options: { dir?: string }): Promise<void> {
     console.log(`    Last run: ${lastRun}${failures}`);
     console.log(`    Execute:  ${job.execute.type}:${job.execute.value}`);
   }
+}
+
+/**
+ * Write handoff notes for the next execution of a job.
+ * Called by the agent at session end to leave context for the next run.
+ */
+export async function jobHandoff(
+  slug: string,
+  options: { notes: string; state?: string; runId?: string; dir?: string },
+): Promise<void> {
+  const config = loadConfig();
+  ensureStateDir(config.stateDir);
+
+  const history = new JobRunHistory(config.stateDir);
+
+  // Parse state snapshot if provided
+  let stateSnapshot: Record<string, unknown> | undefined;
+  if (options.state) {
+    try {
+      stateSnapshot = JSON.parse(options.state);
+    } catch {
+      console.log(pc.red('Invalid JSON for --state'));
+      process.exit(1);
+    }
+  }
+
+  // Find the run ID — either specified or most recent for this slug
+  let runId = options.runId;
+  if (!runId) {
+    const { runs } = history.query({ slug, limit: 1 });
+    if (runs.length === 0) {
+      console.log(pc.red(`No runs found for job "${slug}". Run the job first.`));
+      process.exit(1);
+    }
+    runId = runs[0].runId;
+  }
+
+  history.recordHandoff(runId, options.notes, stateSnapshot);
+
+  console.log(pc.green(`Handoff notes saved for job "${slug}" (run: ${runId})`));
+  if (stateSnapshot) {
+    console.log(pc.dim(`  State snapshot: ${Object.keys(stateSnapshot).length} keys`));
+  }
+  console.log(pc.dim('  These notes will be injected into the next execution\'s prompt.'));
 }

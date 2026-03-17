@@ -519,7 +519,104 @@ describe('JobRunHistory unit tests', () => {
     });
   });
 
-  // ── Scenario 9: Reflection without prior run ──────────────────────
+  // ── Scenario 9: Handoff notes (execution-to-execution continuity) ──
+
+  describe('handoff notes — execution-to-execution continuity', () => {
+    it('records and retrieves handoff notes for the next execution', () => {
+      const history = new JobRunHistory(stateDir);
+
+      // Run 1: complete with handoff notes
+      const runId = history.recordStart({
+        slug: 'tracker',
+        sessionId: 'sess-1',
+        trigger: 'scheduled',
+      });
+      history.recordCompletion({ runId, result: 'success' });
+      history.recordHandoff(runId, 'Check ERROR-128 next time — Safari WebSocket issue.', {
+        lastScanned: '2026-03-17T04:00Z',
+        errorsTriaged: 4,
+      });
+
+      // Retrieve handoff for next execution
+      const handoff = history.getLastHandoff('tracker');
+      expect(handoff).not.toBeNull();
+      expect(handoff!.handoffNotes).toBe('Check ERROR-128 next time — Safari WebSocket issue.');
+      expect(handoff!.stateSnapshot).toEqual({
+        lastScanned: '2026-03-17T04:00Z',
+        errorsTriaged: 4,
+      });
+      expect(handoff!.fromRunId).toBe(runId);
+      expect(handoff!.fromSession).toBe('sess-1');
+    });
+
+    it('returns the most recent handoff when multiple exist', () => {
+      const history = new JobRunHistory(stateDir);
+
+      // Run 1
+      const r1 = history.recordStart({ slug: 'tracker', sessionId: 's1', trigger: 'scheduled' });
+      history.recordCompletion({ runId: r1, result: 'success' });
+      history.recordHandoff(r1, 'Old notes');
+
+      // Run 2
+      const r2 = history.recordStart({ slug: 'tracker', sessionId: 's2', trigger: 'scheduled' });
+      history.recordCompletion({ runId: r2, result: 'success' });
+      history.recordHandoff(r2, 'Fresh notes');
+
+      const handoff = history.getLastHandoff('tracker');
+      expect(handoff!.handoffNotes).toBe('Fresh notes');
+      expect(handoff!.fromSession).toBe('s2');
+    });
+
+    it('returns null when no handoff notes exist', () => {
+      const history = new JobRunHistory(stateDir);
+
+      const r = history.recordStart({ slug: 'tracker', sessionId: 's1', trigger: 'scheduled' });
+      history.recordCompletion({ runId: r, result: 'success' });
+
+      const handoff = history.getLastHandoff('tracker');
+      expect(handoff).toBeNull();
+    });
+
+    it('skips pending runs when looking for handoff', () => {
+      const history = new JobRunHistory(stateDir);
+
+      // Completed run with handoff
+      const r1 = history.recordStart({ slug: 'tracker', sessionId: 's1', trigger: 'scheduled' });
+      history.recordCompletion({ runId: r1, result: 'success' });
+      history.recordHandoff(r1, 'From completed run');
+
+      // Pending run (should be skipped)
+      history.recordStart({ slug: 'tracker', sessionId: 's2', trigger: 'scheduled' });
+
+      const handoff = history.getLastHandoff('tracker');
+      expect(handoff!.handoffNotes).toBe('From completed run');
+    });
+
+    it('survives compaction', () => {
+      const h1 = new JobRunHistory(stateDir);
+
+      const r = h1.recordStart({ slug: 'tracker', sessionId: 's1', trigger: 'scheduled' });
+      h1.recordCompletion({ runId: r, result: 'success' });
+      h1.recordHandoff(r, 'Survives compaction', { key: 'value' });
+
+      // Create new instance (triggers compaction)
+      const h2 = new JobRunHistory(stateDir);
+
+      const handoff = h2.getLastHandoff('tracker');
+      expect(handoff).not.toBeNull();
+      expect(handoff!.handoffNotes).toBe('Survives compaction');
+      expect(handoff!.stateSnapshot).toEqual({ key: 'value' });
+    });
+
+    it('handles handoff for non-existent runId gracefully', () => {
+      const history = new JobRunHistory(stateDir);
+      history.recordHandoff('nonexistent', 'Should not crash');
+      const handoff = history.getLastHandoff('any-slug');
+      expect(handoff).toBeNull();
+    });
+  });
+
+  // ── Scenario 10: Reflection without prior run ─────────────────────
 
   describe('reflection edge cases', () => {
     it('handles reflection for non-existent runId gracefully', () => {

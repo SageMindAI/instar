@@ -491,4 +491,32 @@ describe('JobScheduler', () => {
       expect(jobState?.lastResult).toBe('failure');
     });
   });
+
+  // ── extractHandoff ──────────────────────────────────────────────
+
+  describe('extractHandoff', () => {
+    it('extracts handoff notes from output with [HANDOFF] markers', () => {
+      const output = 'Some session output\n[HANDOFF]\nCheck ERROR-128 next time.\nAlso verify Safari fix.\n[/HANDOFF]\nMore output';
+      expect(JobScheduler.extractHandoff(output)).toBe('Check ERROR-128 next time.\nAlso verify Safari fix.');
+    });
+
+    it('returns null when no handoff markers present', () => {
+      expect(JobScheduler.extractHandoff('Normal output without markers')).toBeNull();
+    });
+
+    it('handles case-insensitive markers', () => {
+      const output = '[handoff]\nLowercase notes\n[/handoff]';
+      expect(JobScheduler.extractHandoff(output)).toBe('Lowercase notes');
+    });
+
+    it('handles empty handoff block', () => {
+      const output = '[HANDOFF]\n   \n[/HANDOFF]';
+      expect(JobScheduler.extractHandoff(output)).toBe('');
+    });
+
+    it('extracts only the first handoff block', () => {
+      const output = '[HANDOFF]\nFirst block\n[/HANDOFF]\n[HANDOFF]\nSecond block\n[/HANDOFF]';
+      expect(JobScheduler.extractHandoff(output)).toBe('First block');
+    });
+  });
 });

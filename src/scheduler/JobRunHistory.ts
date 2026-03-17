@@ -62,6 +62,10 @@ export interface JobRun {
   outputSummary?: string;
   /** LLM reflection on what happened and what was learned */
   reflection?: JobRunReflection;
+  /** Handoff notes for the next execution — human-readable continuity */
+  handoffNotes?: string;
+  /** Structured state snapshot for the next execution */
+  stateSnapshot?: Record<string, unknown>;
 }
 
 export interface JobRunStats {
@@ -311,6 +315,61 @@ export class JobRunHistory {
     });
 
     return result;
+  }
+
+  /**
+   * Record handoff notes for the next execution.
+   * Called when a job session completes and wants to leave context for the next run.
+   */
+  recordHandoff(runId: string, handoffNotes: string, stateSnapshot?: Record<string, unknown>): void {
+    const run = this.findRun(runId);
+    if (!run) {
+      console.warn(`[JobRunHistory] No run found for handoff: ${runId}`);
+      return;
+    }
+
+    const updated: JobRun = {
+      ...run,
+      handoffNotes,
+      stateSnapshot,
+    };
+    this.appendLine(updated);
+  }
+
+  /**
+   * Get the most recent handoff notes for a job slug.
+   * Returns notes from the last completed execution that left handoff data.
+   * This is the primary continuity mechanism between job executions.
+   *
+   * Scans the raw JSONL in reverse (newest entries last) to correctly handle
+   * runs that start within the same millisecond.
+   */
+  getLastHandoff(slug: string): { handoffNotes: string; stateSnapshot?: Record<string, unknown>; fromRunId: string; fromSession: string; completedAt: string } | null {
+    // Read all lines and deduplicate (last entry per runId wins)
+    const all = this.readLines();
+    const byId = new Map<string, JobRun>();
+    for (const run of all) {
+      byId.set(run.runId, run);
+    }
+
+    // Convert to array and scan in reverse append order (most recent last in file)
+    const deduped = Array.from(byId.values());
+
+    // Reverse so we check most recently appended first
+    for (let i = deduped.length - 1; i >= 0; i--) {
+      const run = deduped[i];
+      if (run.slug === slug && run.handoffNotes && run.result !== 'pending') {
+        return {
+          handoffNotes: run.handoffNotes,
+          stateSnapshot: run.stateSnapshot,
+          fromRunId: run.runId,
+          fromSession: run.sessionId,
+          completedAt: run.completedAt ?? run.startedAt,
+        };
+      }
+    }
+
+    return null;
   }
 
   /**

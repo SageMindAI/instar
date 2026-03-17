@@ -585,6 +585,25 @@ export class JobScheduler {
         break;
     }
 
+    // Inject handoff notes from the last execution (continuity between runs)
+    const handoff = this.runHistory.getLastHandoff(job.slug);
+    if (handoff) {
+      const handoffBlock = [
+        '[CONTINUITY FROM PREVIOUS EXECUTION]',
+        `Previous session: ${handoff.fromSession} (completed: ${handoff.completedAt})`,
+        '',
+        'Handoff notes:',
+        handoff.handoffNotes,
+        handoff.stateSnapshot ? `\nState snapshot: ${JSON.stringify(handoff.stateSnapshot)}` : '',
+        '',
+        'Use these notes to continue where the previous execution left off.',
+        'When done, include [HANDOFF]your notes[/HANDOFF] in your output to pass context to the next execution.',
+        'Or run: instar job handoff ' + job.slug + ' --notes "your notes"',
+        '[END CONTINUITY]',
+      ].join('\n');
+      base = `${handoffBlock}\n\n${base}`;
+    }
+
     // Inject attention protocol for on-alert jobs so the LLM knows when to signal
     if (this.getNotifyMode(job) === 'on-alert') {
       const protocol = [
@@ -616,6 +635,16 @@ export class JobScheduler {
    */
   private hasAttentionSignal(output: string): boolean {
     return /^\[ATTENTION\]/im.test(output);
+  }
+
+  /**
+   * Extract handoff notes from session output.
+   * Agents can include a [HANDOFF] ... [/HANDOFF] block in their output
+   * to leave context for the next execution. This is auto-extracted on completion.
+   */
+  static extractHandoff(output: string): string | null {
+    const match = output.match(/\[HANDOFF\]\s*([\s\S]*?)\s*\[\/HANDOFF\]/i);
+    return match ? match[1].trim() : null;
   }
 
   private getConsecutiveFailures(slug: string): number {
@@ -660,6 +689,13 @@ export class JobScheduler {
         error: failed ? `Session ${session.status} (${session.name})` : undefined,
         outputSummary: output ? output.slice(-1000) : undefined,
       });
+
+      // Auto-extract handoff notes from session output if agent included [HANDOFF] marker
+      const handoff = JobScheduler.extractHandoff(output);
+      if (handoff) {
+        this.runHistory.recordHandoff(runId, handoff);
+      }
+
       this.activeRunIds.delete(session.name);
     }
 

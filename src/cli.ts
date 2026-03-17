@@ -963,6 +963,18 @@ jobCmd
   .option('-d, --dir <path>', 'Project directory')
   .action(listJobs);
 
+jobCmd
+  .command('handoff <slug>')
+  .description('Write handoff notes for the next execution of a job')
+  .requiredOption('--notes <notes>', 'Handoff notes (human-readable context for next execution)')
+  .option('--state <json>', 'JSON state snapshot to pass to next execution')
+  .option('--run-id <runId>', 'Specific run ID (defaults to most recent pending/active run)')
+  .option('-d, --dir <path>', 'Project directory')
+  .action(async (slug: string, opts: { notes: string; state?: string; runId?: string; dir?: string }) => {
+    const { jobHandoff } = await import('./commands/job.js');
+    await jobHandoff(slug, opts);
+  });
+
 // ── Lifeline ──────────────────────────────────────────────────────
 
 const lifelineCmd = program
