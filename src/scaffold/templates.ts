@@ -1273,6 +1273,7 @@ When user input starts with \`[telegram:N]\`, the message came from a user via T
 - **Text**: \`[telegram:N] hello there\` — standard text message
 - **Voice**: \`[telegram:N] [voice] transcribed text here\` — voice message, already transcribed
 - **Photo**: \`[telegram:N] [image:/path/to/file.jpg]\` — use the Read tool to view the image
+- **File**: \`[telegram:N] [document:/path/to/file.ext]\` — file uploaded by user, read it to view contents
 
 **Response relay:** After completing your work, relay your response back:
 

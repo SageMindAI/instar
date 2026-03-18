@@ -84,6 +84,13 @@ interface TelegramUpdate {
       file_size?: number;
     }>;
     caption?: string;
+    document?: {
+      file_id: string;
+      file_unique_id: string;
+      file_name?: string;
+      mime_type?: string;
+      file_size?: number;
+    };
   };
 }
 
@@ -2132,6 +2139,26 @@ export class TelegramAdapter implements MessagingAdapter {
     return filepath;
   }
 
+  // ── Document Handling ───────────────────────────────────
+
+  /**
+   * Download a document from Telegram and save it locally.
+   * Preserves the original filename when available.
+   * Returns the local file path.
+   */
+  private async downloadDocument(fileId: string, messageId: number, originalName?: string): Promise<string> {
+    const docDir = path.join(this.stateDir, 'telegram-documents');
+    fs.mkdirSync(docDir, { recursive: true });
+    const ext = originalName ? path.extname(originalName) : '';
+    const baseName = originalName
+      ? originalName.replace(/[^a-zA-Z0-9._-]/g, '_')
+      : `document-${messageId}${ext}`;
+    const filename = `${Date.now()}-${baseName}`;
+    const filepath = path.join(docDir, filename);
+    await this.downloadFile(fileId, filepath);
+    return filepath;
+  }
+
   // ── Command Handling ─────────────────────────────────────
 
   /**
@@ -2965,6 +2992,12 @@ export class TelegramAdapter implements MessagingAdapter {
       return;
     }
 
+    // Handle document/file messages
+    if (msg.document) {
+      await this.handleDocumentMessage(msg, numericTopicId);
+      return;
+    }
+
     // Handle text messages
     if (!msg.text) return;
 
@@ -3221,6 +3254,75 @@ export class TelegramAdapter implements MessagingAdapter {
     } catch (err) {
       console.error(`[telegram] Failed to download photo: ${err}`);
       await this.sendToTopic(topicId, '(Photo received but I couldn\'t process it. Try sending it again.)').catch(() => {});
+    }
+  }
+
+  /**
+   * Handle an incoming document message: download, save, route with path.
+   */
+  private async handleDocumentMessage(
+    msg: NonNullable<TelegramUpdate['message']>,
+    topicId: number,
+  ): Promise<void> {
+    const doc = msg.document!;
+    const caption = msg.caption || '';
+
+    try {
+      const filepath = await this.downloadDocument(doc.file_id, msg.message_id, doc.file_name);
+      console.log(`[telegram] Downloaded document: ${filepath}`);
+
+      const content = caption
+        ? `[document:${filepath}] ${caption}`
+        : `[document:${filepath}]`;
+
+      const message: Message = {
+        id: `tg-${msg.message_id}`,
+        userId: msg.from.id.toString(),
+        content,
+        channel: { type: 'telegram', identifier: topicId.toString() },
+        receivedAt: new Date(msg.date * 1000).toISOString(),
+        metadata: {
+          telegramUserId: msg.from.id,
+          username: msg.from.username,
+          firstName: msg.from.first_name,
+          messageThreadId: topicId,
+          documentPath: filepath,
+          documentName: doc.file_name,
+          documentMimeType: doc.mime_type,
+        },
+      };
+
+      // Log it
+      this.appendToLog({
+        messageId: msg.message_id,
+        topicId,
+        text: content,
+        fromUser: true,
+        timestamp: new Date(msg.date * 1000).toISOString(),
+        sessionName: this.topicToSession.get(topicId) ?? null,
+        senderName: msg.from.first_name,
+        senderUsername: msg.from.username,
+        telegramUserId: msg.from.id,
+      });
+
+      // Fire callbacks
+      if (this.onTopicMessage) {
+        try {
+          this.onTopicMessage(message);
+        } catch (err) {
+          console.error(`[telegram] Topic message handler error: ${err}`);
+        }
+      }
+      if (this.handler) {
+        try {
+          await this.handler(message);
+        } catch (err) {
+          console.error(`[telegram] Handler error: ${err}`);
+        }
+      }
+    } catch (err) {
+      console.error(`[telegram] Failed to download document: ${err}`);
+      await this.sendToTopic(topicId, '(Document received but I couldn\'t process it. Try sending it again.)').catch(() => {});
     }
   }
 

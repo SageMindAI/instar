@@ -102,6 +102,13 @@ interface TelegramUpdate {
     text?: string;
     caption?: string;
     photo?: Array<{ file_id: string; file_size?: number; width: number; height: number }>;
+    document?: {
+      file_id: string;
+      file_unique_id: string;
+      file_name?: string;
+      mime_type?: string;
+      file_size?: number;
+    };
     date: number;
   };
 }
@@ -338,6 +345,12 @@ export class TelegramLifeline {
       return;
     }
 
+    // Handle document/file messages
+    if (msg.document && !msg.text) {
+      await this.handleDocumentMessage(msg);
+      return;
+    }
+
     if (!msg.text) return;
 
     const topicId = msg.message_thread_id ?? 1;
@@ -483,6 +496,91 @@ export class TelegramLifeline {
     const buf = Buffer.from(await fileRes.arrayBuffer());
     fs.writeFileSync(localPath, buf);
     return localPath;
+  }
+
+  /**
+   * Download a document from Telegram and save it to the state directory.
+   * Preserves the original filename when available.
+   */
+  private async downloadDocument(fileId: string, messageId: number, originalName?: string): Promise<string> {
+    const infoRes = await fetch(
+      `https://api.telegram.org/bot${this.config.token}/getFile?file_id=${encodeURIComponent(fileId)}`
+    );
+    if (!infoRes.ok) throw new Error(`getFile failed: ${infoRes.status}`);
+    const infoData = await infoRes.json() as { ok: boolean; result?: { file_path: string } };
+    if (!infoData.ok || !infoData.result?.file_path) throw new Error('getFile returned no path');
+
+    const filePath = infoData.result.file_path;
+    const docDir = path.join(this.projectConfig.stateDir, 'telegram-documents');
+    fs.mkdirSync(docDir, { recursive: true });
+    const ext = originalName ? path.extname(originalName) : '';
+    const baseName = originalName
+      ? originalName.replace(/[^a-zA-Z0-9._-]/g, '_')
+      : `document-${messageId}${ext}`;
+    const filename = `${Date.now()}-${baseName}`;
+    const localPath = path.join(docDir, filename);
+
+    const fileRes = await fetch(
+      `https://api.telegram.org/file/bot${this.config.token}/${filePath}`
+    );
+    if (!fileRes.ok) throw new Error(`File download failed: ${fileRes.status}`);
+    const buf = Buffer.from(await fileRes.arrayBuffer());
+    fs.writeFileSync(localPath, buf);
+    return localPath;
+  }
+
+  /**
+   * Handle an incoming document message: download it and forward/queue with [document:path] content.
+   */
+  private async handleDocumentMessage(
+    msg: NonNullable<TelegramUpdate['message']>,
+  ): Promise<void> {
+    const topicId = msg.message_thread_id ?? 1;
+    const doc = msg.document!;
+    const caption = msg.caption ?? '';
+
+    let content: string;
+    let documentPath: string | undefined;
+    try {
+      documentPath = await this.downloadDocument(doc.file_id, msg.message_id, doc.file_name);
+      content = caption ? `[document:${documentPath}] ${caption}` : `[document:${documentPath}]`;
+    } catch (err) {
+      content = caption ? `[document:download-failed] ${caption}` : '[document:download-failed]';
+      console.error(`[lifeline] Failed to download document: ${err}`);
+    }
+
+    if (this.supervisor.healthy) {
+      const forwarded = await this.forwardToServer(topicId, content, msg);
+      if (forwarded) {
+        await this.sendToTopic(topicId, '✓ Delivered');
+        return;
+      }
+    }
+
+    // Queue the document message (server down or forward failed)
+    this.queue.enqueue({
+      id: `tg-${msg.message_id}`,
+      topicId,
+      text: content,
+      fromUserId: msg.from.id,
+      fromUsername: msg.from.username,
+      fromFirstName: msg.from.first_name,
+      timestamp: new Date(msg.date * 1000).toISOString(),
+      documentPath,
+      documentName: doc.file_name,
+    });
+
+    if (this.shouldSendQueueAck(topicId)) {
+      if (this.supervisor.healthy) {
+        await this.sendToTopic(topicId,
+          `Server is restarting. Your file has been queued (${this.queue.length} in queue). It will be delivered when the server recovers.`
+        );
+      } else {
+        await this.sendToTopic(topicId,
+          `Server is temporarily down. Your file has been queued (${this.queue.length} in queue). It will be delivered when the server recovers.`
+        );
+      }
+    }
   }
 
   /**
@@ -1218,17 +1316,38 @@ export class TelegramLifeline {
     try {
       const content = fs.readFileSync(plistPath, 'utf-8');
 
-      // Check if plist already uses the boot wrapper
-      if (content.includes('instar-boot.sh')) return;
+      let needsRegeneration = false;
+      let reason = '';
 
-      // Plist uses old pattern (hardcoded node/instar path) — regenerate
-      console.log(`[Lifeline] Detected old-style plist without boot wrapper — self-healing`);
+      // Check 1: Plist should use the JS boot wrapper (not bash, not hardcoded paths)
+      if (!content.includes('instar-boot.js')) {
+        needsRegeneration = true;
+        reason = content.includes('instar-boot.sh')
+          ? 'uses bash boot wrapper (vulnerable to macOS TCC/FDA restrictions)'
+          : 'uses old-style hardcoded paths';
+      }
+
+      // Check 2: Verify the node path in the plist is still valid
+      if (!needsRegeneration) {
+        const nodePathMatch = content.match(/<string>(\/[^<]+node[^<]*)<\/string>/);
+        if (nodePathMatch) {
+          const plistNodePath = nodePathMatch[1];
+          if (!fs.existsSync(plistNodePath)) {
+            needsRegeneration = true;
+            reason = `node path no longer exists: ${plistNodePath}`;
+          }
+        }
+      }
+
+      if (!needsRegeneration) return;
+
+      console.log(`[Lifeline] Plist self-heal: ${reason}`);
 
       // Regenerate both boot wrapper and plist via installAutoStart (which calls installBootWrapper)
       const { installAutoStart } = await import('../commands/setup.js');
       const installed = installAutoStart(this.projectConfig.projectName, this.projectConfig.projectDir, true);
       if (installed) {
-        console.log(`[Lifeline] Plist self-healed: now uses boot wrapper (Node-version independent)`);
+        console.log(`[Lifeline] Plist self-healed: now uses node + JS boot wrapper`);
       }
     } catch (err) {
       console.warn(`[Lifeline] Plist self-heal failed (non-critical): ${err}`);

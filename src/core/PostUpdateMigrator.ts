@@ -361,6 +361,7 @@ When user input starts with \`[telegram:N]\` (e.g., \`[telegram:26] hello\`), th
 - **Text**: \`[telegram:26] hello there\` — standard text message
 - **Voice**: \`[telegram:26] [voice] transcribed text here\` — voice message, already transcribed
 - **Photo**: \`[telegram:26] [image:/path/to/file.jpg]\` or \`[telegram:26] [image:/path/to/file.jpg] caption text\` — use the Read tool to view the image at the given path
+- **File**: \`[telegram:26] [document:/path/to/file.ext]\` — file uploaded by user, read it to view contents
 
 **Response relay:** After completing your work, relay your response back:
 

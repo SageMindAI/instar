@@ -827,6 +827,7 @@ function messageToPipeline(msg: Message, topicName?: string): PipelineMessage {
     content: msg.content,
     type: msg.content.startsWith('[voice]') ? 'voice'
       : msg.content.startsWith('[image:') ? 'photo'
+      : msg.content.startsWith('[document:') ? 'document'
       : 'text',
     timestamp: msg.receivedAt,
   };
@@ -3538,18 +3539,40 @@ export async function startServer(options: StartOptions): Promise<void> {
       }
     }
 
-    // Self-healing: ensure autostart is installed so the server always restarts
+    // Self-healing: ensure autostart is installed AND uses the correct format.
     // This is a non-negotiable requirement — the user must always be able to reach their agent remotely.
-    // If autostart isn't installed, install it silently. The agent should never require human intervention
-    // to ensure its own resilience.
+    // If autostart isn't installed, install it silently. If it uses the old /bin/bash entry point
+    // (vulnerable to macOS TCC/FDA restrictions), regenerate it with the node + JS wrapper.
     try {
       const hasTelegram = !!telegram;
       const autostartInstalled = isAutostartInstalled(config.projectName);
-      if (!autostartInstalled) {
+      let needsReinstall = !autostartInstalled;
+
+      // On macOS, check if plist uses the modern JS boot wrapper
+      if (!needsReinstall && process.platform === 'darwin') {
+        const label = `ai.instar.${config.projectName}`;
+        const plistPath = path.join(os.homedir(), 'Library', 'LaunchAgents', `${label}.plist`);
+        try {
+          const plistContent = fs.readFileSync(plistPath, 'utf-8');
+          if (!plistContent.includes('instar-boot.js')) {
+            needsReinstall = true;
+            console.log(pc.yellow(`  Auto-start uses legacy format — upgrading to TCC-safe node entry point`));
+          } else {
+            // Verify node path in plist still exists
+            const nodeMatch = plistContent.match(/<string>(\/[^<]+node[^<]*)<\/string>/);
+            if (nodeMatch && !fs.existsSync(nodeMatch[1])) {
+              needsReinstall = true;
+              console.log(pc.yellow(`  Auto-start node path stale (${nodeMatch[1]}) — regenerating`));
+            }
+          }
+        } catch { /* plist read failed — will reinstall */ needsReinstall = true; }
+      }
+
+      if (needsReinstall) {
         const { installAutoStart } = await import('./setup.js');
         const installed = installAutoStart(config.projectName, config.projectDir, hasTelegram);
         if (installed) {
-          console.log(pc.green(`  Auto-start self-healed: installed ${process.platform === 'darwin' ? 'LaunchAgent' : 'systemd service'}`));
+          console.log(pc.green(`  Auto-start self-healed: installed ${process.platform === 'darwin' ? 'LaunchAgent (node + JS wrapper)' : 'systemd service'}`));
         } else {
           console.log(pc.yellow(`  Auto-start not available on ${process.platform}`));
         }

@@ -817,13 +817,24 @@ export class SessionManager extends EventEmitter {
     // Transform [image:path] tags into explicit read instructions.
     // Claude Code can natively view images via the Read tool, but only
     // if it knows there's an image file to read.
-    const transformed = text.replace(
+    let transformed = text.replace(
       /\[image:([^\]]+)\]/g,
       (_, imagePath: string) => {
         if (imagePath === 'download-failed') {
           return '[User sent a photo but the download failed]';
         }
         return `[User sent a photo — read the image file at ${imagePath} to view it]`;
+      }
+    );
+
+    // Transform [document:path] tags into explicit read instructions.
+    transformed = transformed.replace(
+      /\[document:([^\]]+)\]/g,
+      (_, docPath: string) => {
+        if (docPath === 'download-failed') {
+          return '[User sent a file but the download failed]';
+        }
+        return `[User sent a file — it has been saved to ${docPath}. Read the file to view its contents]`;
       }
     );
 

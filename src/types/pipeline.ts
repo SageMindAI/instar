@@ -61,7 +61,7 @@ export interface TelegramInbound {
   /** Message content */
   content: string;
   /** Message type */
-  type: 'text' | 'voice' | 'photo';
+  type: 'text' | 'voice' | 'photo' | 'document';
   /** When the message was sent (Telegram date) */
   timestamp: string;
   /** Type-specific metadata */
@@ -96,7 +96,7 @@ export interface PipelineMessage {
   /** Processed text content (voice → transcript, photo → [image:path]) */
   content: string;
   /** Original message type */
-  type: 'text' | 'voice' | 'photo';
+  type: 'text' | 'voice' | 'photo' | 'document';
   /** ISO 8601 timestamp */
   timestamp: string;
   /** The tmux session this message is routed to (set during routing) */
@@ -165,7 +165,7 @@ export function toInbound(
   opts: {
     topicName?: string;
     content: string;
-    type: 'text' | 'voice' | 'photo';
+    type: 'text' | 'voice' | 'photo' | 'document';
     media?: TelegramInbound['media'];
   },
 ): TelegramInbound {
