@@ -3548,24 +3548,35 @@ export async function startServer(options: StartOptions): Promise<void> {
       const autostartInstalled = isAutostartInstalled(config.projectName);
       let needsReinstall = !autostartInstalled;
 
-      // On macOS, check if plist uses the modern JS boot wrapper
-      if (!needsReinstall && process.platform === 'darwin') {
-        const label = `ai.instar.${config.projectName}`;
-        const plistPath = path.join(os.homedir(), 'Library', 'LaunchAgents', `${label}.plist`);
+      // On macOS, keep node symlink fresh and check plist format
+      if (process.platform === 'darwin') {
+        // Always update the node symlink — primary defense against NVM/asdf switches
         try {
-          const plistContent = fs.readFileSync(plistPath, 'utf-8');
-          if (!plistContent.includes('instar-boot.js')) {
-            needsReinstall = true;
-            console.log(pc.yellow(`  Auto-start uses legacy format — upgrading to TCC-safe node entry point`));
-          } else {
-            // Verify node path in plist still exists
-            const nodeMatch = plistContent.match(/<string>(\/[^<]+node[^<]*)<\/string>/);
-            if (nodeMatch && !fs.existsSync(nodeMatch[1])) {
+          const { ensureStableNodeSymlink } = await import('./setup.js');
+          ensureStableNodeSymlink(config.projectDir);
+        } catch { /* non-critical */ }
+
+        if (!needsReinstall) {
+          const label = `ai.instar.${config.projectName}`;
+          const plistPath = path.join(os.homedir(), 'Library', 'LaunchAgents', `${label}.plist`);
+          try {
+            const plistContent = fs.readFileSync(plistPath, 'utf-8');
+            if (!plistContent.includes('instar-boot.js')) {
               needsReinstall = true;
-              console.log(pc.yellow(`  Auto-start node path stale (${nodeMatch[1]}) — regenerating`));
+              console.log(pc.yellow(`  Auto-start uses legacy format — upgrading to TCC-safe node entry point`));
+            } else if (!plistContent.includes('.instar/bin/node')) {
+              needsReinstall = true;
+              console.log(pc.yellow(`  Auto-start uses direct node path — upgrading to stable symlink`));
+            } else {
+              // Verify node path in plist still exists (should be the symlink)
+              const nodeMatch = plistContent.match(/<string>(\/[^<]+node[^<]*)<\/string>/);
+              if (nodeMatch && !fs.existsSync(nodeMatch[1])) {
+                needsReinstall = true;
+                console.log(pc.yellow(`  Auto-start node path stale (${nodeMatch[1]}) — regenerating`));
+              }
             }
-          }
-        } catch { /* plist read failed — will reinstall */ needsReinstall = true; }
+          } catch { /* plist read failed — will reinstall */ needsReinstall = true; }
+        }
       }
 
       if (needsReinstall) {

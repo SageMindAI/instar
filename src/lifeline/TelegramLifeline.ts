@@ -1313,6 +1313,16 @@ export class TelegramLifeline {
     const label = `ai.instar.${this.projectConfig.projectName}`;
     const plistPath = path.join(os.homedir(), 'Library', 'LaunchAgents', `${label}.plist`);
 
+    // Always keep the node symlink up to date, even if plist is fine.
+    // This is the primary defense against NVM/asdf version switches breaking
+    // the next launchd restart.
+    try {
+      const { ensureStableNodeSymlink } = await import('../commands/setup.js');
+      ensureStableNodeSymlink(this.projectConfig.projectDir);
+    } catch (err) {
+      console.warn(`[Lifeline] Node symlink update failed (non-critical): ${err}`);
+    }
+
     try {
       const content = fs.readFileSync(plistPath, 'utf-8');
 
@@ -1327,7 +1337,13 @@ export class TelegramLifeline {
           : 'uses old-style hardcoded paths';
       }
 
-      // Check 2: Verify the node path in the plist is still valid
+      // Check 2: Plist should reference the stable node symlink, not a direct path
+      if (!needsRegeneration && !content.includes('.instar/bin/node')) {
+        needsRegeneration = true;
+        reason = 'uses direct node path instead of stable symlink (vulnerable to NVM/asdf switches)';
+      }
+
+      // Check 3: Verify the node path in the plist is still valid
       if (!needsRegeneration) {
         const nodePathMatch = content.match(/<string>(\/[^<]+node[^<]*)<\/string>/);
         if (nodePathMatch) {
@@ -1347,7 +1363,7 @@ export class TelegramLifeline {
       const { installAutoStart } = await import('../commands/setup.js');
       const installed = installAutoStart(this.projectConfig.projectName, this.projectConfig.projectDir, true);
       if (installed) {
-        console.log(`[Lifeline] Plist self-healed: now uses node + JS boot wrapper`);
+        console.log(`[Lifeline] Plist self-healed: now uses node symlink + JS boot wrapper`);
       }
     } catch (err) {
       console.warn(`[Lifeline] Plist self-heal failed (non-critical): ${err}`);
