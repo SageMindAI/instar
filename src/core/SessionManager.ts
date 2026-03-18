@@ -1047,6 +1047,15 @@ export class SessionManager extends EventEmitter {
    * Used by injectMessage after provenance checks pass.
    */
   private rawInject(tmuxSession: string, text: string): void {
+    // Reset idle-prompt timer — this session is about to receive new input,
+    // so it's not a zombie. Without this, the zombie detector can kill a session
+    // that just received a message but hasn't produced output yet.
+    const running = this.state.listSessions({ status: 'running' });
+    const match = running.find(s => s.tmuxSession === tmuxSession);
+    if (match) {
+      this.idlePromptSince.delete(match.id);
+    }
+
     const exactTarget = `=${tmuxSession}:`;
     try {
       if (text.includes('\n')) {
