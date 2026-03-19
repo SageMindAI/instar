@@ -3415,7 +3415,7 @@ export function createRoutes(ctx: RouteContext): Router {
       return;
     }
 
-    const { title, markdown } = req.body;
+    const { title, markdown, confirmed } = req.body;
     if (!title || typeof title !== 'string' || title.length > 256) {
       res.status(400).json({ error: '"title" must be a string under 256 characters' });
       return;
@@ -3426,6 +3426,18 @@ export function createRoutes(ctx: RouteContext): Router {
     }
     if (markdown.length > 100_000) {
       res.status(400).json({ error: '"markdown" must be under 100KB' });
+      return;
+    }
+
+    // Confirmation gate: Telegraph pages are PUBLIC. Require explicit confirmation.
+    if (!confirmed) {
+      res.status(400).json({
+        error: 'Publishing requires confirmation',
+        requiresConfirmation: true,
+        warning: 'This will create a PUBLIC Telegraph page. Anyone with the URL can view it. ' +
+          'Set "confirmed": true to proceed.',
+        preview: { title, contentLength: markdown.length },
+      });
       return;
     }
 

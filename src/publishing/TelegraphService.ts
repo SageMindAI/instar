@@ -69,6 +69,8 @@ export interface PublishedPage {
   updatedAt?: string;
   /** Original markdown for diffing/re-publishing */
   markdownHash?: string;
+  /** Access token used to create this page (required for editing) */
+  accessToken?: string;
 }
 
 export interface PublishingState {
@@ -167,13 +169,14 @@ export class TelegraphService {
       return_content: 'false',
     });
 
-    // Track locally
+    // Track locally (store token so edits use the correct credential)
     this.state.pages.push({
       path: page.path,
       url: page.url,
       title,
       publishedAt: new Date().toISOString(),
       markdownHash: simpleHash(markdown),
+      accessToken: token,
     });
     this.saveState();
 
@@ -182,9 +185,14 @@ export class TelegraphService {
 
   /**
    * Edit an existing Telegraph page.
+   * Uses the original access token stored when the page was created.
+   * Throws a clear error if the page is orphaned (token lost/rotated).
    */
   async editPage(pagePath: string, title: string, markdown: string): Promise<TelegraphPage> {
-    const token = await this.ensureAccount();
+    const existing = this.state.pages.find(p => p.path === pagePath);
+    // Prefer the per-page token (if stored), fall back to current account token
+    const token = existing?.accessToken || await this.ensureAccount();
+
     const content = markdownToNodes(markdown);
 
     const contentJson = JSON.stringify(content);
@@ -192,26 +200,37 @@ export class TelegraphService {
       throw new Error(`Content too large for Telegraph: ${contentJson.length} bytes (max 64000)`);
     }
 
-    const page = await this.apiCall<TelegraphPage>('editPage', {
-      access_token: token,
-      path: pagePath,
-      title,
-      content: contentJson,
-      author_name: this.state.authorName || this.config.authorName,
-      author_url: this.config.authorUrl,
-      return_content: 'false',
-    });
+    try {
+      const page = await this.apiCall<TelegraphPage>('editPage', {
+        access_token: token,
+        path: pagePath,
+        title,
+        content: contentJson,
+        author_name: this.state.authorName || this.config.authorName,
+        author_url: this.config.authorUrl,
+        return_content: 'false',
+      });
 
-    // Update local index
-    const existing = this.state.pages.find(p => p.path === pagePath);
-    if (existing) {
-      existing.title = title;
-      existing.updatedAt = new Date().toISOString();
-      existing.markdownHash = simpleHash(markdown);
+      // Update local index
+      if (existing) {
+        existing.title = title;
+        existing.updatedAt = new Date().toISOString();
+        existing.markdownHash = simpleHash(markdown);
+      }
+      this.saveState();
+
+      return page;
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      if (msg.includes('PAGE_ACCESS_DENIED')) {
+        throw new Error(
+          `Cannot edit page "${pagePath}" — access denied. ` +
+          `The access token used to create this page ${existing?.accessToken ? 'does not match' : 'was not stored (created before token tracking)'}. ` +
+          `This page is orphaned and can only be viewed, not edited.`
+        );
+      }
+      throw err;
     }
-    this.saveState();
-
-    return page;
   }
 
   /**
