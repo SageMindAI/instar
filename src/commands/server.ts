@@ -1159,15 +1159,22 @@ async function ensureAgentUpdatesTopic(
  */
 async function ensureSqliteBindings(): Promise<boolean> {
   try {
-    await import('better-sqlite3');
-    // Bindings loaded OK — nothing to do.
+    const BetterSqlite3 = (await import('better-sqlite3')).default;
+    // Import alone doesn't catch all mismatches — some NODE_MODULE_VERSION
+    // conflicts cause runtime crashes (C++ mutex errors) rather than import errors.
+    // Actually opening an in-memory DB exercises the native bindings fully.
+    const testDb = new BetterSqlite3(':memory:');
+    testDb.pragma('journal_mode = WAL');
+    testDb.close();
     return false;
   } catch (err) {
     const reason = err instanceof Error ? err.message : String(err);
     const isBindingError =
       reason.includes('Could not locate the bindings file') ||
       reason.includes('better-sqlite3') ||
-      reason.includes('was compiled against a different Node.js version');
+      reason.includes('was compiled against a different Node.js version') ||
+      reason.includes('NODE_MODULE_VERSION') ||
+      reason.includes('mutex lock failed');
 
     if (!isBindingError) return false; // Not a binding issue — let subsystems handle it.
 
@@ -1179,14 +1186,26 @@ async function ensureSqliteBindings(): Promise<boolean> {
       if (fs.existsSync(fixScript)) {
         execFileSync(process.execPath, [fixScript], { encoding: 'utf-8', timeout: 60000, stdio: 'pipe' });
       } else {
-        // Fallback: npm rebuild (may fail in pnpm/asdf environments)
-        const globalInstarDir = execSync('npm root -g', { encoding: 'utf-8', timeout: 10000 }).trim() + '/instar';
-        execSync('npm rebuild better-sqlite3', {
-          cwd: globalInstarDir,
-          encoding: 'utf-8',
-          timeout: 60000,
-          stdio: 'pipe',
-        });
+        // Fallback: npm rebuild in the directory containing better-sqlite3.
+        // Shadow installs have their own node_modules — try that first, then global.
+        const instarDir = new URL('../../..', import.meta.url).pathname;
+        const shadowBs3 = path.join(instarDir, 'node_modules', 'better-sqlite3');
+        if (fs.existsSync(shadowBs3)) {
+          execSync('npm rebuild better-sqlite3', {
+            cwd: instarDir,
+            encoding: 'utf-8',
+            timeout: 60000,
+            stdio: 'pipe',
+          });
+        } else {
+          const globalInstarDir = execSync('npm root -g', { encoding: 'utf-8', timeout: 10000 }).trim() + '/instar';
+          execSync('npm rebuild better-sqlite3', {
+            cwd: globalInstarDir,
+            encoding: 'utf-8',
+            timeout: 60000,
+            stdio: 'pipe',
+          });
+        }
       }
       console.log(pc.green('  better-sqlite3: rebuilt successfully — restarting to apply (ESM module cache must be cleared).'));
       return true; // Restart needed — ESM cache holds the stale failure
@@ -2824,6 +2843,10 @@ export async function startServer(options: StartOptions): Promise<void> {
     sleepWakeDetector.on('wake', async (event: { sleepDurationSeconds: number; timestamp: string }) => {
       console.log(`[SleepWake] Wake detected after ~${event.sleepDurationSeconds}s sleep`);
 
+      // Checkpoint SQLite WAL files to flush stale locks from pre-sleep connections
+      try { topicMemory?.checkpoint(); } catch { /* non-critical */ }
+      try { semanticMemory?.checkpoint(); } catch { /* non-critical */ }
+
       // Re-validate tmux sessions
       try {
         const tmuxPath = detectTmuxPath();
@@ -2836,18 +2859,27 @@ export async function startServer(options: StartOptions): Promise<void> {
         console.warn('[SleepWake] tmux check failed after wake');
       }
 
-      // Restart tunnel if configured
+      // Restart tunnel if configured — use forceStop to handle zombie cloudflared
+      // processes that may be hung after sleep. Race with a 15s overall timeout
+      // to prevent the wake handler itself from blocking indefinitely.
       if (tunnel) {
         try {
-          await tunnel.stop();
-          const tunnelUrl = await tunnel.start();
-          console.log(`[SleepWake] Tunnel restarted: ${tunnelUrl}`);
+          await Promise.race([
+            (async () => {
+              await tunnel.forceStop(5000);
+              const tunnelUrl = await tunnel.start();
+              console.log(`[SleepWake] Tunnel restarted: ${tunnelUrl}`);
 
-          // Re-broadcast dashboard URL after tunnel restart (quick tunnels get new URL)
-          if (telegram && tunnelUrl) {
-            const tunnelType = config.tunnel?.type || 'quick';
-            await telegram.broadcastDashboardUrl(tunnelUrl, tunnelType as 'quick' | 'named').catch(() => {});
-          }
+              // Re-broadcast dashboard URL after tunnel restart (quick tunnels get new URL)
+              if (telegram && tunnelUrl) {
+                const tunnelType = config.tunnel?.type || 'quick';
+                await telegram.broadcastDashboardUrl(tunnelUrl, tunnelType as 'quick' | 'named').catch(() => {});
+              }
+            })(),
+            new Promise<void>((_, reject) =>
+              setTimeout(() => reject(new Error('Tunnel restart timed out after 15s')), 15_000)
+            ),
+          ]);
         } catch (err) {
           console.error(`[SleepWake] Tunnel restart failed:`, err);
         }
@@ -3443,6 +3475,7 @@ export async function startServer(options: StartOptions): Promise<void> {
 
     // Start tunnel AFTER server is listening (with retry on failure)
     if (tunnel) {
+      tunnel.enableAutoReconnect();
       const maxRetries = 5;
       let tunnelStarted = false;
       for (let attempt = 1; attempt <= maxRetries; attempt++) {
@@ -3648,6 +3681,17 @@ export async function startServer(options: StartOptions): Promise<void> {
 
     process.on('SIGINT', shutdown);
     process.on('SIGTERM', shutdown);
+
+    // Last-resort SQLite cleanup — if the process crashes from an uncaught exception
+    // (e.g., cloudflared crash cascade during sleep/wake), close databases to prevent
+    // the "mutex lock failed" error on next start. This doesn't prevent the crash,
+    // but ensures the next boot is clean.
+    process.on('uncaughtException', (err) => {
+      console.error('[FATAL] Uncaught exception — closing databases before crash:', err.message);
+      try { topicMemory?.close(); } catch { /* best effort */ }
+      try { semanticMemory?.close(); } catch { /* best effort */ }
+      process.exit(1);
+    });
 
     // Wire the ForegroundRestartWatcher to the graceful shutdown function.
     // This ensures auto-update restarts close all resources (especially SQLite
