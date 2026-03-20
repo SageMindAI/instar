@@ -2285,12 +2285,84 @@ export function createRoutes(ctx: RouteContext): Router {
       return;
     }
     try {
-      const killed = ctx.sessionManager.killSession(req.params.id);
+      // Try direct UUID lookup first, then fall back to tmux session name lookup.
+      // The dashboard sends tmux session names, not UUIDs.
+      let killed = ctx.sessionManager.killSession(req.params.id);
+      if (!killed) {
+        // Look up by tmux session name
+        const allSessions = ctx.state.listSessions({ status: 'running' });
+        const match = allSessions.find(s => s.tmuxSession === req.params.id);
+        if (match) {
+          killed = ctx.sessionManager.killSession(match.id);
+        }
+      }
       if (!killed) {
         res.status(404).json({ error: `Session "${req.params.id}" not found` });
         return;
       }
       res.json({ ok: true, killed: req.params.id });
+    } catch (err) {
+      res.status(500).json({ error: err instanceof Error ? err.message : String(err) });
+    }
+  });
+
+  // Create an interactive session from the dashboard.
+  // By default creates a Telegram topic; set headless=true to skip.
+  router.post('/sessions/create', spawnLimiter, async (req, res) => {
+    const { name, headless } = req.body;
+
+    if (!name || typeof name !== 'string' || name.trim().length < 1) {
+      res.status(400).json({ error: '"name" is required (non-empty string)' });
+      return;
+    }
+    if (name.length > 128) {
+      res.status(400).json({ error: '"name" must be 128 characters or fewer' });
+      return;
+    }
+
+    const topicName = name.trim();
+    let topicId: number | undefined;
+
+    // Create Telegram topic unless headless
+    if (!headless && ctx.telegram) {
+      try {
+        const topic = await ctx.telegram.findOrCreateForumTopic(topicName);
+        topicId = topic.topicId;
+      } catch (err) {
+        // Non-fatal: fall back to headless if topic creation fails
+        console.error(`[sessions/create] Telegram topic creation failed, proceeding headless: ${err}`);
+      }
+    }
+
+    try {
+      const tmuxSession = await ctx.sessionManager.spawnInteractiveSession(
+        undefined, // no initial message
+        topicName,
+        topicId ? { telegramTopicId: topicId } : undefined,
+      );
+
+      // Update topic-session registry if we created a topic
+      if (topicId) {
+        const registryPath = path.join(ctx.config.stateDir, 'topic-session-registry.json');
+        try {
+          const reg = fs.existsSync(registryPath)
+            ? JSON.parse(fs.readFileSync(registryPath, 'utf-8'))
+            : { topicToSession: {}, topicToName: {} };
+          reg.topicToSession[String(topicId)] = tmuxSession;
+          reg.topicToName[String(topicId)] = topicName;
+          fs.writeFileSync(registryPath, JSON.stringify(reg, null, 2));
+        } catch {
+          // Non-fatal — registry is best-effort
+        }
+      }
+
+      res.status(201).json({
+        ok: true,
+        session: tmuxSession,
+        name: topicName,
+        topicId: topicId || null,
+        headless: !topicId,
+      });
     } catch (err) {
       res.status(500).json({ error: err instanceof Error ? err.message : String(err) });
     }

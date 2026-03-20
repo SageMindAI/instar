@@ -1206,6 +1206,213 @@
       to { opacity: 1; transform: translateY(0); }
     }
 
+    /* ── New Session modal ────────────────────────────── */
+    .modal-backdrop {
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,0.6);
+      z-index: 5000;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .modal-dialog {
+      background: var(--bg-panel);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 24px;
+      width: 380px;
+      max-width: 90vw;
+      box-shadow: 0 8px 32px rgba(0,0,0,0.6);
+    }
+
+    .modal-dialog h3 {
+      color: var(--text-bright);
+      font-size: 16px;
+      margin-bottom: 16px;
+    }
+
+    .modal-field {
+      margin-bottom: 14px;
+    }
+
+    .modal-field label {
+      display: block;
+      font-size: 12px;
+      color: var(--text-dim);
+      margin-bottom: 4px;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+    }
+
+    .modal-field input[type="text"] {
+      width: 100%;
+      padding: 10px 12px;
+      border-radius: 6px;
+      border: 1px solid var(--border);
+      background: var(--bg);
+      color: var(--text-bright);
+      font-size: 14px;
+      outline: none;
+      box-sizing: border-box;
+    }
+
+    .modal-field input[type="text"]:focus {
+      border-color: var(--accent-dim);
+    }
+
+    .modal-toggle {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      cursor: pointer;
+      user-select: none;
+    }
+
+    .modal-toggle input[type="checkbox"] {
+      appearance: none;
+      width: 36px;
+      height: 20px;
+      border-radius: 10px;
+      background: #333;
+      position: relative;
+      cursor: pointer;
+      transition: background 0.2s;
+      flex-shrink: 0;
+    }
+
+    .modal-toggle input[type="checkbox"]::after {
+      content: '';
+      position: absolute;
+      top: 2px;
+      left: 2px;
+      width: 16px;
+      height: 16px;
+      border-radius: 50%;
+      background: #888;
+      transition: transform 0.2s, background 0.2s;
+    }
+
+    .modal-toggle input[type="checkbox"]:checked {
+      background: var(--accent-dim);
+    }
+
+    .modal-toggle input[type="checkbox"]:checked::after {
+      transform: translateX(16px);
+      background: #fff;
+    }
+
+    .modal-toggle span {
+      font-size: 13px;
+      color: var(--text);
+    }
+
+    .modal-hint {
+      font-size: 11px;
+      color: var(--text-dim);
+      margin-top: 4px;
+      font-style: italic;
+    }
+
+    .modal-actions {
+      display: flex;
+      gap: 8px;
+      margin-top: 20px;
+      justify-content: flex-end;
+    }
+
+    .modal-actions button {
+      padding: 8px 18px;
+      border-radius: 6px;
+      font-size: 13px;
+      font-weight: 500;
+      cursor: pointer;
+      border: 1px solid var(--border);
+    }
+
+    .modal-btn-cancel {
+      background: var(--bg);
+      color: var(--text);
+    }
+
+    .modal-btn-cancel:hover {
+      background: var(--bg-hover);
+    }
+
+    .modal-btn-create {
+      background: var(--accent-dim);
+      color: #000;
+      border-color: var(--accent-dim);
+    }
+
+    .modal-btn-create:hover {
+      background: var(--accent);
+    }
+
+    .modal-btn-create:disabled {
+      opacity: 0.4;
+      cursor: not-allowed;
+    }
+
+    /* ── New session button ───────────────────────────── */
+    .new-session-btn {
+      width: 28px;
+      height: 28px;
+      border-radius: 6px;
+      border: 1px solid var(--border);
+      background: var(--bg);
+      color: var(--accent);
+      font-size: 18px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: all 0.15s;
+      line-height: 1;
+    }
+
+    .new-session-btn:hover {
+      background: var(--bg-hover);
+      border-color: var(--accent-dim);
+    }
+
+    /* ── Session close button ─────────────────────────── */
+    .session-close-btn {
+      background: none;
+      border: none;
+      color: var(--text-dim);
+      cursor: pointer;
+      font-size: 14px;
+      padding: 2px 6px;
+      border-radius: 4px;
+      opacity: 0;
+      transition: opacity 0.15s, color 0.15s;
+      flex-shrink: 0;
+      line-height: 1;
+    }
+
+    .session-item:hover .session-close-btn,
+    .session-item.active .session-close-btn {
+      opacity: 1;
+    }
+
+    .session-close-btn:hover {
+      color: var(--red);
+      background: rgba(239, 68, 68, 0.1);
+    }
+
+    .session-name-row {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+    }
+
+    .session-name-row .session-name {
+      flex: 1;
+      min-width: 0;
+    }
+
     /* Conflict dialog */
     .conflict-overlay {
       position: fixed;
@@ -1493,7 +1700,10 @@
     <aside class="sidebar" id="sessionsTab">
       <div class="sidebar-header">
         <h2>Sessions</h2>
-        <span class="session-count" id="sessionCount">0</span>
+        <div style="display:flex;align-items:center;gap:8px;">
+          <span class="session-count" id="sessionCount">0</span>
+          <button class="new-session-btn" onclick="openNewSessionModal()" title="New session">+</button>
+        </div>
       </div>
       <div class="session-list" id="sessionList">
         <div class="empty-state" id="emptyState">
@@ -1528,6 +1738,8 @@
             <button class="action-btn action-arrow" onclick="sendKey('Down')" title="Arrow Down">&darr;</button>
             <button class="action-btn action-arrow" onclick="sendKey('Left')" title="Arrow Left">&larr;</button>
             <button class="action-btn action-arrow" onclick="sendKey('Right')" title="Arrow Right">&rarr;</button>
+            <span class="action-separator"></span>
+            <button class="action-btn danger" onclick="closeActiveSession()" title="Close session">&times; Close</button>
           </div>
         </div>
         <div class="terminal-container" id="terminalContainer"></div>
@@ -1577,6 +1789,29 @@
         <button class="btn btn-overwrite" onclick="handleConflictOverwrite()">Overwrite</button>
         <button class="btn btn-reload" onclick="handleConflictReload()">Reload</button>
         <button class="btn btn-dismiss" onclick="hideConflictDialog()">Cancel</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- New Session modal -->
+  <div class="modal-backdrop" id="newSessionModal" style="display:none" onclick="closeNewSessionModal(event)">
+    <div class="modal-dialog" onclick="event.stopPropagation()">
+      <h3>New Session</h3>
+      <div class="modal-field">
+        <label for="newSessionName">Topic Name</label>
+        <input type="text" id="newSessionName" placeholder="e.g. dashboard-redesign" maxlength="128"
+               onkeydown="if(event.key==='Enter')createNewSession()" autofocus>
+      </div>
+      <div class="modal-field">
+        <label class="modal-toggle">
+          <input type="checkbox" id="newSessionHeadless">
+          <span>Headless (no Telegram topic)</span>
+        </label>
+        <div class="modal-hint">Headless sessions still appear in the dashboard but won't create a Telegram topic.</div>
+      </div>
+      <div class="modal-actions">
+        <button class="modal-btn-cancel" onclick="closeNewSessionModal()">Cancel</button>
+        <button class="modal-btn-create" id="createSessionBtn" onclick="createNewSession()">Create Session</button>
       </div>
     </div>
   </div>
@@ -1892,7 +2127,10 @@
         }
 
         el.innerHTML = `
-          <div class="session-name">${escapeHtml(session.name)}</div>
+          <div class="session-name-row">
+            <div class="session-name">${escapeHtml(session.name)}</div>
+            <button class="session-close-btn" data-tmux="${escapeHtml(session.tmuxSession)}" data-name="${escapeHtml(session.name)}" onclick="event.stopPropagation();closeSession(this.dataset.tmux,this.dataset.name)" title="Close session">&times;</button>
+          </div>
           <div class="session-meta">
             <span class="type-badge ${sType}">${sType}</span>
             <span class="model-badge ${model}">${model}</span>
@@ -2048,6 +2286,96 @@
       if (!activeSession) return;
       // Send literal text without Enter
       wsSend({ type: 'key', session: activeSession, key: text });
+    }
+
+    // ── New Session Modal ────────────────────────────────────
+    function openNewSessionModal() {
+      document.getElementById('newSessionModal').style.display = 'flex';
+      const nameInput = document.getElementById('newSessionName');
+      nameInput.value = '';
+      document.getElementById('newSessionHeadless').checked = false;
+      setTimeout(() => nameInput.focus(), 50);
+    }
+
+    function closeNewSessionModal(e) {
+      if (e && e.target !== e.currentTarget) return;
+      document.getElementById('newSessionModal').style.display = 'none';
+    }
+
+    async function createNewSession() {
+      const nameInput = document.getElementById('newSessionName');
+      const headless = document.getElementById('newSessionHeadless').checked;
+      const name = nameInput.value.trim();
+      const btn = document.getElementById('createSessionBtn');
+
+      if (!name) {
+        nameInput.focus();
+        nameInput.style.borderColor = 'var(--red)';
+        setTimeout(() => nameInput.style.borderColor = '', 2000);
+        return;
+      }
+
+      btn.disabled = true;
+      btn.textContent = 'Creating...';
+
+      try {
+        const resp = await fetch('/sessions/create', {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${token}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ name, headless }),
+        });
+        const data = await resp.json();
+
+        if (!resp.ok) {
+          showToast(data.error || 'Failed to create session', 'error');
+          return;
+        }
+
+        showToast(`Session "${name}" created${data.topicId ? ' with Telegram topic' : ' (headless)'}`, 'success');
+        document.getElementById('newSessionModal').style.display = 'none';
+      } catch (err) {
+        showToast('Network error: ' + (err.message || 'Cannot reach server'), 'error');
+      } finally {
+        btn.disabled = false;
+        btn.textContent = 'Create Session';
+      }
+    }
+
+    // ── Close Session ─────────────────────────────────────────
+    async function closeSession(tmuxSession, sessionName) {
+      if (!confirm(`Close session "${sessionName}"?`)) return;
+
+      try {
+        const resp = await fetch(`/sessions/${encodeURIComponent(tmuxSession)}`, {
+          method: 'DELETE',
+          headers: { 'Authorization': `Bearer ${token}` },
+        });
+        const data = await resp.json();
+
+        if (!resp.ok) {
+          showToast(data.error || 'Failed to close session', 'error');
+          return;
+        }
+
+        showToast(`Session "${sessionName}" closed`, 'success');
+
+        // If this was the active session, clear terminal
+        if (activeSession === tmuxSession) {
+          goBack();
+        }
+      } catch (err) {
+        showToast('Network error: ' + (err.message || 'Cannot reach server'), 'error');
+      }
+    }
+
+    function closeActiveSession() {
+      if (!activeSession) return;
+      const session = sessions.find(s => s.tmuxSession === activeSession);
+      const name = session ? session.name : activeSession;
+      closeSession(activeSession, name);
     }
 
     // ── Helpers ───────────────────────────────────────────────
