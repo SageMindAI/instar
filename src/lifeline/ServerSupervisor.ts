@@ -50,7 +50,7 @@ export class ServerSupervisor extends EventEmitter {
   private restartBackoffMs = 5000;
   private isRunning = false;
   private lastHealthy = 0;
-  private startupGraceMs = 90_000; // 90 seconds grace period — allows time for native module auto-rebuild on first start
+  private startupGraceMs = 180_000; // 3 minutes grace period — allows time for heavy init (Threadline, tunnel, agent discovery)
   private spawnedAt = 0;
   private retryCooldownMs = 5 * 60_000; // 5 minutes cooldown after max retries exhausted
   private maxRetriesExhaustedAt = 0;
@@ -84,6 +84,8 @@ export class ServerSupervisor extends EventEmitter {
     stateDir?: string;
     /** How long to wait for server recovery during a planned restart before alerting. Default: 5 minutes. */
     maintenanceWaitMinutes?: number;
+    /** How long to wait after spawning before starting health checks. Default: 180 seconds (3 minutes). */
+    startupGraceSeconds?: number;
   }) {
     super();
     this.projectDir = options.projectDir;
@@ -95,6 +97,9 @@ export class ServerSupervisor extends EventEmitter {
 
     if (options.maintenanceWaitMinutes !== undefined) {
       this.maintenanceWaitMs = options.maintenanceWaitMinutes * 60_000;
+    }
+    if (options.startupGraceSeconds !== undefined) {
+      this.startupGraceMs = options.startupGraceSeconds * 1000;
     }
   }
 
