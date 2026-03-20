@@ -218,7 +218,7 @@ function readTailEntries(jsonlPath: string, maxEntries: number = 20): any[] {
     } finally {
       fs.closeSync(fd);
     }
-  } catch {
+  } catch { // @silent-fallback-ok — pure detector function; empty array means "no crash detected"
     return [];
   }
 

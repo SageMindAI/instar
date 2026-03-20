@@ -7,11 +7,14 @@
  * Always creates a backup before truncating. If resume after truncation fails,
  * the backup can be restored.
  *
+ * Uses tail-scan to avoid reading entire multi-MB files into memory.
+ * Only the tail is parsed to find the truncation point; the file is then
+ * truncated at the byte offset without buffering the full content.
+ *
  * Part of PROP-session-stall-recovery Phase B
  */
 
 import * as fs from 'node:fs';
-import * as path from 'node:path';
 
 // ============================================================================
 // Types
@@ -27,10 +30,12 @@ export interface TruncationResult {
   strategy: TruncationStrategy;
 }
 
-interface ParsedEntry {
-  raw: string;
+interface TailEntry {
   parsed: any;
-  lineIndex: number;
+  /** Byte offset where this line starts in the file */
+  byteOffset: number;
+  /** Byte length of this line (including newline) */
+  byteLength: number;
 }
 
 // ============================================================================
@@ -39,6 +44,9 @@ interface ParsedEntry {
 
 /**
  * Truncate a JSONL file to a safe point for resume.
+ *
+ * Uses tail-scan: reads the last ~256KB of the file to find the truncation
+ * point, then truncates at the byte offset. Avoids loading the entire file.
  *
  * @param jsonlPath - Path to the JSONL conversation file
  * @param strategy - How far back to truncate
@@ -50,35 +58,70 @@ export function truncateJsonlToSafePoint(
   strategy: TruncationStrategy = 'last_exchange',
   nExchanges: number = 1,
 ): TruncationResult {
-  // 1. Read the full JSONL file
-  const content = fs.readFileSync(jsonlPath, 'utf-8');
-  const lines = content.split('\n').filter(line => line.trim().length > 0);
-
-  if (lines.length === 0) {
+  const stat = fs.statSync(jsonlPath);
+  if (stat.size === 0) {
     throw new Error('JSONL file is empty — nothing to truncate');
   }
 
-  // 2. Parse all entries
-  const entries: ParsedEntry[] = [];
-  for (let i = 0; i < lines.length; i++) {
-    try {
-      entries.push({
-        raw: lines[i],
-        parsed: JSON.parse(lines[i]),
-        lineIndex: i,
-      });
-    } catch {
-      // Keep unparseable lines as-is (they'll be included in output)
-      entries.push({
-        raw: lines[i],
-        parsed: null,
-        lineIndex: i,
-      });
-    }
+  // Read tail of file — 256KB is enough for ~50+ JSONL entries
+  const TAIL_BYTES = 256 * 1024;
+  const readStart = Math.max(0, stat.size - TAIL_BYTES);
+  const readSize = Math.min(TAIL_BYTES, stat.size);
+
+  const fd = fs.openSync(jsonlPath, 'r');
+  let tailContent: string;
+  try {
+    const buffer = Buffer.alloc(readSize);
+    fs.readSync(fd, buffer, 0, readSize, readStart);
+    tailContent = buffer.toString('utf-8');
+  } finally {
+    fs.closeSync(fd);
   }
 
-  // 3. Find truncation point based on strategy
-  let keepUpTo: number; // Index in entries array — keep entries[0..keepUpTo-1]
+  // Parse lines from tail with byte offsets
+  const rawLines = tailContent.split('\n');
+  const entries: TailEntry[] = [];
+
+  // Track byte position within the tail
+  let bytePos = readStart;
+  // If we started mid-file, skip the first (potentially partial) line
+  const startIdx = readStart > 0 ? 1 : 0;
+  if (readStart > 0) {
+    bytePos += Buffer.byteLength(rawLines[0] + '\n', 'utf-8');
+  }
+
+  // Count total lines (approximate — we know exact count in the tail)
+  let totalLinesInTail = 0;
+
+  for (let i = startIdx; i < rawLines.length; i++) {
+    const line = rawLines[i];
+    const lineBytes = Buffer.byteLength(line, 'utf-8');
+
+    if (line.trim().length > 0) {
+      totalLinesInTail++;
+      try {
+        entries.push({
+          parsed: JSON.parse(line),
+          byteOffset: bytePos,
+          byteLength: lineBytes + 1, // +1 for newline
+        });
+      } catch { // @silent-fallback-ok — skipping corrupt JSONL lines during tail-scan is expected
+        entries.push({
+          parsed: null,
+          byteOffset: bytePos,
+          byteLength: lineBytes + 1,
+        });
+      }
+    }
+    bytePos += lineBytes + 1; // +1 for newline separator
+  }
+
+  if (entries.length === 0) {
+    throw new Error('JSONL file has no parseable entries in tail');
+  }
+
+  // Find truncation point (index in entries array)
+  let keepUpTo: number;
 
   switch (strategy) {
     case 'last_exchange':
@@ -94,21 +137,39 @@ export function truncateJsonlToSafePoint(
       throw new Error(`Unknown truncation strategy: ${strategy}`);
   }
 
-  // Safety: never truncate to nothing — keep at least the first entry
+  // Safety: never truncate to nothing
   if (keepUpTo <= 0) keepUpTo = 1;
 
-  // 4. Create backup
+  // If we're keeping everything in the tail, nothing to truncate
+  if (keepUpTo >= entries.length) {
+    // Create backup anyway for consistency, but don't truncate
+    const backupPath = `${jsonlPath}.bak.${Date.now()}`;
+    fs.copyFileSync(jsonlPath, backupPath);
+    return {
+      originalLines: totalLinesInTail,
+      truncatedLines: totalLinesInTail,
+      removedLines: 0,
+      backupPath,
+      strategy,
+    };
+  }
+
+  // Calculate the byte offset to truncate at
+  const truncateAtByte = entries[keepUpTo].byteOffset;
+
+  // Create backup before truncating
   const backupPath = `${jsonlPath}.bak.${Date.now()}`;
   fs.copyFileSync(jsonlPath, backupPath);
 
-  // 5. Write truncated content
-  const truncatedLines = entries.slice(0, keepUpTo).map(e => e.raw);
-  fs.writeFileSync(jsonlPath, truncatedLines.join('\n') + '\n');
+  // Truncate the file at the byte offset
+  fs.truncateSync(jsonlPath, truncateAtByte);
+
+  const removedLines = entries.length - keepUpTo;
 
   return {
-    originalLines: entries.length,
+    originalLines: totalLinesInTail + (readStart > 0 ? -1 : 0), // approximate if tail-only
     truncatedLines: keepUpTo,
-    removedLines: entries.length - keepUpTo,
+    removedLines,
     backupPath,
     strategy,
   };
@@ -122,15 +183,13 @@ export function truncateJsonlToSafePoint(
  * Find the start of the last exchange (assistant message that may have tool_use).
  * Removes the last assistant message and any following entries.
  */
-function findLastExchangeStart(entries: ParsedEntry[]): number {
-  // Walk backwards to find the last assistant entry
+function findLastExchangeStart(entries: TailEntry[]): number {
   for (let i = entries.length - 1; i >= 0; i--) {
     const entry = entries[i].parsed;
     if (entry && entry.type === 'assistant') {
-      return i; // Truncate at this point (exclude this entry and everything after)
+      return i;
     }
   }
-  // No assistant entry found — keep everything
   return entries.length;
 }
 
@@ -138,8 +197,7 @@ function findLastExchangeStart(entries: ParsedEntry[]): number {
  * Find the end of the last complete tool exchange (tool_use followed by tool_result).
  * Keeps up to and including the last successful tool_result.
  */
-function findLastSuccessfulToolEnd(entries: ParsedEntry[]): number {
-  // Walk backwards looking for a successful tool_result
+function findLastSuccessfulToolEnd(entries: TailEntry[]): number {
   for (let i = entries.length - 1; i >= 0; i--) {
     const entry = entries[i].parsed;
     if (!entry) continue;
@@ -149,28 +207,24 @@ function findLastSuccessfulToolEnd(entries: ParsedEntry[]): number {
         (b: any) => b.type === 'tool_result' && !b.is_error
       );
       if (hasSuccessfulResult) {
-        return i + 1; // Include this entry
+        return i + 1;
       }
     }
   }
-
-  // No successful tool result found — keep just the first entry
   return 1;
 }
 
 /**
  * Remove the last N complete exchanges (assistant + tool_result pairs).
  */
-function findNExchangesBack(entries: ParsedEntry[], n: number): number {
+function findNExchangesBack(entries: TailEntry[], n: number): number {
   let exchangesFound = 0;
   let cutPoint = entries.length;
 
-  // Walk backwards counting complete exchanges
   for (let i = entries.length - 1; i >= 0; i--) {
     const entry = entries[i].parsed;
     if (!entry) continue;
 
-    // An assistant message marks the start of an exchange
     if (entry.type === 'assistant') {
       exchangesFound++;
       if (exchangesFound >= n) {
@@ -185,20 +239,37 @@ function findNExchangesBack(entries: ParsedEntry[], n: number): number {
 
 /**
  * Validate that a JSONL file contains valid entries.
- * Returns the number of valid lines.
+ * Uses tail-scan — reads last 256KB rather than the full file.
  */
 export function validateJsonl(jsonlPath: string): { valid: number; invalid: number } {
-  const content = fs.readFileSync(jsonlPath, 'utf-8');
-  const lines = content.split('\n').filter(line => line.trim().length > 0);
+  const stat = fs.statSync(jsonlPath);
+  if (stat.size === 0) return { valid: 0, invalid: 0 };
+
+  const TAIL_BYTES = 256 * 1024;
+  const readStart = Math.max(0, stat.size - TAIL_BYTES);
+
+  const fd = fs.openSync(jsonlPath, 'r');
+  let tailContent: string;
+  try {
+    const buffer = Buffer.alloc(Math.min(TAIL_BYTES, stat.size));
+    fs.readSync(fd, buffer, 0, buffer.length, readStart);
+    tailContent = buffer.toString('utf-8');
+  } finally {
+    fs.closeSync(fd);
+  }
+
+  const lines = tailContent.split('\n').filter(line => line.trim().length > 0);
+  // Skip first line if we started mid-file
+  const startIdx = readStart > 0 ? 1 : 0;
 
   let valid = 0;
   let invalid = 0;
 
-  for (const line of lines) {
+  for (let i = startIdx; i < lines.length; i++) {
     try {
-      JSON.parse(line);
+      JSON.parse(lines[i]);
       valid++;
-    } catch {
+    } catch { // @silent-fallback-ok — counting invalid lines is the purpose of this function
       invalid++;
     }
   }

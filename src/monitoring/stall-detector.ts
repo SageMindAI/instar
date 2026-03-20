@@ -74,7 +74,7 @@ export function detectToolCallStall(
     } finally {
       fs.closeSync(fd);
     }
-  } catch {
+  } catch { // @silent-fallback-ok — pure detector function; null means "no stall detected"
     return null; // File doesn't exist or can't be read
   }
 
@@ -91,7 +91,7 @@ export function detectToolCallStall(
   for (const line of tailLines) {
     try {
       entries.push(JSON.parse(line));
-    } catch {
+    } catch { // @silent-fallback-ok — skipping corrupt JSONL lines is expected during tail-read parsing
       // Skip corrupt lines
     }
   }
@@ -163,12 +163,7 @@ export function detectToolCallStall(
   if (stallDurationMs < threshold) return null;
 
   // 10. Extract session UUID from filename
-  const basename = path.basename(jsonlPath, '.jsonl');
-  // UUID format: xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
-  const uuidMatch = basename.match(
-    /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
-  );
-  const sessionUuid = uuidMatch ? basename : basename;
+  const sessionUuid = path.basename(jsonlPath, '.jsonl');
 
   return {
     jsonlPath,
