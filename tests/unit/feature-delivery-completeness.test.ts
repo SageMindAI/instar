@@ -162,6 +162,7 @@ describe('Feature Delivery Completeness', () => {
       '## Identity History',      // AGENT.md section, not CLAUDE.md — no template parity needed
       'Session Continuity',       // conditional (Telegram-only), not a universal feature
       'CONTINUATION',             // alternate check for Session Continuity
+      '/api/files/',              // alternate check for File Viewer
     ];
 
     it('all new migrator CLAUDE.md sections are tracked', () => {
