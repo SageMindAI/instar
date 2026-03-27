@@ -40,6 +40,7 @@ export interface SessionDiagnostics {
   suggestions: string[];
 }
 import { DegradationReporter } from '../monitoring/DegradationReporter.js';
+import { buildClaudeCliNotFoundMessage, isClaudeCliMissingError } from './ClaudeCliErrors.js';
 import { InputGuard, type TopicBinding } from './InputGuard.js';
 import type { InputDetector } from '../monitoring/PromptGate.js';
 
@@ -1016,10 +1017,15 @@ export class SessionManager extends EventEmitter {
           // Stabilization delay: Claude's TUI may redraw after loading large JONSLs,
           // clearing any text injected too early. Wait for the redraw to settle.
           const stabilizationMs = options?.resumeSessionId ? 5000 : 0;
-          setTimeout(() => {
+          if (stabilizationMs > 0) {
+            setTimeout(() => {
+              this.injectMessage(tmuxSession, initialMessage);
+              console.log(`[SessionManager] Injected initial message into "${tmuxSession}" (${initialMessage.length} chars${stabilizationMs ? ', after stabilization delay' : ''})`);
+            }, stabilizationMs);
+          } else {
             this.injectMessage(tmuxSession, initialMessage);
-            console.log(`[SessionManager] Injected initial message into "${tmuxSession}" (${initialMessage.length} chars${stabilizationMs ? ', after stabilization delay' : ''})`);
-          }, stabilizationMs);
+            console.log(`[SessionManager] Injected initial message into "${tmuxSession}" (${initialMessage.length} chars)`);
+          }
         } else {
           console.error(`[SessionManager] Claude not ready in session "${tmuxSession}" — message NOT injected. Session may need manual intervention.`);
           // Still try to inject — Claude might be ready but prompt detection failed
@@ -1029,7 +1035,8 @@ export class SessionManager extends EventEmitter {
           }
         }
       }).catch((err) => {
-        console.error(`[SessionManager] Error waiting for Claude ready in "${tmuxSession}": ${err}`);
+        const message = err instanceof Error ? err.message : String(err);
+        console.error(`[SessionManager] Error waiting for Claude ready in "${tmuxSession}": ${message}`);
       });
     }
 
@@ -1434,26 +1441,37 @@ export class SessionManager extends EventEmitter {
    */
   private async waitForClaudeReady(tmuxSession: string, timeoutMs: number = 30000): Promise<boolean> {
     const start = Date.now();
-    // Wait a minimum startup delay before checking (Claude needs time to load)
-    await new Promise(r => setTimeout(r, 3000));
+    const startupGraceMs = 3000;
+    let lastOutput = '';
+
     while (Date.now() - start < timeoutMs) {
+      const output = this.captureOutput(tmuxSession, 5);
+      if (output) {
+        lastOutput = output;
+      }
+
       if (!this.tmuxSessionExists(tmuxSession)) {
+        if (isClaudeCliMissingError(null, lastOutput)) {
+          throw new Error(buildClaudeCliNotFoundMessage());
+        }
         console.error(`[SessionManager] Session "${tmuxSession}" died during startup`);
         return false;
       }
-      const output = this.captureOutput(tmuxSession, 5);
+
       // Check only the last 3 lines for Claude Code's prompt character (❯).
       // Checking all captured lines can false-positive on ❯ appearing in prior output
       // (e.g., during TUI redraw of a resumed session's history).
       const lines = (output || '').split('\n').filter(l => l.trim());
       const tail = lines.slice(-3).join('\n');
-      if (tail.includes('❯') || tail.includes('bypass permissions')) {
+
+      if (Date.now() - start >= startupGraceMs && (tail.includes('❯') || tail.includes('bypass permissions'))) {
         console.log(`[SessionManager] Claude ready in "${tmuxSession}" after ${Date.now() - start}ms`);
         return true;
       }
+
       await new Promise(r => setTimeout(r, 500));
     }
-    // Log what we see on timeout for debugging
+
     const finalOutput = this.captureOutput(tmuxSession, 20);
     console.error(`[SessionManager] Claude not ready in "${tmuxSession}" after ${timeoutMs}ms. Output: ${(finalOutput || '').slice(-200)}`);
     return false;

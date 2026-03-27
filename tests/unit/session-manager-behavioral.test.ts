@@ -19,6 +19,8 @@ import os from 'node:os';
 
 // Track mock tmux sessions at module scope so the mock and tests share state
 const mockTmuxSessions = new Set<string>();
+const mockCapturePaneOutput = new Map<string, string>();
+const mockStartupDeathDelayMs = new Map<string, number>();
 
 // Mock child_process to avoid needing real tmux
 vi.mock('node:child_process', () => {
@@ -39,7 +41,17 @@ vi.mock('node:child_process', () => {
       if (args[0] === 'new-session') {
         const sIdx = args.indexOf('-s');
         if (sIdx >= 0 && args[sIdx + 1]) {
-          mockTmuxSessions.add(args[sIdx + 1]);
+          const sessionName = args[sIdx + 1];
+          mockTmuxSessions.add(sessionName);
+          if (!mockCapturePaneOutput.has(sessionName)) {
+            mockCapturePaneOutput.set(sessionName, '❯');
+          }
+          const deathDelayMs = mockStartupDeathDelayMs.get(sessionName);
+          if (deathDelayMs !== undefined) {
+            setTimeout(() => {
+              mockTmuxSessions.delete(sessionName);
+            }, deathDelayMs);
+          }
         }
         return '';
       }
@@ -53,7 +65,8 @@ vi.mock('node:child_process', () => {
 
       // tmux capture-pane
       if (args[0] === 'capture-pane') {
-        return '';
+        const target = args[2]?.replace(/^=/, '').replace(/:$/, '');
+        return target ? (mockCapturePaneOutput.get(target) ?? '') : '';
       }
 
       // tmux send-keys
@@ -117,6 +130,8 @@ describe('SessionManager behavioral tests', () => {
 
     // Clear mock session tracking
     mockTmuxSessions.clear();
+    mockCapturePaneOutput.clear();
+    mockStartupDeathDelayMs.clear();
   });
 
   afterEach(() => {
@@ -312,10 +327,45 @@ describe('SessionManager behavioral tests', () => {
   });
 
   describe('spawnInteractiveSession', () => {
-    it('creates session with custom name', async () => {
-      const tmuxSession = await manager.spawnInteractiveSession(undefined, 'my-chat');
+    it('creates session with custom name without waiting for startup when no initial message is provided', async () => {
+      vi.useFakeTimers();
+      try {
+        let resolvedSession: string | undefined;
+        const spawnPromise = manager.spawnInteractiveSession(undefined, 'my-chat');
+        spawnPromise.then(tmuxSession => {
+          resolvedSession = tmuxSession;
+        });
 
-      expect(tmuxSession).toContain('my-chat');
+        await Promise.resolve();
+
+        expect(resolvedSession).toBeDefined();
+        expect(resolvedSession).toContain('my-chat');
+        await expect(spawnPromise).resolves.toContain('my-chat');
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('returns immediately even when an initial message is waiting for Claude to become ready', async () => {
+      vi.useFakeTimers();
+      try {
+        const safeName = 'delayed-ready';
+        const tmuxName = `${path.basename(tmpDir)}-${safeName}`;
+        mockCapturePaneOutput.set(tmuxName, '');
+
+        let resolvedSession: string | undefined;
+        const spawnPromise = manager.spawnInteractiveSession('hello Claude', safeName);
+        spawnPromise.then(sessionName => {
+          resolvedSession = sessionName;
+        });
+
+        await Promise.resolve();
+
+        expect(resolvedSession).toBe(tmuxName);
+        await expect(spawnPromise).resolves.toBe(tmuxName);
+      } finally {
+        vi.useRealTimers();
+      }
     });
 
     it('reuses existing session if tmux session exists', async () => {
@@ -369,6 +419,28 @@ describe('SessionManager behavioral tests', () => {
       await expect(
         manager.spawnInteractiveSession(undefined, 'chat-overflow')
       ).rejects.toThrow('Absolute session limit');
+    });
+
+    it('logs a friendly error when Claude is missing and the tmux session dies before the startup grace period ends', async () => {
+      vi.useFakeTimers();
+      const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+      try {
+        const safeName = 'missing-claude';
+        const tmuxName = `${path.basename(tmpDir)}-${safeName}`;
+        mockCapturePaneOutput.set(tmuxName, 'zsh: command not found: claude');
+        mockStartupDeathDelayMs.set(tmuxName, 1000);
+
+        const spawnPromise = manager.spawnInteractiveSession('hello Claude', safeName);
+        await expect(spawnPromise).resolves.toContain(safeName);
+        await vi.advanceTimersByTimeAsync(4000);
+
+        const combinedErrors = errorSpy.mock.calls.flat().join('\n');
+        expect(combinedErrors).toContain('Claude Code CLI not found.');
+        expect(combinedErrors).toContain('https://docs.anthropic.com/en/docs/claude-code');
+      } finally {
+        errorSpy.mockRestore();
+        vi.useRealTimers();
+      }
     });
   });
 
