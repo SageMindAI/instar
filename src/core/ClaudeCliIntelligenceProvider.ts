@@ -16,6 +16,7 @@
 import { execFile } from 'node:child_process';
 import type { IntelligenceProvider, IntelligenceOptions } from './types.js';
 import { resolveCliFlag } from './models.js';
+import { buildClaudeCliNotFoundMessage, isClaudeCliMissingError } from './ClaudeCliErrors.js';
 
 const DEFAULT_MODEL = 'fast';
 const DEFAULT_TIMEOUT_MS = 30_000;
@@ -55,7 +56,11 @@ export class ClaudeCliIntelligenceProvider implements IntelligenceProvider {
         env: childEnv,
       }, (error, stdout, stderr) => {
         if (error) {
-          // Timeout or other error — return empty so caller can fall back
+          if (isClaudeCliMissingError(error, stderr)) {
+            reject(new Error(buildClaudeCliNotFoundMessage()));
+            return;
+          }
+
           reject(new Error(`Claude CLI error: ${error.message}${stderr ? ` — ${stderr.slice(0, 200)}` : ''}`));
           return;
         }
