@@ -305,6 +305,7 @@ let _topicResumeMap: import('../core/TopicResumeMap.js').TopicResumeMap | null =
 let _projectDir: string = process.cwd();
 let _sharedIntelligence: import('../core/types.js').IntelligenceProvider | null = null;
 let _selfKnowledgeTree: SelfKnowledgeTree | null = null;
+let _slackAdapter: import('../messaging/slack/SlackAdapter.js').SlackAdapter | null = null;
 
 async function spawnSessionForTopic(
   sessionManager: SessionManager,
@@ -1147,6 +1148,32 @@ async function ensureAgentAttentionTopic(
 }
 
 /**
+ * Ensure a Slack attention channel exists — for operational alerts routed via Slack.
+ */
+async function ensureSlackAttentionChannel(
+  slack: import('../messaging/slack/SlackAdapter.js').SlackAdapter,
+  state: StateManager,
+): Promise<void> {
+  const existingChannelId = state.get<string>('slack-attention-channel');
+  if (existingChannelId) {
+    console.log(`  Slack Attention channel: ${existingChannelId}`);
+    return;
+  }
+
+  try {
+    const agentName = (slack as unknown as { config: { workspaceName?: string } }).config?.workspaceName?.replace(/-agent$/, '') || 'agent';
+    const channelId = await slack.createChannel(`${agentName}-sys-attention`);
+    state.set('slack-attention-channel', channelId);
+    await slack.sendToChannel(channelId,
+      `Attention channel active. Blocked tasks, critical errors, quota alerts, and anything that needs your attention will appear here.`
+    );
+    console.log(pc.green(`  Created Slack Attention channel: ${channelId}`));
+  } catch (err) {
+    console.error(`  Failed to create Slack Attention channel: ${err}`);
+  }
+}
+
+/**
  * Ensure the Agent Updates topic exists — for version updates, feature announcements, etc.
  * Separates informational updates from critical attention items.
  * Created once on first server start, persisted in state.
@@ -1382,19 +1409,30 @@ export async function startServer(options: StartOptions): Promise<void> {
   let _notifyState: { get<T>(key: string): T | null | undefined } | null = null;
 
   /**
-   * Central notification gateway — ALL non-interactive Telegram notifications should go through here.
-   * Interactive messages (session replies, user-facing responses) still use sendToTopic directly.
+   * Central notification gateway — ALL non-interactive notifications should go through here.
+   * Sends to both Telegram (via batcher) and Slack (directly) when available.
+   * Interactive messages (session replies, user-facing responses) still use sendToTopic/sendToChannel directly.
    */
   function notify(tier: NotificationTier, category: string, message: string, topicId?: number): void {
+    // Telegram: via notification batcher
     const resolvedTopicId = topicId ?? _notifyState?.get<number>('agent-attention-topic') ?? 0;
-    if (!resolvedTopicId) return;
-    notificationBatcher.enqueue({
-      tier,
-      category,
-      message,
-      timestamp: new Date(),
-      topicId: resolvedTopicId,
-    }).catch(() => { /* @silent-fallback-ok */ });
+    if (resolvedTopicId) {
+      notificationBatcher.enqueue({
+        tier,
+        category,
+        message,
+        timestamp: new Date(),
+        topicId: resolvedTopicId,
+      }).catch(() => { /* @silent-fallback-ok */ });
+    }
+
+    // Slack: send IMMEDIATE notifications to attention channel (batching deferred to future)
+    if (tier === 'IMMEDIATE' && _slackAdapter) {
+      const slackAttentionChannel = _notifyState?.get<string>('slack-attention-channel');
+      if (slackAttentionChannel) {
+        _slackAdapter.sendToChannel(slackAttentionChannel, message).catch(() => { /* @silent-fallback-ok */ });
+      }
+    }
   }
 
   /**
@@ -1805,6 +1843,7 @@ export async function startServer(options: StartOptions): Promise<void> {
       const detector = new InputDetector({
         detectionWindowLines: promptGateConfig.detectionWindowLines ?? 50,
         enabled: true,
+        intelligence: sharedIntelligence ?? undefined,
       });
 
       const classifier = new InputClassifier({
@@ -1968,6 +2007,41 @@ export async function startServer(options: StartOptions): Promise<void> {
       ensureAgentUpdatesTopic(telegram, state).catch(err => {
         console.error(`[server] Failed to ensure Agent Updates topic: ${err}`);
       });
+
+      // Wire Prompt Gate callbacks in send-only mode too — the lifeline forwards
+      // callback queries via /internal/telegram-callback, and we need handlers for them
+      if (promptGateConfig?.enabled) {
+        telegram.onPromptResponse = (sessionName, key) => {
+          if (!sessionManager.isSessionAlive(sessionName)) {
+            console.warn(`[PromptGate] Skipping injection — session "${sessionName}" is no longer alive`);
+            return false;
+          }
+          return sessionManager.sendKey(sessionName, key);
+        };
+        telegram.onPromptTextResponse = (sessionName, text) => {
+          if (!sessionManager.isSessionAlive(sessionName)) {
+            console.warn(`[PromptGate] Skipping text injection — session "${sessionName}" is no longer alive`);
+            return false;
+          }
+          return sessionManager.sendInput(sessionName, text);
+        };
+        telegram.onRelayLeaseStart = (sessionName) => {
+          const sessions = sessionManager.listRunningSessions();
+          const session = sessions.find(s => s.tmuxSession === sessionName);
+          if (session) {
+            const leaseMs = (promptGateConfig.relayTimeoutSeconds ?? 300) * 2 * 1000;
+            sessionManager.grantRelayLease(session.id, leaseMs);
+          }
+        };
+        telegram.onRelayLeaseEnd = (sessionName) => {
+          const sessions = sessionManager.listRunningSessions();
+          const session = sessions.find(s => s.tmuxSession === sessionName);
+          if (session) {
+            sessionManager.clearRelayLease(session.id);
+          }
+        };
+        console.log(pc.green('  Prompt Gate: Telegram relay wired (via lifeline callback forwarding)'));
+      }
     }
 
     if (telegramConfig && !skipTelegram && !isStandbyTelegram) {
@@ -1978,8 +2052,22 @@ export async function startServer(options: StartOptions): Promise<void> {
 
       // Wire Prompt Gate callbacks — connect Telegram relay responses to sessions
       if (promptGateConfig?.enabled) {
-        telegram.onPromptResponse = (sessionName, key) => sessionManager.sendKey(sessionName, key);
-        telegram.onPromptTextResponse = (sessionName, text) => sessionManager.sendInput(sessionName, text);
+        telegram.onPromptResponse = (sessionName, key) => {
+          // Pre-injection verification: confirm session is still alive
+          if (!sessionManager.isSessionAlive(sessionName)) {
+            console.warn(`[PromptGate] Skipping injection — session "${sessionName}" is no longer alive`);
+            return false;
+          }
+          return sessionManager.sendKey(sessionName, key);
+        };
+        telegram.onPromptTextResponse = (sessionName, text) => {
+          // Pre-injection verification: confirm session is still alive
+          if (!sessionManager.isSessionAlive(sessionName)) {
+            console.warn(`[PromptGate] Skipping text injection — session "${sessionName}" is no longer alive`);
+            return false;
+          }
+          return sessionManager.sendInput(sessionName, text);
+        };
         telegram.onRelayLeaseStart = (sessionName) => {
           // Find the session by tmux name and grant a relay lease
           const sessions = sessionManager.listRunningSessions();
@@ -2008,7 +2096,17 @@ export async function startServer(options: StartOptions): Promise<void> {
 
       // Wire NotificationBatcher to Telegram and start batching
       notificationBatcher.setSendFunction(
-        async (topicId, text) => { await telegram!.sendToTopic(topicId, text); return { messageId: 0 }; }
+        async (topicId, text) => {
+          await telegram!.sendToTopic(topicId, text);
+          // Mirror batched notifications to Slack attention channel
+          if (_slackAdapter) {
+            const slackAttentionChannel = state.get<string>('slack-attention-channel');
+            if (slackAttentionChannel) {
+              _slackAdapter.sendToChannel(slackAttentionChannel, text).catch(() => {});
+            }
+          }
+          return { messageId: 0 };
+        }
       );
       notificationBatcher.start();
       console.log(pc.green('  Notification batcher enabled (SUMMARY: 30m, DIGEST: 2h)'));
@@ -2385,7 +2483,6 @@ export async function startServer(options: StartOptions): Promise<void> {
         slackAdapter.onMessage(async (message) => {
           const channelId = message.channel.identifier;
           const isDM = message.metadata?.isDM as boolean;
-          const threadTs = message.metadata?.threadTs as string | undefined;
           const senderName = message.metadata?.senderName as string || 'User';
 
           // Build injection tag
@@ -2396,6 +2493,7 @@ export async function startServer(options: StartOptions): Promise<void> {
           fs.mkdirSync(tmpDir, { recursive: true });
           const ctxPath = path.join(tmpDir, `ctx-${channelId}-${Date.now()}.txt`);
           const history = slackAdapter!.getChannelMessages(channelId, 30);
+          const unansweredCount = slackAdapter!.getUnansweredCount(channelId);
 
           const contextData = JSON.stringify({
             topicId: channelId,
@@ -2407,22 +2505,79 @@ export async function startServer(options: StartOptions): Promise<void> {
               fromUser: true,
               text: m.text,
             })),
-            unansweredCount: 0,
+            unansweredCount,
             relayInstructions: `cat <<'EOF' | .claude/scripts/slack-reply.sh ${channelId}\nYour response text here\nEOF`,
           }, null, 2);
           fs.writeFileSync(ctxPath, contextData);
 
           const bootstrapMessage = `${prefix} ${message.content} (IMPORTANT: Read ${ctxPath} for thread history and Slack relay instructions — you MUST relay your response back.)`;
 
-          // Route: DMs go to lifeline session, channels spawn/find sessions
+          // Check for existing session bound to this channel
+          const existingSession = slackAdapter!.getSessionForChannel(channelId);
+          if (existingSession) {
+            // Try to inject into existing session via tmux
+            const sessions = sessionManager.listRunningSessions();
+            const alive = sessions.find(s => s.tmuxSession === existingSession);
+            if (alive) {
+              console.log(`[slack→session] Injecting into ${existingSession}: "${message.content.slice(0, 80)}"`);
+              // Use tmux send-keys to inject the message (same as Telegram's injection pattern)
+              try {
+                const { execSync } = await import('node:child_process');
+                // Write to a temp file and send via tmux to avoid escaping issues
+                const msgFile = path.join(tmpDir, `inject-${Date.now()}.txt`);
+                fs.writeFileSync(msgFile, bootstrapMessage);
+                execSync(`tmux send-keys -t '=${existingSession}' "$(cat '${msgFile}')" Enter`, { timeout: 5000 });
+                fs.unlinkSync(msgFile);
+              } catch (injectErr) {
+                console.error(`[slack→session] Injection failed: ${injectErr instanceof Error ? injectErr.message : injectErr}`);
+              }
+              return;
+            }
+            console.log(`[slack→session] Session "${existingSession}" died, respawning...`);
+          }
+
+          // Check resume map for session continuity
+          const resumeInfo = slackAdapter!.getChannelResume(channelId);
+          const resumeSessionId = resumeInfo?.uuid ?? undefined;
+          if (resumeInfo) {
+            slackAdapter!.removeChannelResume(channelId);
+          }
+
+          // Route: DMs go to lifeline session, channels spawn new sessions
           const targetSession = isDM ? 'lifeline' : undefined;
-          sessionManager.spawnInteractiveSession(bootstrapMessage, targetSession).catch(err => {
+          try {
+            const newSessionName = await sessionManager.spawnInteractiveSession(
+              bootstrapMessage,
+              targetSession,
+              { resumeSessionId },
+            );
+            if (newSessionName) {
+              slackAdapter!.registerChannelSession(channelId, newSessionName);
+              console.log(`[slack→session] ${resumeSessionId ? 'Resumed' : 'Spawned'} "${newSessionName}" for channel ${channelId}`);
+            }
+          } catch (err) {
             console.error(`[slack] Session spawn failed: ${err instanceof Error ? err.message : err}`);
-          });
+          }
         });
 
         await slackAdapter.start();
+        _slackAdapter = slackAdapter;
         console.log(pc.green(`  Slack connected (workspace: ${(slackConfig.config as Record<string, unknown>).workspaceName || 'unknown'})`));
+
+        // Ensure Slack attention channel exists
+        ensureSlackAttentionChannel(slackAdapter, state).catch(err => {
+          console.error(`[server] Failed to ensure Slack Attention channel: ${err}`);
+        });
+
+        // Wire stall detection — route stall alerts to Slack attention channel
+        slackAdapter.onStallDetected = (channelId, sessionName, messageText) => {
+          const slackAttentionChannel = state.get<string>('slack-attention-channel');
+          if (slackAttentionChannel) {
+            slackAdapter!.sendToChannel(slackAttentionChannel,
+              `Stall detected in session "${sessionName}" (channel ${channelId}). Message may not have been answered: "${messageText.slice(0, 100)}"`
+            ).catch(() => {});
+          }
+        };
       } catch (err) {
         const reason = err instanceof Error ? err.message : String(err);
         console.error(pc.red(`  Slack init failed: ${reason}`));
@@ -3273,6 +3428,7 @@ export async function startServer(options: StartOptions): Promise<void> {
           getSessionForTopic: (topicId) => telegram!.getSessionForTopic(topicId),
           isSessionAlive: (name) => sessionManager.isSessionAlive(name),
           sendMessage: async (topicId, text, metadata) => {
+            // Send to Telegram
             const url = `http://localhost:${config.port}/telegram/reply/${topicId}`;
             const response = await fetch(url, {
               method: 'POST',
@@ -3284,6 +3440,14 @@ export async function startServer(options: StartOptions): Promise<void> {
             });
             if (!response.ok) {
               throw new Error(`Reply failed: ${response.status}`);
+            }
+
+            // Mirror standby messages to Slack if available
+            if (_slackAdapter && text.startsWith('🔭')) {
+              const slackAttentionChannel = state.get<string>('slack-attention-channel');
+              if (slackAttentionChannel) {
+                _slackAdapter.sendToChannel(slackAttentionChannel, text).catch(() => {});
+              }
             }
           },
           getAuthorizedUserIds: () => {

@@ -2325,24 +2325,46 @@ export function createRoutes(ctx: RouteContext): Router {
       ? ctx.state.listSessions({ status: status as 'starting' | 'running' | 'completed' | 'failed' | 'killed' })
       : ctx.state.listSessions();
 
-    // Enrich sessions with hook event telemetry when available
-    const enriched = req.query.enrich !== 'false' && ctx.hookEventReceiver
-      ? sessions.map(s => {
-          const summary = ctx.hookEventReceiver!.getSessionSummary(s.tmuxSession);
-          if (!summary) return s;
-          return {
-            ...s,
-            telemetry: {
-              eventCount: summary.eventCount,
-              toolsUsed: summary.toolsUsed,
-              subagentsSpawned: summary.subagentsSpawned,
-              lastActivity: summary.lastEvent,
-              taskCompleted: ctx.hookEventReceiver!.hasTaskCompleted(s.tmuxSession),
-              exitReason: ctx.hookEventReceiver!.getExitReason(s.tmuxSession),
-            },
+    // Enrich sessions with hook event telemetry and platform info
+    const enriched = sessions.map(s => {
+      const result: Record<string, unknown> = { ...s };
+
+      // Add hook event telemetry
+      if (req.query.enrich !== 'false' && ctx.hookEventReceiver) {
+        const summary = ctx.hookEventReceiver.getSessionSummary(s.tmuxSession);
+        if (summary) {
+          result.telemetry = {
+            eventCount: summary.eventCount,
+            toolsUsed: summary.toolsUsed,
+            subagentsSpawned: summary.subagentsSpawned,
+            lastActivity: summary.lastEvent,
+            taskCompleted: ctx.hookEventReceiver!.hasTaskCompleted(s.tmuxSession),
+            exitReason: ctx.hookEventReceiver!.getExitReason(s.tmuxSession),
           };
-        })
-      : sessions;
+        }
+      }
+
+      // Add platform indicator
+      if (ctx.telegram) {
+        const topicId = ctx.telegram.getTopicForSession?.(s.tmuxSession);
+        if (topicId) {
+          result.platform = 'telegram';
+          result.platformId = topicId;
+        }
+      }
+      if (!result.platform && ctx.slack) {
+        const channelId = ctx.slack.getChannelForSession(s.tmuxSession);
+        if (channelId) {
+          result.platform = 'slack';
+          result.platformId = channelId;
+        }
+      }
+      if (!result.platform) {
+        result.platform = 'headless';
+      }
+
+      return result;
+    });
 
     res.json(enriched);
   });
@@ -2456,9 +2478,10 @@ export function createRoutes(ctx: RouteContext): Router {
   });
 
   // Create an interactive session from the dashboard.
-  // By default creates a Telegram topic; set headless=true to skip.
+  // Set platform to 'telegram', 'slack', or 'headless'.
+  // Legacy: headless=true is equivalent to platform='headless'.
   router.post('/sessions/create', spawnLimiter, async (req, res) => {
-    const { name, headless } = req.body;
+    const { name, headless, platform } = req.body;
 
     if (!name || typeof name !== 'string' || name.trim().length < 1) {
       res.status(400).json({ error: '"name" is required (non-empty string)' });
@@ -2471,15 +2494,27 @@ export function createRoutes(ctx: RouteContext): Router {
 
     const topicName = name.trim();
     let topicId: number | undefined;
+    let slackChannelId: string | undefined;
+    const resolvedPlatform = platform || (headless ? 'headless' : (ctx.telegram ? 'telegram' : (ctx.slack ? 'slack' : 'headless')));
 
-    // Create Telegram topic unless headless
-    if (!headless && ctx.telegram) {
+    // Create Telegram topic
+    if (resolvedPlatform === 'telegram' && ctx.telegram) {
       try {
         const topic = await ctx.telegram.findOrCreateForumTopic(topicName);
         topicId = topic.topicId;
       } catch (err) {
-        // Non-fatal: fall back to headless if topic creation fails
         console.error(`[sessions/create] Telegram topic creation failed, proceeding headless: ${err}`);
+      }
+    }
+
+    // Create Slack channel
+    if (resolvedPlatform === 'slack' && ctx.slack) {
+      try {
+        const agentName = (ctx.slack as unknown as { config: { workspaceName?: string } }).config?.workspaceName?.replace(/-agent$/, '') || 'agent';
+        const channelName = `${agentName}-sess-${topicName.toLowerCase().replace(/[^a-z0-9]/g, '-').slice(0, 40)}`;
+        slackChannelId = await ctx.slack.createChannel(channelName);
+      } catch (err) {
+        console.error(`[sessions/create] Slack channel creation failed, proceeding headless: ${err}`);
       }
     }
 
@@ -2490,7 +2525,7 @@ export function createRoutes(ctx: RouteContext): Router {
         topicId ? { telegramTopicId: topicId } : undefined,
       );
 
-      // Update topic-session registry if we created a topic
+      // Update topic-session registry if we created a Telegram topic
       if (topicId) {
         const registryPath = path.join(ctx.config.stateDir, 'topic-session-registry.json');
         try {
@@ -2505,12 +2540,19 @@ export function createRoutes(ctx: RouteContext): Router {
         }
       }
 
+      // Update Slack channel-session registry if we created a Slack channel
+      if (slackChannelId && ctx.slack) {
+        ctx.slack.registerChannelSession(slackChannelId, tmuxSession, topicName);
+      }
+
       res.status(201).json({
         ok: true,
         session: tmuxSession,
         name: topicName,
         topicId: topicId || null,
-        headless: !topicId,
+        slackChannelId: slackChannelId || null,
+        platform: resolvedPlatform,
+        headless: resolvedPlatform === 'headless',
       });
     } catch (err) {
       res.status(500).json({ error: err instanceof Error ? err.message : String(err) });
@@ -3237,6 +3279,26 @@ export function createRoutes(ctx: RouteContext): Router {
       res.json({ ok: true, topicId: channelId, ts });
     } catch (err) {
       res.status(500).json({ error: err instanceof Error ? err.message : String(err) });
+    }
+  });
+
+  router.post('/internal/slack-forward', async (req, res) => {
+    if (!ctx.slack) {
+      res.status(503).json({ error: 'Slack not configured' });
+      return;
+    }
+
+    const { channelId, text } = req.body;
+    if (!channelId || !text) {
+      res.status(400).json({ error: '"channelId" and "text" fields required' });
+      return;
+    }
+
+    try {
+      await ctx.slack.sendToChannel(channelId, text);
+      res.json({ ok: true });
+    } catch (err) {
+      res.status(500).json({ error: (err as Error).message });
     }
   });
 
@@ -4994,6 +5056,41 @@ export function createRoutes(ctx: RouteContext): Router {
       }
     } else {
       res.status(503).json({ error: 'No message routing available' });
+    }
+  });
+
+  // ── Telegram Callback Query Forwarding (from Lifeline) ────────
+  // Receives inline keyboard callback queries that the Lifeline forwarded.
+  // Processes them through TelegramAdapter.processCallbackQuery().
+
+  router.post('/internal/telegram-callback', async (req, res) => {
+    const { callbackQueryId, data, fromUserId, messageId, chatId } = req.body;
+
+    if (!callbackQueryId || !data) {
+      res.status(400).json({ error: 'callbackQueryId and data required' });
+      return;
+    }
+
+    if (!ctx.telegram) {
+      res.status(503).json({ error: 'Telegram not configured' });
+      return;
+    }
+
+    try {
+      // Reconstruct a callback query object and process it through TelegramAdapter
+      const query = {
+        id: callbackQueryId,
+        data,
+        from: { id: fromUserId, is_bot: false, first_name: 'user' },
+        message: messageId ? { message_id: messageId, chat: { id: chatId } } : undefined,
+      };
+
+      // Use the adapter's public method for processing forwarded callbacks
+      await ctx.telegram.handleForwardedCallback(query);
+      res.json({ ok: true });
+    } catch (err) {
+      console.error(`[telegram-callback] Processing failed:`, err instanceof Error ? err.message : err);
+      res.status(500).json({ error: err instanceof Error ? err.message : String(err) });
     }
   });
 

@@ -145,6 +145,12 @@ interface TelegramUpdate {
     };
     date: number;
   };
+  callback_query?: {
+    id: string;
+    from: { id: number; first_name: string; username?: string };
+    data?: string;
+    message?: { message_id: number; chat: { id: number } };
+  };
 }
 
 export class TelegramLifeline {
@@ -367,7 +373,7 @@ export class TelegramLifeline {
       await this.apiCall('getUpdates', {
         offset: this.lastUpdateId + 1,
         timeout: 0,
-        allowed_updates: ['message'],
+        allowed_updates: ['message', 'callback_query'],
       });
       console.log('[Lifeline] Stale connection flushed');
     } catch (err) {
@@ -386,7 +392,7 @@ export class TelegramLifeline {
             await this.apiCall('getUpdates', {
               offset: this.lastUpdateId + 1,
               timeout: 0,
-              allowed_updates: ['message'],
+              allowed_updates: ['message', 'callback_query'],
             });
             console.log(`[Lifeline] Stale connection flushed (retry ${i + 1} succeeded)`);
             return;
@@ -448,6 +454,13 @@ export class TelegramLifeline {
   }
 
   private async processUpdate(update: TelegramUpdate): Promise<void> {
+    // Forward callback queries (inline keyboard button presses) to the server
+    // These come from Prompt Gate relay buttons — the server handles the response injection
+    if (update.callback_query) {
+      await this.forwardCallbackQuery(update.callback_query);
+      return;
+    }
+
     const msg = update.message;
     if (!msg) return;
 
@@ -692,6 +705,57 @@ export class TelegramLifeline {
           `Server is temporarily down. Your file has been queued (${this.queue.length} in queue). It will be delivered when the server recovers.`
         );
       }
+    }
+  }
+
+  /**
+   * Forward an inline keyboard callback query to the server for processing.
+   * Prompt Gate relay buttons generate these when the user taps a button.
+   */
+  private async forwardCallbackQuery(query: NonNullable<TelegramUpdate['callback_query']>): Promise<void> {
+    if (!this.supervisor.healthy) {
+      // Server is down — can't process the callback. Answer with error.
+      await this.apiCall('answerCallbackQuery', {
+        callback_query_id: query.id,
+        text: 'Server is restarting — please try again in a moment.',
+      }).catch(() => {});
+      return;
+    }
+
+    try {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), 10_000);
+      try {
+        const response = await fetch(
+          `http://127.0.0.1:${this.projectConfig.port}/internal/telegram-callback`,
+          {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              callbackQueryId: query.id,
+              data: query.data,
+              fromUserId: query.from.id,
+              fromUsername: query.from.username,
+              messageId: query.message?.message_id,
+              chatId: query.message?.chat?.id,
+            }),
+            signal: controller.signal,
+          }
+        );
+        if (!response.ok) {
+          await this.apiCall('answerCallbackQuery', {
+            callback_query_id: query.id,
+            text: 'Failed to process — please try again.',
+          }).catch(() => {});
+        }
+      } finally {
+        clearTimeout(timer);
+      }
+    } catch {
+      await this.apiCall('answerCallbackQuery', {
+        callback_query_id: query.id,
+        text: 'Server unreachable.',
+      }).catch(() => {});
     }
   }
 
@@ -1603,7 +1667,7 @@ export class TelegramLifeline {
     const result = await this.apiCall('getUpdates', {
       offset: this.lastUpdateId + 1,
       timeout: 30,
-      allowed_updates: ['message'],
+      allowed_updates: ['message', 'callback_query'],
     });
     return (result as TelegramUpdate[]) ?? [];
   }
