@@ -3236,7 +3236,7 @@ export function createRoutes(ctx: RouteContext): Router {
       const ts = await ctx.slack.sendToChannel(channelId, text, { thread_ts });
       res.json({ ok: true, topicId: channelId, ts });
     } catch (err) {
-      res.status(500).json({ error: (err as Error).message });
+      res.status(500).json({ error: err instanceof Error ? err.message : String(err) });
     }
   });
 
@@ -3254,7 +3254,7 @@ export function createRoutes(ctx: RouteContext): Router {
       });
       res.json({ ok: true, channels: channels.channels ?? [] });
     } catch (err) {
-      res.status(500).json({ error: (err as Error).message });
+      res.status(500).json({ error: err instanceof Error ? err.message : String(err) });
     }
   });
 
@@ -3274,7 +3274,7 @@ export function createRoutes(ctx: RouteContext): Router {
       const channelId = await ctx.slack.createChannel(name, is_private);
       res.json({ ok: true, channelId });
     } catch (err) {
-      res.status(400).json({ error: (err as Error).message });
+      res.status(400).json({ error: err instanceof Error ? err.message : String(err) });
     }
   });
 
@@ -3289,6 +3289,31 @@ export function createRoutes(ctx: RouteContext): Router {
 
     const messages = ctx.slack.getChannelMessages(channelId, limit);
     res.json({ ok: true, messages, count: messages.length });
+  });
+
+  router.get('/slack/search', (req, res) => {
+    if (!ctx.slack) {
+      res.status(503).json({ error: 'Slack not configured' });
+      return;
+    }
+
+    const query = req.query.q as string | undefined;
+    const channelId = req.query.channelId as string | undefined;
+    const since = req.query.since ? new Date(req.query.since as string) : undefined;
+    const rawLimit = parseInt(req.query.limit as string, 10) || 50;
+    const limit = Math.min(Math.max(rawLimit, 1), 500);
+
+    const results = ctx.slack.searchLog({ query, channelId, since, limit });
+    res.json({ results, count: results.length });
+  });
+
+  router.get('/slack/log-stats', (req, res) => {
+    if (!ctx.slack) {
+      res.status(503).json({ error: 'Slack not configured' });
+      return;
+    }
+
+    res.json(ctx.slack.getLogStats());
   });
 
   // ── Attention Queue ─────────────────────────────────────────────

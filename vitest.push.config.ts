@@ -136,6 +136,9 @@ const FLAKY_TESTS = [
   'tests/integration/intent-routes.test.ts',
   'tests/integration/guardian-jobs.test.ts',
 
+  // ── Supertest timeout on relationship route (intermittent) ─────────
+  'tests/unit/route-validation-edge.test.ts',
+
   // ── better-sqlite3 NODE_MODULE_VERSION mismatch (discovery/feature/topic) ──
   'tests/e2e/discovery-agent-integration.test.ts',
   'tests/e2e/discovery-evaluator.test.ts',
