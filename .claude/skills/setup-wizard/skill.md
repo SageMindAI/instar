@@ -511,9 +511,9 @@ This handles directory creation, registry entry, port allocation, and gitignore 
 
 Regardless of project or personal agent, **a messaging platform is how you talk to your agent**. This should be clear from the very first message. Don't present it as an optional add-on — it's the destination of this entire setup.
 
-The terminal session is the on-ramp. Messaging (Telegram or WhatsApp) is where the agent experience lives.
+The terminal session is the on-ramp. Messaging (Telegram, Slack, or WhatsApp) is where the agent experience lives.
 
-**Telegram is recommended** for its topic threads, bot API, and forum-style organization — but WhatsApp is a fully supported alternative for users who prefer it or already live there.
+**Telegram is recommended** for its topic threads, bot API, and forum-style organization — but Slack and WhatsApp are fully supported alternatives for users who prefer them or already live there.
 
 ## Phase 2: Identity Bootstrap — The Birth Conversation
 
@@ -788,7 +788,8 @@ Frame messaging as the core of the experience, then let the user choose their pl
 > This is how you'll actually talk to your agent day-to-day. Not the terminal — just messaging on your phone or desktop.
 >
 > 1. **Telegram** (recommended) — Topic threads for organized conversations, powerful bot API, forum-style groups. Best for power users who want structured channels.
-> 2. **WhatsApp** — Talk to your agent from the messaging app you already use. Simple, familiar, works everywhere.
+> 2. **Slack** — Your agent lives in Slack alongside your team. Channels, threads, reactions, Block Kit interactions. Great for professional workflows.
+> 3. **WhatsApp** — Talk to your agent from the messaging app you already use. Simple, familiar, works everywhere.
 >
 > Which do you prefer? (You can always add the other one later.)
 
@@ -796,11 +797,15 @@ Frame messaging as the core of the experience, then let the user choose their pl
 
 > "Without a messaging platform, you'll only be able to talk to [agent name] by opening a terminal and running `instar chat`. No mobile access, no proactive messages, no organized threads. Most of what makes an Instar agent useful requires messaging."
 >
-> "You can set it up later with `instar telegram setup` or `instar whatsapp connect`."
+> "You can set it up later with `instar telegram setup`, `instar add slack`, or `instar whatsapp connect`."
 
 ### If User Chooses Telegram
 
 Proceed with the Telegram setup flow below (Step 3b onward).
+
+### If User Chooses Slack
+
+Jump to **Phase 4h: Slack Setup**. Slack is a first-class option — treat it with the same energy and completeness as Telegram setup.
 
 ### If User Chooses WhatsApp
 
@@ -1520,7 +1525,278 @@ If both Telegram and WhatsApp are configured, mention:
 
 No additional config needed — CrossPlatformAlerts wires automatically in `server.ts` when both adapters are present.
 
-### 4h. Agent Network
+### 4h. Slack Setup
+
+Slack is a **first-class messaging option**. The user may arrive here either:
+- **As their primary choice** from Phase 3 (chose Slack over Telegram/WhatsApp)
+- **As an additional channel** after Telegram or WhatsApp is already configured
+
+**If arriving as primary choice from Phase 3**, skip the "want to add" prompt — they already chose this. Go straight to Step 4h-1.
+
+**If arriving after Telegram/WhatsApp setup**, present:
+
+> **Want to add Slack as an additional channel?**
+>
+> Slack lets you talk to your agent from Slack — channels, threads, reactions, and interactive buttons. It works alongside your other messaging platforms.
+>
+> 1. Yes, set up Slack
+> 2. Skip for now
+>
+> Type a number.
+
+If they choose to skip, move to Phase 4i.
+
+#### Step 4h-1: Browser Automation for Slack
+
+**Use the same browser automation detection from Step 3a.** Playwright preferred, Chrome extension as fallback, manual as last resort.
+
+Tell the user:
+
+> I'm going to open a browser to set up Slack automatically. I'll create a workspace, configure an app, and set everything up.
+>
+> You'll need to log into Slack in the browser window. Ready?
+
+Wait for confirmation before proceeding.
+
+#### Step 4h-2: Navigate to Slack and Handle Login
+
+Navigate to `https://slack.com/signin`. Take a snapshot.
+
+**If already logged in** (redirected to a workspace or shows user avatar): Skip to Step 4h-3.
+
+**If not logged in** (sign-in form visible):
+> "Please log into your Slack account in the browser window. You can use email, Google, or Apple sign-in. Let me know when you're logged in."
+
+Wait for user confirmation. Take a snapshot to verify.
+
+**If no Slack account:**
+> "You'll need a Slack account. Click 'Create an account' in the browser and follow the steps. Let me know when you're logged in."
+
+#### Step 4h-3: Workspace Setup
+
+Ask the user:
+
+> I recommend creating a dedicated workspace for your agent — it keeps things clean and avoids privacy concerns with colleagues. Would you like me to create a dedicated workspace, or install into an existing one?
+
+**If creating a new workspace:**
+
+1. Navigate to `https://slack.com/get-started#/createnew`
+2. Take snapshot, find email field
+3. Type user's email (from USER.md or ask)
+4. Click "Continue"
+5. **WAIT** — user must enter 6-digit email verification code from their inbox
+   > "Check your email for a 6-digit code from Slack and enter it in the browser."
+   Wait for user confirmation.
+6. Take snapshot — workspace name field
+7. Type workspace name: `{agent-name}-agent` (e.g., "echo-agent")
+8. Click "Next"
+9. Take snapshot — project/channel name field
+10. Type "general"
+11. Click "Next"
+12. Take snapshot — invite page
+13. Click "Skip" or skip link
+14. Wait for workspace to load
+
+**If using existing workspace:**
+1. Ask which workspace to use
+2. Navigate to the workspace URL
+3. Take snapshot to confirm workspace loaded
+
+#### Step 4h-4: Create Slack App via Manifest
+
+Build the app manifest JSON with minimal Phase 1 scopes:
+
+```json
+{
+  "display_information": {
+    "name": "{agent-name}",
+    "description": "Instar agent"
+  },
+  "features": {
+    "bot_user": {
+      "display_name": "{agent-name}",
+      "always_online": true
+    }
+  },
+  "oauth_config": {
+    "scopes": {
+      "bot": [
+        "channels:history", "channels:manage", "channels:read",
+        "chat:write", "im:history", "im:read", "im:write",
+        "pins:write", "reactions:read", "reactions:write", "users:read"
+      ]
+    }
+  },
+  "settings": {
+    "event_subscriptions": {
+      "bot_events": [
+        "message.channels", "message.groups", "message.im",
+        "file_shared", "reaction_added", "app_mention"
+      ]
+    },
+    "socket_mode_enabled": true,
+    "org_deploy_enabled": false
+  }
+}
+```
+
+1. URL-encode the manifest JSON
+2. Navigate to: `https://api.slack.com/apps?new_app=1&manifest_json={ENCODED_JSON}`
+3. Take snapshot — workspace picker dropdown
+4. Select the target workspace from dropdown
+5. Click "Next"
+6. Take snapshot — manifest review/summary page
+7. Click "Create" button
+8. Wait 2-3 seconds for app creation
+9. Take snapshot — should be on app's Basic Information page
+10. Extract App ID from the URL (`api.slack.com/apps/A{APP_ID}/...`)
+
+#### Step 4h-5: Install App to Workspace
+
+1. Navigate to: `https://api.slack.com/apps/{APP_ID}/install-on-team`
+2. Take snapshot — "Install to Workspace" button
+3. Click "Install to Workspace"
+4. Take snapshot — OAuth authorization page
+5. Click "Allow"
+6. Wait for redirect back to app settings
+7. Take snapshot — OAuth & Permissions page
+8. **CRITICAL: DO NOT take screenshots/snapshots on this page** — it shows the bot token
+9. Extract Bot User OAuth Token (`xoxb-...`) from the page using regex. Pattern: `xoxb-\d+-\d+-[A-Za-z0-9]+`
+10. Store token in memory — do NOT log it
+
+#### Step 4h-6: Enable Socket Mode & Generate App Token
+
+1. Navigate to: `https://api.slack.com/apps/{APP_ID}/socket-mode`
+2. Take snapshot — Socket Mode toggle
+3. If toggle is OFF, click to enable it
+4. Navigate to: `https://api.slack.com/apps/{APP_ID}/general`
+5. Scroll to "App-Level Tokens" section
+6. Take snapshot — find "Generate Token and Scopes" button
+7. Click "Generate Token and Scopes"
+8. Take snapshot — token creation dialog
+9. Type token name: "socket-mode" in the name field
+10. Click "Add Scope"
+11. Select "connections:write" scope
+12. Click "Generate"
+13. **CRITICAL: DO NOT take screenshots/snapshots** — token is displayed
+14. Extract app-level token (`xapp-...`) from the dialog. Pattern: `xapp-\d+-[A-Za-z0-9]+-\d+-[A-Za-z0-9]+`
+15. Click "Done"
+
+#### Step 4h-7: Validate Tokens
+
+Validate both tokens via API (NOT browser):
+
+```bash
+# Validate bot token and extract workspace info
+BOT_RESULT=$(curl -s -X POST https://slack.com/api/auth.test \
+  -H "Authorization: Bearer ${BOT_TOKEN}" \
+  -H "Content-Type: application/json")
+
+# Expected: {"ok": true, "team_id": "T...", "user_id": "U...", "team": "workspace-name"}
+
+# Validate app token
+APP_RESULT=$(curl -s -X POST https://slack.com/api/apps.connections.open \
+  -H "Authorization: Bearer ${APP_TOKEN}" \
+  -H "Content-Type: application/json")
+
+# Expected: {"ok": true, "url": "wss://..."}
+```
+
+If either fails, tell the user and offer to retry the extraction step.
+
+Extract from `BOT_RESULT`:
+- `team_id` → `workspaceId`
+- `team` → `workspaceName`
+- `user_id` → add to `authorizedUserIds` (this is the installing user)
+
+#### Step 4h-8: Create System Channels
+
+```bash
+# Create lifeline channel
+LIFELINE=$(curl -s -X POST https://slack.com/api/conversations.create \
+  -H "Authorization: Bearer ${BOT_TOKEN}" \
+  -H "Content-Type: application/json" \
+  -d '{"name": "{agent}-sys-lifeline"}')
+
+# Create dashboard channel
+DASHBOARD=$(curl -s -X POST https://slack.com/api/conversations.create \
+  -H "Authorization: Bearer ${BOT_TOKEN}" \
+  -H "Content-Type: application/json" \
+  -d '{"name": "{agent}-sys-dashboard"}')
+
+# Pin a welcome message in lifeline
+curl -s -X POST https://slack.com/api/chat.postMessage \
+  -H "Authorization: Bearer ${BOT_TOKEN}" \
+  -H "Content-Type: application/json" \
+  -d '{"channel": "LIFELINE_ID", "text": "Lifeline channel active. This is where I send critical system messages."}'
+```
+
+#### Step 4h-9: Write Configuration
+
+Write Slack config to `.instar/config.json`:
+
+```javascript
+node -e "
+const fs = require('fs');
+const p = '<project_dir>/.instar/config.json';
+const c = JSON.parse(fs.readFileSync(p, 'utf-8'));
+c.messaging = c.messaging || [];
+// Remove existing slack config if any
+c.messaging = c.messaging.filter(m => m.type !== 'slack');
+c.messaging.push({
+  type: 'slack',
+  enabled: true,
+  config: {
+    botToken: '${BOT_TOKEN}',
+    appToken: '${APP_TOKEN}',
+    workspaceId: '${WORKSPACE_ID}',
+    workspaceName: '${WORKSPACE_NAME}',
+    authorizedUserIds: ['${USER_ID}'],
+    stallTimeoutMinutes: 5,
+    logRetentionDays: 90,
+    lifelineChannelId: '${LIFELINE_CHANNEL_ID}',
+    dashboardChannelId: '${DASHBOARD_CHANNEL_ID}'
+  }
+});
+fs.writeFileSync(p, JSON.stringify(c, null, 2));
+fs.chmodSync(p, 0o600);
+"
+```
+
+#### Step 4h-10: Confirm Success and Close Browser
+
+Close the browser (Playwright: `browser_close()`).
+
+Tell the user:
+
+> Slack is set up! Your workspace '{workspaceName}' is ready.
+> I've created your system channels and configured everything.
+>
+> Important: Your bot tokens provide full access to your Slack workspace — treat them like passwords. They don't expire, so if you suspect compromise, revoke them at api.slack.com/apps.
+>
+> Would you like me to store your tokens in Bitwarden for extra security? (recommended)
+
+If they accept Bitwarden, trigger the `secret-setup` skill.
+
+#### Slack Manual Fallback
+
+**Only use this if NO browser automation tools are available.** If automation failed partway, tell the user exactly what succeeded.
+
+Walk the user through:
+
+1. Go to `https://slack.com/get-started#/createnew` and create a workspace (or use existing)
+2. Go to `https://api.slack.com/apps?new_app=1` → click "From a manifest"
+3. Select your workspace
+4. Paste this manifest: [provide the JSON from Step 4h-4]
+5. Click Create, then Install to Workspace, then Allow
+6. Go to Basic Information → App-Level Tokens → Generate Token and Scopes
+7. Name: "socket-mode", Scope: "connections:write", click Generate
+8. Copy both tokens (bot token from OAuth page, app token from Basic Info)
+9. Run: `instar add slack` and paste the tokens when prompted
+
+Even in manual mode, system channel creation (Step 4h-8) and config writing (Step 4h-9) are done by the wizard, not the user.
+
+### 4i. Agent Network
 
 Your agent can join a secure network to communicate with other AI agents. Present this as an optional but recommended step:
 

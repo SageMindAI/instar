@@ -338,9 +338,6 @@ export class PresenceProxy {
     // Skip lifeline topic
     if (topicId === 2) return;
 
-    // Debug: log all events to verify wiring
-    console.log(`[PresenceProxy] Event: topic=${topicId} fromUser=${event.fromUser} text="${event.text?.slice(0, 50)}..."`);
-
     if (event.fromUser) {
       this.handleUserMessage(topicId, event);
     } else {
@@ -385,20 +382,14 @@ export class PresenceProxy {
 
   private handleUserMessage(topicId: number, event: MessageLoggedEvent): void {
     const sessionName = this.config.getSessionForTopic(topicId);
-    if (!sessionName) {
-      console.log(`[PresenceProxy] Skipping topic ${topicId} — no session mapped`);
-      return;
-    }
+    if (!sessionName) return;
 
     const existingState = this.states.get(topicId);
 
     // If proxy is silenced, skip
     if (existingState?.silencedUntil && Date.now() < existingState.silencedUntil) {
-      console.log(`[PresenceProxy] Skipping topic ${topicId} — silenced until ${new Date(existingState.silencedUntil).toISOString()}`);
       return;
     }
-
-    console.log(`[PresenceProxy] Scheduling Tier 1 for topic ${topicId} (session: ${sessionName}, delay: ${this.tier1DelayMs}ms)`);
 
     // Reset all timers for this topic (rapid message handling)
     this.clearTimersForTopic(topicId);
@@ -476,12 +467,8 @@ export class PresenceProxy {
   }
 
   private async fireTier(topicId: number, tier: 1 | 2 | 3): Promise<void> {
-    console.log(`[PresenceProxy] fireTier ${tier} for topic ${topicId}`);
     const state = this.states.get(topicId);
-    if (!state || state.cancelled) {
-      console.log(`[PresenceProxy] Tier ${tier} skipped — state=${state ? 'exists' : 'none'} cancelled=${state?.cancelled}`);
-      return;
-    }
+    if (!state || state.cancelled) return;
 
     // Race condition guard: check if agent has responded since user message
     // The event-driven cancellation may not have fired yet if the agent's response
