@@ -157,8 +157,9 @@ describe('InputDetector.pattern', () => {
   });
 
   describe('planApproval', () => {
-    it('detects plan mode prompt', () => {
-      // Plan: and "Do you want to proceed?" must both be in last 5 lines
+    it('plan-like output falls through to question type (plan detection is LLM-only)', () => {
+      // Plan detection was moved to LLM-only path — regex no longer matches plans.
+      // "Do you want to proceed?" still triggers question detection.
       const output = [
         'Previous output here...',
         '',
@@ -169,8 +170,7 @@ describe('InputDetector.pattern', () => {
 
       const prompt = detectWithDebounce(detector, 'test', output);
       expect(prompt).not.toBeNull();
-      expect(prompt!.type).toBe('plan');
-      expect(prompt!.options).toHaveLength(2);
+      expect(prompt!.type).toBe('question');
     });
   });
 

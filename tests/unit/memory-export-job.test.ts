@@ -95,7 +95,7 @@ describe('Memory Export Job definition', () => {
   // 6. Runs every 6 hours
   it('is scheduled to run every 6 hours', () => {
     const job = getMemoryExportJob();
-    expect(job!.schedule).toBe('0 */6 * * *');
+    expect(job!.schedule).toBe('28 */6 * * *');
   });
 
   // 7. Enabled by default
