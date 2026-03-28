@@ -5621,42 +5621,42 @@
     async function loadSystems() {
       try {
         systemsData = await apiFetch('/systems/status');
-        renderSystems();
+        showSystemsOverview();
+        renderSystemsOverview();
       } catch (e) {
         document.getElementById('systemsBanner').innerHTML =
           '<div style="padding:20px;color:var(--red);text-align:center">Failed to load systems status</div>';
       }
     }
 
-    function renderSystems() {
+    function renderSystemsOverview() {
       if (!systemsData) return;
       const { uptime, health, healthSummary, activeCapabilities, issues, recentEvents } = systemsData;
       const uptimeStr = formatUptimeClient(uptime);
 
-      // Zone 1: Health Banner
+      // Health Banner
       const bannerClass = health === 'healthy' ? 'healthy' : health === 'error' ? 'error' : 'degraded';
-      const icon = health === 'healthy' ? '&#10003;' : '&#9888;';
-
+      const bannerIcon = health === 'healthy' ? '&#10003;' : '&#9888;';
       document.getElementById('systemsBanner').innerHTML = `
         <div class="health-banner ${bannerClass}">
-          <span class="health-icon">${icon}</span>
+          <span class="health-icon">${bannerIcon}</span>
           <div class="health-text">
             <div class="health-title">${esc(healthSummary)}</div>
             <div class="health-meta">Uptime: ${esc(uptimeStr)}  &middot;  ${activeCapabilities.length} capabilities active${issues.length > 0 ? '  &middot;  ' + issues.length + ' issue' + (issues.length > 1 ? 's' : '') : ''}</div>
           </div>
         </div>`;
 
-      // Zone 2: Issues (only if any)
+      // Issues (only if any)
       const issuesEl = document.getElementById('systemsIssues');
       if (issues.length > 0) {
-        issuesEl.innerHTML = '<div class="issues-panel">' + issues.map(issue => {
-          const cls = issue.severity === 'warning' ? ' warning' : '';
-          const icon = issue.severity === 'warning' ? '&#9888;' : '&#10060;';
+        issuesEl.innerHTML = '<div class="issues-panel">' + issues.map(iss => {
+          const cls = iss.severity === 'warning' ? ' warning' : '';
+          const ic = iss.severity === 'warning' ? '&#9888;' : '&#10060;';
           return `<div class="issue-card${cls}">
-            <span class="issue-card-icon">${icon}</span>
+            <span class="issue-card-icon">${ic}</span>
             <div class="issue-card-content">
-              <div class="issue-card-label">${esc(issue.label)}</div>
-              <div class="issue-card-desc">${esc(issue.description)}</div>
+              <div class="issue-card-label">${esc(iss.label)}</div>
+              <div class="issue-card-desc">${esc(iss.description)}</div>
             </div>
           </div>`;
         }).join('') + '</div>';
@@ -5664,77 +5664,146 @@
         issuesEl.innerHTML = '';
       }
 
-      // Zone 3: Active Capabilities (card list)
+      // Card Grid
       const capsEl = document.getElementById('systemsCapabilities');
       if (activeCapabilities.length > 0) {
         const cards = activeCapabilities.map(cap => {
           const dotClass = cap.status === 'error' ? 'error' : 'active';
-          return `<div class="capability-card" data-cap-id="${esc(cap.id)}">
-            <div class="capability-card-header" onclick="toggleCapabilityCard(this)">
+          const statusClass = cap.status === 'error' ? ' error' : '';
+          const previewStats = buildPreviewStats(cap.stats || {});
+          return `<div class="cap-card${statusClass}" onclick="showCapabilityDetail('${esc(cap.id)}')">
+            <div class="cap-card-top">
               <span class="cap-dot ${dotClass}"></span>
-              <div class="cap-info">
-                <div class="cap-label">${esc(cap.label)}</div>
-                <div class="cap-metric">${esc(cap.metric)}</div>
-              </div>
-              <span class="cap-arrow">&#9654;</span>
+              <span class="cap-card-name">${esc(cap.label)}</span>
+              <span class="cap-card-arrow">&#9654;</span>
             </div>
-            <div class="cap-detail">
-              <div class="cap-detail-desc">${esc(cap.description)}</div>
-              <div class="cap-detail-label">Components</div>
-              <div class="cap-detail-processes">
-                ${cap.processes.map(p => {
-                  const pDotColor = p.status === 'running' ? 'var(--accent)' : 'var(--red)';
-                  return '<div class="cap-detail-proc"><span class="cap-detail-proc-dot" style="background:' + pDotColor + '"></span>' + esc(p.name) + '</div>';
-                }).join('')}
-              </div>
-            </div>
+            <div class="cap-card-desc">${esc(cap.description)}</div>
+            ${previewStats ? '<div class="cap-card-stats">' + previewStats + '</div>' : ''}
+            <div class="cap-card-metric">${esc(cap.metric)}</div>
           </div>`;
         }).join('');
-
-        capsEl.innerHTML = `
-          <div class="capabilities-section">
-            <div class="capabilities-section-title">Active Capabilities</div>
-            ${cards}
-          </div>`;
+        capsEl.innerHTML = `<div class="cap-section-title">Active Capabilities</div><div class="cap-grid">${cards}</div>`;
       } else {
         capsEl.innerHTML = '';
       }
 
-      // Zone 4: Events (collapsed disclosure, only if events exist)
+      // Events
       const eventsEl = document.getElementById('systemsEvents');
       if (recentEvents.length > 0) {
-        const eventRows = recentEvents.map(e => {
+        const rows = recentEvents.map(e => {
           const time = e.timestamp ? new Date(e.timestamp).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : '';
-          return `<div class="systems-event-row">
-            <span class="systems-event-time">${esc(time)}</span>
-            <span class="systems-event-text">${esc(e.narrative || e.subsystem || 'Unknown event')}</span>
-          </div>`;
+          return `<div class="systems-event-row"><span class="systems-event-time">${esc(time)}</span><span class="systems-event-text">${esc(e.narrative || e.subsystem || '')}</span></div>`;
         }).join('');
-
-        eventsEl.innerHTML = `
-          <div class="events-disclosure" id="eventsDisclosure">
-            <button class="events-disclosure-toggle" onclick="document.getElementById('eventsDisclosure').classList.toggle('expanded')">
-              <span class="events-disclosure-arrow">&#9654;</span>
-              Recent Events (${recentEvents.length})
-            </button>
-            <div class="events-disclosure-body">${eventRows}</div>
-          </div>`;
+        eventsEl.innerHTML = `<div class="events-disclosure" id="eventsDisclosure">
+          <button class="events-disclosure-toggle" onclick="document.getElementById('eventsDisclosure').classList.toggle('expanded')">
+            <span class="events-disclosure-arrow">&#9654;</span> Recent Events (${recentEvents.length})
+          </button>
+          <div class="events-disclosure-body">${rows}</div></div>`;
       } else {
         eventsEl.innerHTML = '';
       }
     }
 
-    function toggleCapabilityCard(headerEl) {
-      const card = headerEl.closest('.capability-card');
-      if (!card) return;
-      const wasExpanded = card.classList.contains('expanded');
-
-      // Close all others
-      document.querySelectorAll('.capability-card.expanded').forEach(el => el.classList.remove('expanded'));
-
-      if (!wasExpanded) {
-        card.classList.add('expanded');
+    function buildPreviewStats(stats) {
+      if (!stats || typeof stats !== 'object') return '';
+      const map = {
+        recoveries: 'Recoveries', interventions: 'Interventions', activeCases: 'Active',
+        coherencePassed: 'Passed', coherenceFailed: 'Failed', memoryPercent: 'Memory',
+        enabledJobs: 'Jobs', activeJobSessions: 'Running', queueLength: 'Queued',
+        weeklyUsage: 'Weekly', fiveHourRate: '5h Rate',
+        topicMappings: 'Topics', totalMessages: 'Messages',
+        proposals: 'Proposals', gaps: 'Gaps', learningsApplied: 'Applied',
+      };
+      const chips = [];
+      for (const [key, label] of Object.entries(map)) {
+        if (stats[key] != null && stats[key] !== 0 && stats[key] !== false) {
+          const suf = ['weeklyUsage','fiveHourRate','memoryPercent'].includes(key) ? '%' : '';
+          chips.push(`<span class="cap-stat"><span class="cap-stat-value">${esc(String(stats[key]))}${suf}</span>${esc(label)}</span>`);
+        }
+        if (chips.length >= 3) break;
       }
+      return chips.join('');
+    }
+
+    function showCapabilityDetail(capId) {
+      if (!systemsData) return;
+      const cap = systemsData.activeCapabilities.find(c => c.id === capId);
+      if (!cap) return;
+      document.getElementById('systemsOverview').style.display = 'none';
+      document.getElementById('systemsDetailView').classList.add('active');
+      const content = document.getElementById('systemsDetailContent');
+
+      const statCards = buildStatCards(cap.stats || {});
+      const processRows = (cap.processes || []).map(p => {
+        const dotColor = p.status === 'running' ? 'var(--accent)' : 'var(--red)';
+        return `<div class="cap-process-row">
+          <span class="cap-process-dot" style="background:${dotColor}"></span>
+          <span class="cap-process-name">${esc(p.name)}</span>
+          <span class="cap-process-status">${esc(p.status === 'running' ? 'Running' : 'Error')}</span>
+        </div>`;
+      }).join('');
+
+      const lastAct = cap.lastActivity
+        ? '<div class="cap-last-activity">Last activity: ' + esc(timeAgo(cap.lastActivity)) + '</div>' : '';
+
+      content.innerHTML = `
+        <div class="cap-detail-header">
+          <div class="cap-detail-title">
+            <span class="cap-dot ${cap.status === 'error' ? 'error' : 'active'}"></span>
+            <h3>${esc(cap.label)}</h3>
+          </div>
+          <div class="cap-detail-description">${esc(cap.description)}</div>
+          ${lastAct}
+        </div>
+        ${statCards ? '<div class="cap-detail-section"><div class="cap-detail-section-title">Metrics</div><div class="cap-stats-grid">' + statCards + '</div></div>' : ''}
+        <div class="cap-detail-section">
+          <div class="cap-detail-section-title">Components (${(cap.processes || []).length})</div>
+          <div class="cap-process-list">${processRows}</div>
+        </div>
+        <div class="cap-detail-section">
+          <div class="cap-detail-section-title">Status</div>
+          <div style="font-size:13px;color:var(--accent);font-weight:500;padding:8px 0">${esc(cap.metric)}</div>
+        </div>`;
+    }
+
+    function buildStatCards(stats) {
+      if (!stats || typeof stats !== 'object') return '';
+      const map = {
+        interventions: 'Interventions', recoveries: 'Recoveries', sessionDeaths: 'Deaths',
+        llmOverrides: 'LLM Overrides', activeCases: 'Active Cases', totalTriages: 'Triages',
+        cooldowns: 'Cooldowns',
+        coherenceChecks: 'Checks', coherencePassed: 'Passed', coherenceFailed: 'Failed', coherenceCorrected: 'Corrected',
+        memoryPercent: 'Memory %', memoryFreeGB: 'Free GB', memoryTotalGB: 'Total GB',
+        trackedProcesses: 'Tracked', orphanProcesses: 'Orphans', totalMemoryMB: 'Memory MB',
+        totalJobs: 'Total Jobs', enabledJobs: 'Enabled', queueLength: 'Queued', activeJobSessions: 'Running',
+        weeklyUsage: 'Weekly %', fiveHourRate: '5h Rate %',
+        topicMappings: 'Topics', pendingStalls: 'Pending', totalMessages: 'Messages',
+        proposals: 'Proposals', learnings: 'Learnings', learningsApplied: 'Applied',
+        gaps: 'Gaps', actions: 'Actions', overdueActions: 'Overdue',
+      };
+      const cards = [];
+      for (const [key, label] of Object.entries(map)) {
+        if (stats[key] != null && typeof stats[key] === 'number') {
+          cards.push(`<div class="cap-stat-card"><div class="cap-stat-card-value">${stats[key]}</div><div class="cap-stat-card-label">${esc(label)}</div></div>`);
+        }
+      }
+      return cards.join('');
+    }
+
+    function showSystemsOverview() {
+      document.getElementById('systemsOverview').style.display = '';
+      document.getElementById('systemsDetailView').classList.remove('active');
+    }
+
+    function timeAgo(isoStr) {
+      const ms = Date.now() - new Date(isoStr).getTime();
+      const s = Math.floor(ms / 1000);
+      if (s < 60) return 'just now';
+      const m = Math.floor(s / 60);
+      if (m < 60) return m + 'm ago';
+      const h = Math.floor(m / 60);
+      if (h < 24) return h + 'h ago';
+      return Math.floor(h / 24) + 'd ago';
     }
 
     function formatUptimeClient(ms) {
