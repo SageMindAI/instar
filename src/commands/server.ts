@@ -1150,29 +1150,29 @@ function wireIMessageRouting(
 
   /**
    * Build a bootstrap message for an iMessage session.
-   * Includes conversation context, relay instructions, and session persistence guidance.
-   * Mirrors the Telegram `spawnSessionForTopic` pattern — the bootstrap must tell Claude:
-   * 1. WHO is messaging (sender tag)
-   * 2. HOW to reply (the relay script)
-   * 3. To STAY ALIVE and wait for follow-up messages
+   *
+   * Writes context + relay instructions to a temp file and returns a SINGLE-LINE
+   * injection message referencing it. Multi-line injections via bracketed paste
+   * cause sessions to exit immediately after processing — the single-line + file
+   * pattern (used by Telegram's forward handler) keeps sessions alive.
    */
   function buildIMessageBootstrap(sender: string, text: string, senderName?: string, context?: string): string {
     const replyScript = '.claude/scripts/imessage-reply.sh';
-    const parts: string[] = [];
+    const contextLines: string[] = [];
 
     if (context) {
-      parts.push(
+      contextLines.push(
         `CONTINUATION — You are resuming an EXISTING conversation via iMessage.`,
         `Read the context below before responding.`,
         ``,
         context,
         ``,
         `IMPORTANT: Your response MUST continue the conversation above. Do NOT introduce yourself.`,
+        ``,
       );
     }
 
-    parts.push(
-      ``,
+    contextLines.push(
       `--- iMessage SESSION (${sender}) ---`,
       `This is a PERSISTENT conversational session via iMessage.`,
       `MANDATORY: After EVERY response, relay your message back to the user:`,
@@ -1185,12 +1185,18 @@ function wireIMessageRouting(
       `Strip the [imessage:...] prefix before interpreting messages.`,
       `Only relay conversational text — not tool output or internal reasoning.`,
       `--- END iMessage SESSION ---`,
-      ``,
-      `The user's latest message:`,
-      `[imessage:${sender}${senderName ? ` from ${senderName}` : ''}] ${text}`,
     );
 
-    return parts.join('\n');
+    // Write to temp file — same pattern as Telegram forward handler
+    const tmpDir = '/tmp/instar-imessage';
+    fs.mkdirSync(tmpDir, { recursive: true });
+    const senderSlug = sender.replace(/[^a-zA-Z0-9]/g, '').slice(-8);
+    const ctxPath = path.join(tmpDir, `ctx-${senderSlug}-${Date.now()}.txt`);
+    fs.writeFileSync(ctxPath, contextLines.join('\n'));
+
+    // Single-line injection referencing the file
+    const tag = `[imessage:${sender}${senderName ? ` from ${senderName}` : ''}]`;
+    return `${tag} ${text} (IMPORTANT: Read ${ctxPath} for iMessage session instructions and conversation history — you MUST relay your response back via the reply script.)`;
   }
 
   imessage.onMessage(async (msg) => {
@@ -1204,52 +1210,72 @@ function wireIMessageRouting(
     // Check for existing session
     const targetSession = imessage.getSessionForSender(sender);
 
-    if (targetSession) {
-      if (sessionManager.isSessionAlive(targetSession)) {
-        // Session alive — inject message
-        console.log(`[imessage→session] Injecting into ${targetSession}: "${text.slice(0, 80)}"`);
-        sessionManager.injectIMessageMessage(targetSession, sender, text, senderName);
-        imessage.trackMessageInjection(sender, targetSession, text);
-      } else {
-        // Session dead — respawn with context
-        if (spawningSenders.has(senderNorm)) {
-          console.log(`[imessage→session] Spawn already in progress for ${imessage.constructor && (imessage.constructor as any).maskIdentifier ? (imessage.constructor as any).maskIdentifier(sender) : sender}`);
-          return;
-        }
-        spawningSenders.add(senderNorm);
-        try {
-          console.log(`[imessage→session] Session "${targetSession}" died, respawning...`);
-          const context = imessage.getConversationContext(sender, 30);
-          const sessionName = `im-${sender.replace(/[^a-zA-Z0-9]/g, '').slice(-6)}`;
-          const bootstrap = buildIMessageBootstrap(sender, text, senderName, context || undefined);
-          const newSession = await sessionManager.spawnInteractiveSession(bootstrap, sessionName);
-          imessage.registerSession(sender, newSession);
-          imessage.trackMessageInjection(sender, newSession, text);
-          console.log(`[imessage→session] Respawned "${newSession}" for ${(imessage.constructor as any).maskIdentifier?.(sender) || sender}`);
-        } catch (err) {
-          console.error(`[imessage→session] Respawn failed:`, err);
-        } finally {
-          spawningSenders.delete(senderNorm);
-        }
-      }
+    if (targetSession && sessionManager.isSessionAlive(targetSession)) {
+      // Session alive — inject directly
+      console.log(`[imessage→session] Injecting into ${targetSession}: "${text.slice(0, 80)}"`);
+      sessionManager.injectIMessageMessage(targetSession, sender, text, senderName);
+      imessage.trackMessageInjection(sender, targetSession, text);
     } else {
-      // No session — auto-spawn
+      // Session dead or missing — spawn a new one, then inject the message
+      // CRITICAL: Spawn WITHOUT an initial message, then inject AFTER the session
+      // is alive. Passing the message into spawnInteractiveSession uses an internal
+      // injection path that kills sessions. Spawning empty + injecting separately
+      // (the same path used for subsequent messages) keeps sessions alive.
       if (spawningSenders.has(senderNorm)) {
         console.log(`[imessage→session] Spawn already in progress for ${(imessage.constructor as any).maskIdentifier?.(sender) || sender}`);
         return;
       }
       spawningSenders.add(senderNorm);
       try {
-        console.log(`[imessage→session] No session for ${(imessage.constructor as any).maskIdentifier?.(sender) || sender}, auto-spawning...`);
-        const context = imessage.getConversationContext(sender, 30);
+        const action = targetSession ? 'respawning' : 'auto-spawning';
+        console.log(`[imessage→session] ${action} session for ${(imessage.constructor as any).maskIdentifier?.(sender) || sender}...`);
+
+        // Write context + relay instructions to temp file
+        const bootstrap = buildIMessageBootstrap(sender, text, senderName,
+          imessage.getConversationContext(sender, 30) || undefined);
+
+        // Spawn empty session (no initial message — this stays alive)
         const sessionName = `im-${sender.replace(/[^a-zA-Z0-9]/g, '').slice(-6)}`;
-        const bootstrap = buildIMessageBootstrap(sender, text, senderName, context || undefined);
-        const newSession = await sessionManager.spawnInteractiveSession(bootstrap, sessionName);
+        const newSession = await sessionManager.spawnInteractiveSession(
+          undefined,  // NO initial message
+          sessionName,
+        );
         imessage.registerSession(sender, newSession);
-        imessage.trackMessageInjection(sender, newSession, text);
-        console.log(`[imessage→session] Spawned "${newSession}" for ${(imessage.constructor as any).maskIdentifier?.(sender) || sender}`);
+
+        // Wait for Claude to be ready, then inject via the normal message path
+        // This is the same injection method used for subsequent messages (proven to work)
+        const waitStart = Date.now();
+        const maxWait = 30_000;
+        const checkInterval = 500;
+        let injected = false;
+
+        while (Date.now() - waitStart < maxWait) {
+          await new Promise(r => setTimeout(r, checkInterval));
+          if (!sessionManager.isSessionAlive(newSession)) {
+            console.error(`[imessage→session] Session "${newSession}" died during startup`);
+            break;
+          }
+          // Check if Claude's prompt is visible (session is ready for input)
+          const output = sessionManager.captureOutput(newSession, 20);
+          if (output && (output.includes('❯') || output.includes('bypass permissions') || /\/effort/.test(output))) {
+            // Ready — inject the message
+            await new Promise(r => setTimeout(r, 1000)); // stabilization
+            sessionManager.injectIMessageMessage(newSession, sender, text, senderName);
+            imessage.trackMessageInjection(sender, newSession, text);
+            injected = true;
+            console.log(`[imessage→session] Spawned "${newSession}" and injected message (${Date.now() - waitStart}ms)`);
+            break;
+          }
+        }
+
+        if (!injected && sessionManager.isSessionAlive(newSession)) {
+          // Timeout but session alive — inject anyway
+          sessionManager.injectIMessageMessage(newSession, sender, text, senderName);
+          imessage.trackMessageInjection(sender, newSession, text);
+          console.log(`[imessage→session] Spawned "${newSession}" — injected after timeout (session alive)`);
+        }
       } catch (err) {
-        console.error(`[imessage→session] Auto-spawn failed:`, err);
+        console.error(`[imessage→session] Spawn failed:`, err);
       } finally {
         spawningSenders.delete(senderNorm);
       }
@@ -3844,7 +3870,7 @@ export async function startServer(options: StartOptions): Promise<void> {
     const { OrphanProcessReaper } = await import('../monitoring/OrphanProcessReaper.js');
     const orphanReaper = new OrphanProcessReaper(config, sessionManager, {
       pollIntervalMs: 60_000,      // Check every minute
-      orphanMaxAgeMs: 3_600_000,   // Kill Instar orphans after 1 hour
+      orphanMaxAgeMs: 43_200_000,  // Kill Instar orphans after 12 hours (messaging sessions are long-lived)
       externalReportAgeMs: 14_400_000, // Report external processes after 4 hours
       highMemoryThresholdMB: 500,  // Flag processes using >500MB
       autoKillOrphans: true,       // Auto-kill Instar orphans (safe — only project-prefixed tmux sessions)
