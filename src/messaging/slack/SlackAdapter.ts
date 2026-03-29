@@ -177,6 +177,9 @@ export class SlackAdapter implements MessagingAdapter {
       this._autoJoinAllChannels();
     }
 
+    // Backfill ring buffers with recent channel history so sessions have context on restart
+    this._backfillChannelHistory();
+
     // Start pending prompt TTL eviction
     this._startPromptEviction();
 
@@ -977,6 +980,51 @@ export class SlackAdapter implements MessagingAdapter {
    * Only called in dedicated mode or when autoJoinChannels is true.
    * Runs asynchronously — doesn't block startup.
    */
+  /**
+   * Backfill ring buffers with recent channel history from Slack's API.
+   * This runs on startup so that sessions spawned after a server restart
+   * have conversation context instead of starting from scratch.
+   */
+  private async _backfillChannelHistory(): Promise<void> {
+    // Backfill the lifeline channel and any other configured channels
+    const channelIds = [
+      this.config.lifelineChannelId,
+      this.config.dashboardChannelId,
+    ].filter(Boolean) as string[];
+
+    for (const channelId of channelIds) {
+      try {
+        const result = await this.apiClient.call('conversations.history', {
+          channel: channelId,
+          limit: 50,
+        }) as { messages?: Array<Record<string, unknown>> };
+
+        const messages = result.messages ?? [];
+        messages.reverse(); // API returns newest-first, we want oldest-first
+
+        const buffer = this.channelHistory.get(channelId) ?? new RingBuffer<SlackMessage>(RING_BUFFER_CAPACITY);
+        let count = 0;
+        for (const m of messages) {
+          const user = m.user as string ?? m.bot_id as string;
+          const text = m.text as string ?? '';
+          const ts = m.ts as string;
+          const subtype = m.subtype as string | undefined;
+          if (!user || !ts) continue;
+          // Skip join/leave subtypes
+          if (subtype && subtype !== 'file_share') continue;
+          buffer.push({ ts, user, text, channel: channelId });
+          count++;
+        }
+        this.channelHistory.set(channelId, buffer);
+        if (count > 0) {
+          console.log(`[slack] Backfilled ${count} messages for channel ${channelId}`);
+        }
+      } catch (err) {
+        console.warn(`[slack] Could not backfill channel ${channelId}: ${(err as Error).message}`);
+      }
+    }
+  }
+
   private async _autoJoinAllChannels(): Promise<void> {
     try {
       const result = await this.apiClient.call('conversations.list', {
