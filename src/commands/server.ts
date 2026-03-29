@@ -2535,6 +2535,11 @@ export async function startServer(options: StartOptions): Promise<void> {
             const alive = sessions.find(s => s.tmuxSession === existingSession);
             if (alive) {
               console.log(`[slack→session] Injecting into ${existingSession}: "${message.content.slice(0, 80)}"`);
+              // Wait for Claude to be ready (handles race with recently spawned sessions)
+              const ready = await sessionManager.waitForClaudeReady(existingSession, 15000);
+              if (!ready) {
+                console.warn(`[slack→session] Session ${existingSession} not ready after 15s — injecting anyway`);
+              }
               // Use tmux send-keys to inject the message (same as Telegram's injection pattern)
               try {
                 const { execSync } = await import('node:child_process');

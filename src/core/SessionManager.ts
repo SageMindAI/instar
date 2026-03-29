@@ -1488,7 +1488,7 @@ export class SessionManager extends EventEmitter {
    * Wait for Claude to be ready in a tmux session by polling output.
    * Looks for Claude Code's prompt character (❯) which appears when ready for input.
    */
-  private async waitForClaudeReady(tmuxSession: string, timeoutMs: number = 30000): Promise<boolean> {
+  async waitForClaudeReady(tmuxSession: string, timeoutMs: number = 30000): Promise<boolean> {
     const start = Date.now();
     // Wait a minimum startup delay before checking (Claude needs time to load)
     await new Promise(r => setTimeout(r, 3000));
