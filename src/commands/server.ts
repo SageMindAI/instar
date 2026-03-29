@@ -1148,6 +1148,51 @@ function wireIMessageRouting(
   // Wire session alive check for stall detection
   imessage.setIsSessionAlive((sessionName) => sessionManager.isSessionAlive(sessionName));
 
+  /**
+   * Build a bootstrap message for an iMessage session.
+   * Includes conversation context, relay instructions, and session persistence guidance.
+   * Mirrors the Telegram `spawnSessionForTopic` pattern — the bootstrap must tell Claude:
+   * 1. WHO is messaging (sender tag)
+   * 2. HOW to reply (the relay script)
+   * 3. To STAY ALIVE and wait for follow-up messages
+   */
+  function buildIMessageBootstrap(sender: string, text: string, senderName?: string, context?: string): string {
+    const replyScript = '.claude/scripts/imessage-reply.sh';
+    const parts: string[] = [];
+
+    if (context) {
+      parts.push(
+        `CONTINUATION — You are resuming an EXISTING conversation via iMessage.`,
+        `Read the context below before responding.`,
+        ``,
+        context,
+        ``,
+        `IMPORTANT: Your response MUST continue the conversation above. Do NOT introduce yourself.`,
+      );
+    }
+
+    parts.push(
+      ``,
+      `--- iMessage SESSION (${sender}) ---`,
+      `This is a PERSISTENT conversational session via iMessage.`,
+      `MANDATORY: After EVERY response, relay your message back to the user:`,
+      `  cat <<'EOF' | ${replyScript} "${sender}"`,
+      `  Your response text here`,
+      `  EOF`,
+      ``,
+      `CRITICAL: After replying, STAY AT THE PROMPT and wait for follow-up messages.`,
+      `Do NOT exit. More messages will be injected as [imessage:${sender}] prefixed text.`,
+      `Strip the [imessage:...] prefix before interpreting messages.`,
+      `Only relay conversational text — not tool output or internal reasoning.`,
+      `--- END iMessage SESSION ---`,
+      ``,
+      `The user's latest message:`,
+      `[imessage:${sender}${senderName ? ` from ${senderName}` : ''}] ${text}`,
+    );
+
+    return parts.join('\n');
+  }
+
   imessage.onMessage(async (msg) => {
     const sender = msg.channel?.identifier;
     if (!sender) return;
@@ -1176,12 +1221,7 @@ function wireIMessageRouting(
           console.log(`[imessage→session] Session "${targetSession}" died, respawning...`);
           const context = imessage.getConversationContext(sender, 30);
           const sessionName = `im-${sender.replace(/[^a-zA-Z0-9]/g, '').slice(-6)}`;
-          let bootstrap = '';
-          if (context) {
-            bootstrap = `CONTINUATION — You are resuming an EXISTING conversation. Read the context below before responding.\n\n${context}\n\nIMPORTANT: Your response MUST acknowledge and continue the conversation above. Do NOT introduce yourself.\n\nThe user's latest message:\n[imessage:${sender}] ${text}`;
-          } else {
-            bootstrap = `[imessage:${sender}${senderName ? ` from ${senderName}` : ''}] ${text}`;
-          }
+          const bootstrap = buildIMessageBootstrap(sender, text, senderName, context || undefined);
           const newSession = await sessionManager.spawnInteractiveSession(bootstrap, sessionName);
           imessage.registerSession(sender, newSession);
           imessage.trackMessageInjection(sender, newSession, text);
@@ -1203,12 +1243,7 @@ function wireIMessageRouting(
         console.log(`[imessage→session] No session for ${(imessage.constructor as any).maskIdentifier?.(sender) || sender}, auto-spawning...`);
         const context = imessage.getConversationContext(sender, 30);
         const sessionName = `im-${sender.replace(/[^a-zA-Z0-9]/g, '').slice(-6)}`;
-        let bootstrap = '';
-        if (context) {
-          bootstrap = `CONTINUATION — You are resuming an EXISTING conversation. Read the context below before responding.\n\n${context}\n\nIMPORTANT: Your response MUST acknowledge and continue the conversation above. Do NOT introduce yourself.\n\nThe user's latest message:\n[imessage:${sender}${senderName ? ` from ${senderName}` : ''}] ${text}`;
-        } else {
-          bootstrap = `[imessage:${sender}${senderName ? ` from ${senderName}` : ''}] ${text}`;
-        }
+        const bootstrap = buildIMessageBootstrap(sender, text, senderName, context || undefined);
         const newSession = await sessionManager.spawnInteractiveSession(bootstrap, sessionName);
         imessage.registerSession(sender, newSession);
         imessage.trackMessageInjection(sender, newSession, text);
