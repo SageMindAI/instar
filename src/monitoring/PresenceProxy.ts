@@ -184,6 +184,37 @@ export function guardProxyOutput(text: string): { safe: boolean; reason?: string
   return { safe: true };
 }
 
+// ─── Quota Exhaustion Detection ─────────────────────────────────────────────
+
+/** Patterns that indicate Claude's API quota has been exhausted */
+const QUOTA_EXHAUSTION_PATTERNS = [
+  /you've hit your limit/i,
+  /\/extra-usage to finish/i,
+  /resets?\s+\d{1,2}(?::\d{2})?\s*(?:am|pm)?\s*\(/i,  // "resets 7pm (America/..."
+  /usage limit.*reached/i,
+  /quota.*exceeded/i,
+  /rate limit.*exceeded/i,
+];
+
+/**
+ * Check if terminal output indicates quota exhaustion.
+ * Returns a human-friendly message if detected, null otherwise.
+ */
+export function detectQuotaExhaustion(snapshot: string): string | null {
+  for (const pattern of QUOTA_EXHAUSTION_PATTERNS) {
+    if (pattern.test(snapshot)) {
+      // Try to extract the reset time
+      const resetMatch = snapshot.match(/resets?\s+(\d{1,2}(?::\d{2})?\s*(?:am|pm)?\s*\([^)]+\))/i);
+      const resetTime = resetMatch ? resetMatch[1] : null;
+      if (resetTime) {
+        return `The agent has hit its Claude API usage limit. Quota resets ${resetTime}. The session is paused until then — no work is being done.`;
+      }
+      return 'The agent has hit its Claude API usage limit. The session is paused until the quota resets — no work is being done.';
+    }
+  }
+  return null;
+}
+
 // ─── Long-Running Process Whitelist ─────────────────────────────────────────
 
 const LONG_RUNNING_PATTERNS = [
@@ -521,6 +552,21 @@ export class PresenceProxy {
 
     let message: string;
 
+    // ── Quota exhaustion: detect before LLM call (saves tokens + gives clear message) ──
+    if (snapshot) {
+      const quotaMessage = detectQuotaExhaustion(snapshot);
+      if (quotaMessage) {
+        message = `${this.prefix} ${quotaMessage}`;
+        // Skip LLM, cancel further tiers — quota is a definitive state, not ambiguous
+        if (state.cancelled) return;
+        state.tier1FiredAt = Date.now();
+        await this.sendProxyMessage(topicId, message, 1);
+        this.persistState(topicId, state);
+        state.conversationHistory.push({ role: 'proxy', text: message, timestamp: Date.now() });
+        return; // Don't schedule tier 2/3 — nothing more to assess
+      }
+    }
+
     if (!snapshot || snapshot.trim().length < 10) {
       message = `${this.prefix} ${this.config.agentName} is active but hasn't produced visible output yet. Your message has been delivered.`;
     } else {
@@ -578,6 +624,18 @@ export class PresenceProxy {
 
     state.tier2Snapshot = snapshot;
     state.tier2SnapshotHash = hash;
+
+    // ── Quota exhaustion: check before LLM call ──
+    if (snapshot) {
+      const quotaMessage = detectQuotaExhaustion(snapshot);
+      if (quotaMessage) {
+        if (state.cancelled) return;
+        state.tier2FiredAt = Date.now();
+        await this.sendProxyMessage(topicId, `${this.prefix} 2-minute update — ${quotaMessage}`, 2);
+        this.persistState(topicId, state);
+        return; // Don't schedule tier 3
+      }
+    }
 
     // Check if output changed since Tier 1
     const outputChanged = state.tier1SnapshotHash !== hash;
@@ -642,6 +700,25 @@ export class PresenceProxy {
     const lines = this.config.maxTmuxLines?.t3 ?? 200;
     const raw = alive ? this.config.captureSessionOutput(state.sessionName, lines) : null;
     const snapshot = raw ? sanitizeTmuxOutput(raw, this.config.credentialPatterns) : null;
+
+    // ── Quota exhaustion: check before LLM call ──
+    if (snapshot) {
+      const quotaMessage = detectQuotaExhaustion(snapshot);
+      if (quotaMessage) {
+        if (state.cancelled) {
+          this.config.releaseTriageMutex?.(state.sessionName, 'presence-proxy');
+          return;
+        }
+        state.tier3FiredAt = Date.now();
+        state.tier3Assessment = 'waiting';
+        state.tier3Summary = quotaMessage;
+        await this.sendProxyMessage(topicId, `${this.prefix} 5-minute check — ${quotaMessage}`, 3);
+        this.config.releaseTriageMutex?.(state.sessionName, 'presence-proxy');
+        this.persistState(topicId, state);
+        this.cleanupState(topicId);
+        return;
+      }
+    }
 
     // Process tree check (authoritative)
     const processes = alive ? this.config.getProcessTree(state.sessionName) : [];

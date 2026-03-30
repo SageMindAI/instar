@@ -324,32 +324,38 @@
 
 ### Critical Gaps (Core UX Impact)
 
-1. **Voice message support** (1.1.4) — Slack supports file uploads including audio; needs transcription pipeline
-2. **Stall detection** (6.1-6.9) — Entire stall detection subsystem missing for Slack
-3. **Slash commands** (7.4-7.14) — Most commands not available in Slack
+1. ~~**Voice message support** (1.1.4)~~ — **CLOSED v0.25.0**: Whisper transcription via Groq/OpenAI
+2. ~~**Stall detection** (6.1-6.9)~~ — **CLOSED v0.25.0**: Full pipeline (track, detect, alert)
+3. ~~**Slash commands** (7.4-7.14)~~ — **CLOSED v0.25.0**: !claim, !unlink, !interrupt, !restart, !status
 4. **Lifeline** (13.1-13.13) — No persistent guardian process for Slack; connection lost on server crash
-5. **Long message temp files** (3.2.4) — Large messages injected directly, may cause tmux issues
-6. **Sender/topic sanitization** (3.2.6-3.2.7) — Injection protection missing for Slack
+5. ~~**Long message temp files** (3.2.4)~~ — **CLOSED v0.25.0**: >500 chars → temp file
+6. ~~**Sender/topic sanitization** (3.2.6-3.2.7)~~ — **CLOSED v0.25.0**: Sanitization at injection boundary
 
 ### Important Gaps (Reliability & Polish)
 
-7. **Delivery confirmation** (4.2) — No `✓ Delivered` equivalent in Slack
-8. **Standby commands** (5.6-5.8) — `unstick`, `quiet`, `resume` not available in Slack
-9. **Standby state persistence** (5.9) — Lost on restart for Slack
-10. **Topic context hook** (16.3) — No Slack equivalent of telegram-topic-context.sh
-11. **Session resume UUID proactive save** (3.1.4) — Only saves on explicit resume, not proactively
-12. **TopicMemory dual-write** (12.6) — Slack messages not stored in SQLite
-13. **Content validation** (17.1-17.4) — No outbound validation or Sentinel for Slack
+7. ~~**Delivery confirmation** (4.2)~~ — **CLOSED v0.25.0**: ✓ Delivered after injection
+8. ~~**Standby commands** (5.6-5.8)~~ — **CLOSED v0.25.0**: unstick, quiet, resume, restart → PresenceProxy
+9. ~~**Standby state persistence** (5.9)~~ — **CLOSED v0.25.0**: Channel map pre-populated on startup
+10. ~~**Topic context hook** (16.3)~~ — **CLOSED**: Already existed (slack-channel-context.sh)
+11. ~~**Session resume UUID proactive save** (3.1.4)~~ — **CLOSED v0.25.0**: beforeSessionKill hook
+12. ~~**TopicMemory dual-write** (12.6)~~ — **CLOSED v0.25.0**: Slack → SQLite via synthetic ID
+13. ~~**Content validation** (17.1-17.4)~~ — **CLOSED v0.25.0**: Sentinel intercept (emergency-stop, pause)
 
 ### Nice-to-Have Gaps
 
-14. **Notification batcher** (8.2) — Summary/Digest tiers not implemented for Slack
-15. **Quiet hours** (8.3) — Not implemented for Slack
-16. **Unknown user registration** (10.3-10.7) — Slack silently drops unauthorized users
-17. **Topic emoji/color** (2.7-2.8) — Slack channels don't have emoji/color
-18. **Idle prompt timer reset** (3.2.9) — Not wired for Slack sessions
-19. **Search route** (18.14) — No message search API for Slack
-20. **Updates channel** (8.5) — No dedicated updates channel in Slack
+14. ~~**Notification batcher** (8.2)~~ — **CLOSED v0.25.0**: All tiers route to Slack attention channel
+15. **Quiet hours** (8.3) — Not implemented for Slack (inherits from Telegram's batcher)
+16. ~~**Unknown user handling** (10.3-10.7)~~ — **CLOSED v0.25.0**: Ephemeral "not authorized" message
+17. **Topic emoji/color** (2.7-2.8) — N/A for Slack (channels don't have emoji/color)
+18. ~~**Idle prompt timer reset** (3.2.9)~~ — **CLOSED v0.25.0**: Uses SessionManager.injectMessage
+19. ~~**Search route** (18.14)~~ — **CLOSED**: Already existed (/slack/search)
+20. ~~**Updates channel** (8.5)~~ — **CLOSED v0.25.0**: echo-sys-updates auto-created
+
+### Remaining Open Gaps
+
+- **Lifeline** (13.1-13.13) — Persistent guardian process for Slack. Significant architectural work.
+- **Quiet hours** (8.3) — Low priority, can inherit from Telegram's global batcher config
+- **Topic emoji/color** (2.7-2.8) — Platform limitation, not applicable
 
 ---
 
@@ -358,4 +364,5 @@
 | Version | Date | Changes |
 |---------|------|---------|
 | 1.0 | 2026-03-29 | Initial comprehensive audit |
+| 2.0 | 2026-03-30 | v0.25.0: Closed 17/20 gaps. Voice, stall detection, commands, standby, TopicMemory, Sentinel, notifications, unknown user handling |
 | 1.1 | 2026-03-29 | v0.24.29: stuck session recovery (kill & respawn); Slack context file format changed from JSON to human-readable thread history; ring buffer now stores bot messages and backfills from Slack API on startup |
