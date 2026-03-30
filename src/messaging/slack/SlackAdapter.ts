@@ -61,6 +61,8 @@ export class SlackAdapter implements MessagingAdapter {
   private authorizedUsers: Set<string>;
   private channelHistory: Map<string, RingBuffer<SlackMessage>> = new Map();
   private pendingPrompts: Map<string, PendingPrompt> = new Map();
+  private seenMessageTs: Set<string> = new Set();
+  private seenMessageTsCleanupTimer: ReturnType<typeof setInterval> | null = null;
   private userCache: Map<string, { name: string; fetchedAt: number }> = new Map();
   private promptEvictionTimer: ReturnType<typeof setInterval> | null = null;
   private housekeepingTimer: ReturnType<typeof setInterval> | null = null;
@@ -199,6 +201,18 @@ export class SlackAdapter implements MessagingAdapter {
     // Start pending prompt TTL eviction
     this._startPromptEviction();
 
+    // Start message dedup set cleanup (every 5 minutes, drop entries older than 10 min)
+    this.seenMessageTsCleanupTimer = setInterval(() => {
+      // Slack ts format: "1234567890.123456" (seconds.microseconds)
+      const cutoff = (Date.now() / 1000) - 600; // 10 minutes ago
+      for (const ts of this.seenMessageTs) {
+        const tsSeconds = parseFloat(ts);
+        if (!isNaN(tsSeconds) && tsSeconds < cutoff) {
+          this.seenMessageTs.delete(ts);
+        }
+      }
+    }, 5 * 60 * 1000);
+
     // Start channel housekeeping (auto-archive idle channels)
     this._startHousekeeping();
 
@@ -215,6 +229,7 @@ export class SlackAdapter implements MessagingAdapter {
     if (this.housekeepingTimer) { clearInterval(this.housekeepingTimer); this.housekeepingTimer = null; }
     if (this.logPurgeTimer) { clearInterval(this.logPurgeTimer); this.logPurgeTimer = null; }
     if (this.stallCheckTimer) { clearInterval(this.stallCheckTimer); this.stallCheckTimer = null; }
+    if (this.seenMessageTsCleanupTimer) { clearInterval(this.seenMessageTsCleanupTimer); this.seenMessageTsCleanupTimer = null; }
     if (this.socketClient) {
       await this.socketClient.disconnect();
       this.socketClient = null;
@@ -584,12 +599,23 @@ export class SlackAdapter implements MessagingAdapter {
     if (subtype && subtype !== 'file_share') return;
     if (!userId || !channelId) return;
 
+    // Dedup — Socket Mode reconnections can redeliver the same event.
+    // Slack message timestamps are unique per-channel and safe as dedup keys.
+    if (ts && this.seenMessageTs.has(ts)) {
+      return;
+    }
+    if (ts) {
+      this.seenMessageTs.add(ts);
+    }
+
     // Bot messages: store in ring buffer for context but don't process as user input
     // This ensures spawned sessions see the full conversation (both sides).
     if (event.bot_id) {
       const buffer = this.channelHistory.get(channelId) ?? new RingBuffer<SlackMessage>(RING_BUFFER_CAPACITY);
       buffer.push({ ts, user: userId, text, channel: channelId, thread_ts: threadTs });
       this.channelHistory.set(channelId, buffer);
+      // Bot replied in this channel — clear stall tracking (the agent answered)
+      this.clearStallTracking(channelId);
       return;
     }
 
@@ -762,15 +788,27 @@ export class SlackAdapter implements MessagingAdapter {
         return;
       }
 
+      const pending = this.pendingPrompts.get(messageTs)!;
       this.pendingPrompts.delete(messageTs);
 
+      // Clear stall tracking for the channel — prompt was answered
+      this.clearStallTracking(pending.channelId);
+
       // Update message to show selection
-      if (payload.channel?.id && messageTs) {
+      const channelId = payload.channel?.id;
+      if (channelId && messageTs) {
         await this.updateMessage(
-          payload.channel.id,
+          channelId,
           messageTs,
           `Answered: ${action.text?.text ?? action.value ?? 'selected'}`,
         ).catch(() => {});
+      }
+
+      // Inject the response into the session
+      const value = action.value ?? action.text?.text ?? '';
+      if (this.onPromptResponse && channelId) {
+        this.onPromptResponse(channelId, promptId, value);
+        console.log(`[slack] Prompt response: session=${pending.sessionName ?? 'unknown'} value="${value}"`);
       }
     }
   }
@@ -797,12 +835,13 @@ export class SlackAdapter implements MessagingAdapter {
   // ── Prompt Gate ──
 
   /** Register a pending prompt (for interaction validation). */
-  registerPendingPrompt(messageTs: string, promptId: string, channelId: string): void {
+  registerPendingPrompt(messageTs: string, promptId: string, channelId: string, sessionName?: string): void {
     this.pendingPrompts.set(messageTs, {
       promptId,
       channelId,
       messageTs,
       createdAt: Date.now(),
+      sessionName,
     });
   }
 

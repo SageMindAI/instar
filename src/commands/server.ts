@@ -2008,6 +2008,30 @@ export async function startServer(options: StartOptions): Promise<void> {
       telemetryHeartbeat.start();
     }
 
+    // Helper: resolve pending plan prompts when a prompt response arrives.
+    // Calls the internal route endpoint to mark the plan prompt as resolved,
+    // which unblocks the PreToolUse hook that's polling for the response.
+    const resolvePlanPromptForSession = (sessionName: string, key: string) => {
+      const port = config.port ?? 4042;
+      const payload = JSON.stringify({ sessionName, key });
+      const http = require('node:http');
+      const req = http.request({
+        hostname: '127.0.0.1',
+        port,
+        path: '/hooks/plan-prompt/resolve',
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Content-Length': Buffer.byteLength(payload),
+          'Authorization': `Bearer ${config.authToken}`,
+        },
+        timeout: 2000,
+      });
+      req.on('error', () => {}); // Best-effort
+      req.write(payload);
+      req.end();
+    };
+
     // Set up Telegram if configured
     // When --no-telegram is set (lifeline owns polling), create adapter in send-only mode
     // so the server can still relay replies via /telegram/reply/:topicId
@@ -2038,6 +2062,8 @@ export async function startServer(options: StartOptions): Promise<void> {
             console.warn(`[PromptGate] Skipping injection — session "${sessionName}" is no longer alive`);
             return false;
           }
+          // Also resolve any pending plan prompt for this session (unblocks the hook)
+          resolvePlanPromptForSession(sessionName, key);
           return sessionManager.sendKey(sessionName, key);
         };
         telegram.onPromptTextResponse = (sessionName, text) => {
@@ -2080,6 +2106,8 @@ export async function startServer(options: StartOptions): Promise<void> {
             console.warn(`[PromptGate] Skipping injection — session "${sessionName}" is no longer alive`);
             return false;
           }
+          // Also resolve any pending plan prompt for this session (unblocks the hook)
+          resolvePlanPromptForSession(sessionName, key);
           return sessionManager.sendKey(sessionName, key);
         };
         telegram.onPromptTextResponse = (sessionName, text) => {
@@ -2637,8 +2665,7 @@ export async function startServer(options: StartOptions): Promise<void> {
                   sessionManager.injectMessage(existingSession, bootstrapMessage);
                   // Track for stall detection
                   slackAdapter!.trackMessageInjection(channelId, existingSession, message.content);
-                  // Delivery confirmation
-                  slackAdapter!.sendToChannel(channelId, '✓ Delivered').catch(() => {});
+                  // Delivery confirmation via reaction only (no text message — the ✅ reaction is sufficient)
                 } catch (injectErr) {
                   console.error(`[slack→session] Injection failed: ${injectErr instanceof Error ? injectErr.message : injectErr}`);
                 }
@@ -2771,6 +2798,22 @@ export async function startServer(options: StartOptions): Promise<void> {
         };
         slackAdapter.onIsSessionAlive = (tmuxSession) => {
           return sessionManager.isSessionAlive(tmuxSession);
+        };
+
+        // Wire prompt response callback — inject button presses into sessions
+        slackAdapter.onPromptResponse = (channelId, promptId, value) => {
+          // Look up which session is bound to this channel
+          const sessionName = slackAdapter!.getSessionForChannel(channelId);
+          if (!sessionName) {
+            console.warn(`[slack] Prompt response for channel ${channelId} but no session bound`);
+            return;
+          }
+          if (!sessionManager.isSessionAlive(sessionName)) {
+            console.warn(`[slack] Prompt response for dead session "${sessionName}"`);
+            return;
+          }
+          sessionManager.sendKey(sessionName, value);
+          console.log(`[slack] Prompt response injected: session="${sessionName}" key="${value}"`);
         };
 
         // Standby commands will be wired after PresenceProxy is initialized (below)
