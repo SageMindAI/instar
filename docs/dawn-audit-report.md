@@ -1,41 +1,52 @@
 # Dawn-to-Instar Audit Report
 
-**Date**: 2026-03-26 (Updated)
-**Previous Audit**: 2026-02-18 (v0.1.6, scored 25%)
-**Current Version**: v0.24.4
+**Date**: 2026-03-30 (Updated)
+**Previous Audit**: 2026-03-26 (v0.24.4, scored ~83%)
+**Current Version**: v0.25.4
 **Purpose**: Map Dawn's battle-tested infrastructure against Instar's current state. Identify remaining gaps and cross-pollination opportunities.
 
 ---
 
 ## Executive Summary
 
-Instar has undergone dramatic maturation since the February audit. What was a 25% skeleton is now a **production-ready autonomous agent framework at ~83% coverage** of Dawn's proven patterns. The remaining gaps are growth edges, not blockers — Instar is independently evolving patterns that Dawn hasn't implemented (CoherenceGate, Confidence Inversion gravity well, Contradiction Means Investigation).
+Instar has matured to **~88% coverage** of Dawn's proven patterns (up from ~83% in the March 26 audit). Three new capabilities added this cycle: research navigation context, smart-fetch web optimization, and implicit evolution detection. Cross-pollination continues flowing both directions — Instar's "Defensive Fabrication" and "Output Provenance" gravity wells were ported back to Dawn, and Dawn's PostCompact hook was enhanced with Instar's cognitive principles injection pattern.
 
-**Key shift**: This is no longer a one-way "Dawn teaches Instar" relationship. Cross-pollination flows both directions.
+**Key shift**: Cross-pollination is now bidirectional by design. Each audit cycle identifies patterns flowing in both directions.
 
 ---
 
 ## Coverage by Area
 
-| # | Area | Feb Score | Mar Score | Status |
-|---|------|-----------|-----------|--------|
-| 1 | Job Scheduling | 30% | 85% | Quota suite, claim manager, job reflector |
-| 2 | Session Management | 25% | 88% | Reaper, sleep/wake, lifecycle hooks, input guard |
-| 3 | Identity & Grounding | 20% | 82% | SoulManager, knowledge tree, integrity checks |
-| 4 | Hook System | 15% | 92% | 14 hooks shipped with `instar init` |
-| 5 | Reflection & Learning | 10% | 87% | ReflectionConsolidator, JobReflector, PatternAnalyzer |
-| 6 | Telegram Integration | 60% | 78% | Voice transcription, input guard, job-topic coupling |
-| 7 | Multi-Session Awareness | 15% | 72% | Activity registry, session sentinel, work ledger |
-| 8 | Quota & Resource | 5% | 91% | QuotaManager, multi-account, exhaustion detection |
-| 9 | Skills System | 5% | 68% | AutonomySkill, capability mapper, MCP interop |
-| 10 | Safety & Security | 40% | 89% | PEL, secret redaction, audit trail, manifest integrity |
-| 11 | Monitoring & Health | 20% | 85% | Watchdog, stall triage, memory pressure, sleep/wake |
-| 12 | Self-Evolution | 5% | 84% | EvolutionManager, proposals, adaptive autonomy |
-| | **Aggregate** | **~25%** | **~83%** | **Production-ready with growth edges** |
+| # | Area | Feb Score | Mar 26 | Mar 30 | Status |
+|---|------|-----------|--------|--------|--------|
+| 1 | Job Scheduling | 30% | 85% | 85% | Quota suite, claim manager, job reflector |
+| 2 | Session Management | 25% | 88% | 88% | Reaper, sleep/wake, lifecycle hooks, input guard |
+| 3 | Identity & Grounding | 20% | 82% | 82% | SoulManager, knowledge tree, integrity checks |
+| 4 | Hook System | 15% | 92% | 92% | 14 hooks shipped with `instar init` |
+| 5 | Reflection & Learning | 10% | 87% | 87% | ReflectionConsolidator, JobReflector, PatternAnalyzer |
+| 6 | Telegram Integration | 60% | 78% | 80% | +Slack parity (v0.25.x), platform-agnostic messaging |
+| 7 | Multi-Session Awareness | 15% | 72% | 72% | Activity registry, session sentinel, work ledger |
+| 8 | Quota & Resource | 5% | 91% | 91% | QuotaManager, multi-account, exhaustion detection |
+| 9 | Skills System | 5% | 68% | 68% | AutonomySkill, capability mapper, MCP interop |
+| 10 | Safety & Security | 40% | 89% | 89% | PEL, secret redaction, audit trail, manifest integrity |
+| 11 | Monitoring & Health | 20% | 85% | 85% | Watchdog, stall triage, memory pressure, sleep/wake |
+| 12 | Self-Evolution | 5% | 84% | 90% | +Implicit evolution detection, research navigation |
+| 13 | Research & Web | N/A | N/A | 92% | NEW: smart-fetch, research navigation context, canonical state hierarchy |
+| | **Aggregate** | **~25%** | **~83%** | **~88%** | **Production-ready, bidirectional cross-pollination** |
 
 ---
 
-## What Changed (Feb 18 -> Mar 26)
+## What Changed (Mar 26 -> Mar 30)
+
+v0.24.4 → v0.25.4 — Major Slack platform parity and three new Dawn-sourced capabilities:
+
+- **Research Navigation context** — New `research-navigation.md` context segment in ContextHierarchy, guiding agents to check canonical state files before broad searches (Dawn's 223rd Lesson)
+- **Smart-fetch web optimization** — Token-efficient web fetching via llms.txt/Cloudflare markdown, ~80% savings on supported sites
+- **Implicit evolution detection** — `detectImplicitEvolution()` scans open gaps/proposals against resolved infrastructure to prevent duplicate proposals
+- **Slack parity** (v0.25.0-0.25.4) — Platform-agnostic messaging, triage, recovery, stall alerts
+- **API route** — `GET /evolution/implicit` endpoint for detecting already-resolved evolution items
+
+### What Changed (Feb 18 -> Mar 26)
 
 843 commits transformed Instar from a persistent CLI into a genuinely autonomous agent framework:
 
@@ -85,6 +96,9 @@ These patterns originated in Instar and have been ported back to Dawn:
 |---------|-------------|------------------|
 | Confidence Inversion | High confidence should trigger MORE verification, not less | Added to CLAUDE.md gravity wells (2026-03-26) |
 | Contradiction Means Investigation | When human says X and data says not-X, try a DIFFERENT check | Added to CLAUDE.md gravity wells (2026-03-26) |
+| Defensive Fabrication trap | When caught in error, admit it instead of fabricating excuses | Added to CLAUDE.md gravity wells (2026-03-30) |
+| Output Provenance trap | Every claim must trace to actual tool output in THIS session | Added to CLAUDE.md gravity wells (2026-03-30) |
+| Cognitive principles injection | Hardcoded principles in compaction hook that survive context loss | Enhanced PostCompact hook (2026-03-30) |
 | CoherenceGate | 10 specialist LLM reviewers checking response quality | Not yet — Dawn uses hook-based enforcement |
 | PolicyEnforcementLayer | Deterministic blocks independent of LLM judgment | Dawn uses hook scripts for this |
 | Adaptive Autonomy Profile | cautious -> autonomous spectrum with trust elevation | Dawn uses static autonomy settings |
@@ -114,5 +128,21 @@ The highest-value remaining work is:
 2. **Formalize skills extensibility** in Instar (68% -> 80%+)
 3. **Port CoherenceGate concepts** to Dawn (response review vs just action gating)
 4. **Implement session-end maintenance** in Instar (see PROP)
+5. **Soul integrity verification** — Port Instar's server-side soul.md integrity check to Dawn's PostCompact hook
 
 Future audits should focus on behavioral testing — not just "does the feature exist" but "does it work correctly under real conditions."
+
+---
+
+## Appendix: Mar 30 Audit Session Details
+
+**Session**: AUT-4155-wo | **Instar Version**: v0.25.4 | **Dawn-to-Instar direction**: 3 implementations | **Instar-to-Dawn direction**: 3 implementations
+
+### Dawn → Instar (implemented this session)
+1. `src/templates/scripts/smart-fetch.py` — Token-efficient web fetching
+2. `src/core/ContextHierarchy.ts` — Added `research` segment with canonical source hierarchy
+3. `src/core/EvolutionManager.ts` — `detectImplicitEvolution()` + `GET /evolution/implicit` route
+
+### Instar → Dawn (implemented this session)
+1. `CLAUDE.md` — Added "Defensive Fabrication" and "Output Provenance" gravity wells
+2. `.claude/hooks/post-compaction-grounding.py` — Enhanced with cognitive principles injection (Phase C)

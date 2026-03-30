@@ -503,9 +503,10 @@ export class ServerSupervisor extends EventEmitter {
     // detection below misses (its 2-minute threshold is too high for brief suspends).
     // On wake, reset failure counters so stale pre-sleep failures don't cascade.
     if (!this.sleepWakeDetector) {
-      // Lower drift threshold to 5s (from default 10s) to catch brief sleeps/power naps
+      // Use 15s drift threshold — low enough to catch real sleeps but high enough
+      // to avoid false positives from normal OS scheduling jitter (~5-10s on loaded systems)
       // that still cause health check failures during the transition.
-      this.sleepWakeDetector = new SleepWakeDetector({ driftThresholdMs: 5000 });
+      this.sleepWakeDetector = new SleepWakeDetector({ driftThresholdMs: 15_000 });
       this.sleepWakeDetector.on('wake', (event: { sleepDurationSeconds: number }) => {
         console.log(`[Supervisor] SleepWakeDetector: wake after ~${event.sleepDurationSeconds}s. Resetting failure counters.`);
         this.restartAttempts = 0;

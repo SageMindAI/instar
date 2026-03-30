@@ -5517,6 +5517,18 @@ export function createRoutes(ctx: RouteContext): Router {
     res.json({ ok: true, id: req.params.id, status });
   });
 
+  // ── Implicit Evolution Detection ─────────────────────────────
+  // Scans open gaps/proposals for items already resolved by existing infrastructure.
+  // Born from Dawn's REC-52-2 pattern: detect when capability needs are already met.
+  router.get('/evolution/implicit', (_req, res) => {
+    if (!ctx.evolution) {
+      res.json({ implicit: [], count: 0 });
+      return;
+    }
+    const implicit = ctx.evolution.detectImplicitEvolution();
+    res.json({ implicit, count: implicit.length });
+  });
+
   // ── Serendipity Protocol ─────────────────────────────────────
   router.get('/serendipity/stats', (_req, res) => {
     const serendipityDir = path.join(ctx.config.stateDir, 'state', 'serendipity');

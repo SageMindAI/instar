@@ -1002,6 +1002,10 @@ export class TelegramLifeline {
   private hasNotifiedServerDown = false;
   /** Suppressed "server down" count during current outage. */
   private suppressedServerDownCount = 0;
+  /** Timestamp of last "server down" notification sent (for cross-outage rate limiting). */
+  private lastServerDownNotifyAt = 0;
+  /** Minimum interval between "server down" notifications, even across separate outages (30 min). */
+  private static readonly SERVER_DOWN_COOLDOWN_MS = 30 * 60_000;
 
   /** Per-topic timestamps for rate-limiting queue acknowledgment messages. */
   private lastQueueAckAt = new Map<number, number>();
@@ -1022,6 +1026,7 @@ export class TelegramLifeline {
         const data = JSON.parse(fs.readFileSync(rateLimitPath, 'utf-8'));
         this.hasNotifiedServerDown = data.hasNotifiedServerDown ?? false;
         this.suppressedServerDownCount = data.suppressedServerDownCount ?? 0;
+        this.lastServerDownNotifyAt = data.lastServerDownNotifyAt ?? 0;
       }
     } catch {
       // Start fresh if state is corrupted
@@ -1037,6 +1042,7 @@ export class TelegramLifeline {
       fs.writeFileSync(tmpPath, JSON.stringify({
         hasNotifiedServerDown: this.hasNotifiedServerDown,
         suppressedServerDownCount: this.suppressedServerDownCount,
+        lastServerDownNotifyAt: this.lastServerDownNotifyAt,
         savedAt: new Date().toISOString(),
       }));
       fs.renameSync(tmpPath, rateLimitPath);
@@ -1074,7 +1080,21 @@ export class TelegramLifeline {
       return;
     }
 
+    // Cross-outage rate limit: suppress if we notified within the cooldown window.
+    // This prevents spam during flap cycles (e.g., Power Nap causing repeated down→up→down).
+    const now = Date.now();
+    if (this.lastServerDownNotifyAt > 0 &&
+        (now - this.lastServerDownNotifyAt) < TelegramLifeline.SERVER_DOWN_COOLDOWN_MS) {
+      this.hasNotifiedServerDown = true;
+      this.suppressedServerDownCount++;
+      this.saveRateLimitState();
+      const remainingMin = Math.round((TelegramLifeline.SERVER_DOWN_COOLDOWN_MS - (now - this.lastServerDownNotifyAt)) / 60_000);
+      console.log(`[Lifeline] Suppressing "server down" notification — cooldown active (${remainingMin}min remaining)`);
+      return;
+    }
+
     this.hasNotifiedServerDown = true;
+    this.lastServerDownNotifyAt = now;
     const topicId = this.lifelineTopicId ?? 1;
 
     const message = `Server went down: ${reason}\n\n` +

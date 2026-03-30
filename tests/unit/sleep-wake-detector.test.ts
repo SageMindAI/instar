@@ -81,4 +81,28 @@ describe('SleepWakeDetector', () => {
     }).not.toThrow();
     detector.stop();
   });
+
+  it('does not fire on normal OS scheduling jitter (< 15s)', async () => {
+    // Regression: lowering threshold to 5s caused false wake detections
+    // every 5 minutes from normal OS timer jitter (~9-10s drift).
+    // The supervisor uses 15s threshold; verify jitter below that is ignored.
+    detector = new SleepWakeDetector({
+      checkIntervalMs: 50,
+      driftThresholdMs: 15_000, // matches supervisor config
+    });
+
+    const wakeSpy = vi.fn();
+    detector.on('wake', wakeSpy);
+
+    let realNow = Date.now();
+    vi.spyOn(Date, 'now').mockImplementation(() => realNow);
+
+    detector.start();
+
+    // Simulate 10s of jitter (well under 15s threshold)
+    realNow += 10_000;
+    await new Promise(r => setTimeout(r, 100));
+
+    expect(wakeSpy).not.toHaveBeenCalled();
+  });
 });

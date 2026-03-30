@@ -497,6 +497,18 @@ async function spawnSessionForTopic(
     }
   }
 
+  // Large bootstrap messages (e.g. CONTINUATION context with full thread history)
+  // can exceed tmux send-keys limits. Write to a temp file and inject a reference,
+  // same pattern as injectTelegramMessage's FILE_THRESHOLD.
+  const BOOTSTRAP_FILE_THRESHOLD = 500;
+  if (bootstrapMessage.length > BOOTSTRAP_FILE_THRESHOLD) {
+    const bootstrapFilename = `bootstrap-${topicId}-${Date.now()}-${Math.random().toString(36).slice(2, 10)}.txt`;
+    const bootstrapFilepath = path.join(tmpDir, bootstrapFilename);
+    fs.writeFileSync(bootstrapFilepath, bootstrapMessage);
+    console.log(`[spawnSessionForTopic] Bootstrap message too large (${bootstrapMessage.length} chars), wrote to ${bootstrapFilepath}`);
+    bootstrapMessage = `[IMPORTANT: Read ${bootstrapFilepath} — it contains your full session context, conversation history, and the user's latest message. You MUST read this file before responding.]`;
+  }
+
   // Check for a resume UUID from a previously-killed session on this topic.
   // TopicResumeMap is authoritative — it saved the UUID for this specific topic at kill time
   // or via the refresh heartbeat. Skip LLM validation (which was failing due to JSONL sampling
