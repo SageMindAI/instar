@@ -103,6 +103,7 @@ Instar solves the six dimensions of agent coherence:
 | **Job Scheduler** | Cron-based tasks with priority levels, model tiering, and quota awareness | [→](https://instar.sh/features/scheduler/) |
 | **Telegram** | Two-way messaging via forum topics. Each topic maps to a Claude session | [→](https://instar.sh/features/telegram/) |
 | **WhatsApp** | Full messaging via local Baileys library. No cloud dependency | [→](https://instar.sh/features/whatsapp/) |
+| **iMessage** | Native macOS messaging via Messages.app database polling + `imsg` CLI. [Setup guide](#imessage-setup-macos) | |
 | **Lifeline** | Persistent supervisor. Detects crashes, auto-recovers, queues messages | [→](https://instar.sh/features/lifeline/) |
 | **Conversational Memory** | Per-topic SQLite with FTS5, rolling summaries, context re-injection | [→](https://instar.sh/features/memory/) |
 | **Evolution System** | Proposals, learnings, gap tracking, commitment follow-through | [→](https://instar.sh/features/evolution/) |
@@ -158,7 +159,7 @@ Different tools solve different problems. Here's where Instar fits:
 | **Persistence** | Multi-layered memory across sessions | Session-bound context | Plugin-based memory | Framework-dependent |
 | **Identity** | Hooks enforce identity at every boundary | Manual CLAUDE.md | Not addressed | Not addressed |
 | **Scheduling** | Native cron with priority & quotas | None | None | External required |
-| **Messaging** | Telegram + WhatsApp (two-way) | None | 22+ channels, voice, device apps | External required |
+| **Messaging** | Telegram + WhatsApp + iMessage (two-way) | None | 22+ channels, voice, device apps | External required |
 | **Safety** | LLM-supervised gates, decision journaling | Permission prompts | Behavioral hooks | Guardrails libraries |
 | **Process model** | One process per session, isolated | Single process | All agents in one Gateway | Single orchestrator |
 | **State storage** | 100% file-based (JSON/JSONL/SQLite) | Session only | Database-backed | Framework-dependent |
@@ -196,6 +197,62 @@ The AI systems we build today set precedents for how AI is treated tomorrow. **T
 > **Deep dive:** [Philosophy](https://instar.sh/concepts/philosophy/)
 
 </details>
+
+## iMessage Setup (macOS)
+
+iMessage support lets your agent send and receive iMessages on macOS. Messages are read directly from the native Messages database and sent via the [`imsg`](https://github.com/steipete/imsg) CLI.
+
+> **Note:** This feature is available on the `feat/imessage-adapter` branch and not yet in the published npm package. Install from this fork to try it:
+> ```bash
+> npm install github:rolandcanyon-cmd/instar#feat/imessage-adapter
+> ```
+
+### Prerequisites
+
+1. **macOS** with Messages.app signed into an Apple ID
+2. **Full Disk Access** for your terminal app (System Settings → Privacy & Security → Full Disk Access → add Terminal.app or iTerm)
+3. **imsg CLI** installed:
+   ```bash
+   brew install steipete/tap/imsg
+   ```
+4. **Automation permission** for Messages.app — macOS will prompt on first send
+
+### Configuration
+
+Add to your `.instar/config.json`:
+
+```json
+{
+  "messaging": [
+    {
+      "type": "imessage",
+      "enabled": true,
+      "config": {
+        "authorizedSenders": ["+14081234567"],
+        "cliPath": "/opt/homebrew/bin/imsg"
+      }
+    }
+  ]
+}
+```
+
+`authorizedSenders` is required (fail-closed). Only messages from these phone numbers or email addresses will be processed.
+
+### How it works
+
+- **Receiving**: The server polls `~/Library/Messages/chat.db` every 2 seconds for new messages. Uses the `query_only` SQLite pragma to read the WAL (write-ahead log) where Messages.app writes new data.
+- **Sending**: Claude Code sessions run `imessage-reply.sh` which calls `imsg send` and notifies the server for logging. Sending requires Automation permission for Messages.app, which only works from user-context processes (tmux sessions), not the LaunchAgent server.
+- **Session lifecycle**: Follows the same pattern as Telegram — each sender maps to a Claude Code session that receives conversation context on spawn and respawns with full history when needed.
+
+### Endpoints
+
+| Endpoint | Description |
+|----------|-------------|
+| `GET /imessage/status` | Connection state |
+| `POST /imessage/reply/:recipient` | Log outbound message (called by reply script) |
+| `GET /imessage/chats` | List recent conversations |
+| `GET /imessage/chats/:chatId/history` | Message history for a chat |
+| `GET /imessage/search?q=query` | Search messages |
 
 ## Origin
 
