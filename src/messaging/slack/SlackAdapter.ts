@@ -22,8 +22,6 @@ import { ChannelManager } from './ChannelManager.js';
 import { FileHandler } from './FileHandler.js';
 import { RingBuffer } from './RingBuffer.js';
 import { MessageLogger, type LogEntry } from '../shared/MessageLogger.js';
-import { SessionChannelRegistry } from '../shared/SessionChannelRegistry.js';
-import { StallDetector } from '../shared/StallDetector.js';
 import type { SlackConfig, SlackMessage, PendingPrompt, InteractionPayload, InteractionAction } from './types.js';
 import { sanitizeDisplayName, validateChannelId, escapeMrkdwn } from './sanitize.js';
 
@@ -31,12 +29,6 @@ const RING_BUFFER_CAPACITY = 50;
 const SLACK_MAX_TEXT_LENGTH = 4000;
 const AUTO_ARCHIVE_DAYS = 7;
 const LOG_PURGE_INTERVAL_MS = 24 * 60 * 60 * 1000; // Daily
-
-interface SlackChannelResume {
-  uuid: string;
-  sessionName: string | null;
-  savedAt: string;
-}
 
 export class SlackAdapter implements MessagingAdapter {
   readonly platform = 'slack';
@@ -51,8 +43,6 @@ export class SlackAdapter implements MessagingAdapter {
   private channelManager: ChannelManager;
   private fileHandler: FileHandler;
   private logger: MessageLogger;
-  private sessionRegistry: SessionChannelRegistry;
-  private stallDetector: StallDetector;
 
   // State
   private messageHandler: ((message: Message) => Promise<void>) | null = null;
@@ -64,20 +54,12 @@ export class SlackAdapter implements MessagingAdapter {
   private promptEvictionTimer: ReturnType<typeof setInterval> | null = null;
   private housekeepingTimer: ReturnType<typeof setInterval> | null = null;
   private logPurgeTimer: ReturnType<typeof setInterval> | null = null;
-  private channelResumePath: string;
-  private channelResumes: Map<string, SlackChannelResume> = new Map();
 
   // Callbacks (wired by server.ts)
   /** Called when a prompt gate response is received */
   onPromptResponse: ((channelId: string, promptId: string, value: string) => void) | null = null;
   /** Called when a message is logged (for dual-write to SQLite) */
   onMessageLogged: ((entry: LogEntry) => void) | null = null;
-  /** Called when a channel-linked session appears stalled. */
-  onStallDetected: ((channelId: string, sessionName: string, messageText: string, injectedAt: number) => Promise<unknown> | unknown) | null = null;
-  /** Optional liveness check for shared stall verification. */
-  onIsSessionAlive: ((sessionName: string) => boolean) | null = null;
-  /** Optional activity check for shared stall verification. */
-  onIsSessionActive: ((sessionName: string) => Promise<boolean>) | null = null;
 
   constructor(config: Record<string, unknown>, stateDir: string) {
     this.config = config as unknown as SlackConfig;
@@ -100,7 +82,6 @@ export class SlackAdapter implements MessagingAdapter {
     this.apiClient = new SlackApiClient(this.config.botToken, this.config.appToken);
 
     const agentName = this.config.workspaceName?.replace(/-agent$/, '') || 'agent';
-    const slackStateDir = path.join(stateDir, 'slack');
     this.channelManager = new ChannelManager(this.apiClient, agentName);
     this.fileHandler = new FileHandler(this.apiClient, this.config.botToken, stateDir);
     this.logger = new MessageLogger({
@@ -108,26 +89,11 @@ export class SlackAdapter implements MessagingAdapter {
       maxLines: 100_000,
       keepLines: 75_000,
     });
-    this.sessionRegistry = new SessionChannelRegistry({
-      registryPath: path.join(slackStateDir, 'channel-registry.json'),
-    });
-    this.channelResumePath = path.join(slackStateDir, 'channel-resume.json');
-    this.loadChannelResumes();
-    this.stallDetector = new StallDetector({
-      stallTimeoutMinutes: this.config.stallTimeoutMinutes ?? 5,
-      promiseTimeoutMinutes: this.config.promiseTimeoutMinutes ?? 10,
-    });
-    this.stallDetector.setOnStall(async (event) => {
-      await this.onStallDetected?.(event.channelId, event.sessionName, event.messageText, event.injectedAt);
-    });
   }
 
   // ── MessagingAdapter Interface ──
 
   async start(): Promise<void> {
-    this.stallDetector.setIsSessionAlive(this.onIsSessionAlive ? (sessionName) => this.onIsSessionAlive!(sessionName) : null);
-    this.stallDetector.setIsSessionActive(this.onIsSessionActive ? (sessionName) => this.onIsSessionActive!(sessionName) : null);
-
     const handlers: SocketModeHandlers = {
       onEvent: async (type, payload) => this._handleEvent(type, payload),
       onInteraction: async (payload) => this._handleInteraction(payload as unknown as InteractionPayload),
@@ -162,12 +128,10 @@ export class SlackAdapter implements MessagingAdapter {
 
     // Purge stale log entries on startup
     this._purgeOldLogs();
-    this.stallDetector.start();
   }
 
   async stop(): Promise<void> {
     this.started = false;
-    this.stallDetector.stop();
     if (this.promptEvictionTimer) {
       clearInterval(this.promptEvictionTimer);
       this.promptEvictionTimer = null;
@@ -211,7 +175,6 @@ export class SlackAdapter implements MessagingAdapter {
       lastResult = await this.apiClient.call('chat.postMessage', params);
     }
 
-    this._noteOutboundMessage(channelId, message.content);
     return lastResult;
   }
 
@@ -236,7 +199,6 @@ export class SlackAdapter implements MessagingAdapter {
     const params: Record<string, unknown> = { channel: channelId, text };
     if (options?.thread_ts) params.thread_ts = options.thread_ts;
     const result = await this.apiClient.call('chat.postMessage', params);
-    this._noteOutboundMessage(channelId, text);
     return result.ts as string;
   }
 
@@ -279,53 +241,6 @@ export class SlackAdapter implements MessagingAdapter {
     if (!buffer) return [];
     const all = buffer.toArray();
     return limit >= all.length ? all : all.slice(-limit);
-  }
-
-  /** Register a session for a Slack channel. */
-  registerChannelSession(channelId: string, sessionName: string, channelName?: string): void {
-    this.sessionRegistry.register(channelId, sessionName, channelName);
-  }
-
-  /** Get the session mapped to a channel. */
-  getSessionForChannel(channelId: string): string | null {
-    return this.sessionRegistry.getSessionForChannel(channelId);
-  }
-
-  /** Get the channel mapped to a session. */
-  getChannelForSession(sessionName: string): string | null {
-    return this.sessionRegistry.getChannelForSession(sessionName);
-  }
-
-  /** Persist a resume UUID for a channel-linked session. */
-  saveChannelResume(channelId: string, uuid: string, sessionName?: string): void {
-    this.channelResumes.set(channelId, {
-      uuid,
-      sessionName: sessionName ?? null,
-      savedAt: new Date().toISOString(),
-    });
-    this.persistChannelResumes();
-  }
-
-  /** Get the last saved resume UUID for a channel. */
-  getChannelResume(channelId: string): SlackChannelResume | null {
-    return this.channelResumes.get(channelId) ?? null;
-  }
-
-  /** Remove a saved resume UUID once it has been consumed. */
-  removeChannelResume(channelId: string): void {
-    if (this.channelResumes.delete(channelId)) {
-      this.persistChannelResumes();
-    }
-  }
-
-  /** Track a channel message that was injected into a tmux-backed session. */
-  trackMessageInjection(channelId: string, sessionName: string, messageText: string): void {
-    this.stallDetector.trackMessageInjection(channelId, sessionName, messageText);
-  }
-
-  /** Clear stall tracking for a channel after a response is sent. */
-  clearStallTracking(channelId: string): void {
-    this.stallDetector.clearStallForChannel(channelId);
   }
 
   /** Get user info (cached for 5 minutes). */
@@ -467,11 +382,6 @@ export class SlackAdapter implements MessagingAdapter {
       } catch (err) {
         console.error('[slack] Message handler error:', (err as Error).message);
       }
-    }
-
-    const sessionName = this.sessionRegistry.getSessionForChannel(channelId);
-    if (sessionName) {
-      this.stallDetector.trackMessageInjection(channelId, sessionName, text);
     }
 
     // Mark complete (replace eyes with checkmark)
@@ -711,47 +621,6 @@ export class SlackAdapter implements MessagingAdapter {
       }
     }
     return unanswered;
-  }
-
-  private loadChannelResumes(): void {
-    try {
-      if (!fs.existsSync(this.channelResumePath)) return;
-      const raw = JSON.parse(fs.readFileSync(this.channelResumePath, 'utf-8')) as Record<string, Partial<SlackChannelResume>>;
-      for (const [channelId, resume] of Object.entries(raw)) {
-        if (typeof resume.uuid !== 'string' || resume.uuid.length === 0) continue;
-        this.channelResumes.set(channelId, {
-          uuid: resume.uuid,
-          sessionName: typeof resume.sessionName === 'string' ? resume.sessionName : null,
-          savedAt: typeof resume.savedAt === 'string' ? resume.savedAt : new Date().toISOString(),
-        });
-      }
-    } catch {
-      // Best-effort persistence — start fresh if the file is absent or invalid.
-    }
-  }
-
-  private persistChannelResumes(): void {
-    try {
-      fs.mkdirSync(path.dirname(this.channelResumePath), { recursive: true });
-      const tmpPath = this.channelResumePath + `.${process.pid}.${Math.random().toString(36).slice(2)}.tmp`;
-      try {
-        fs.writeFileSync(tmpPath, JSON.stringify(Object.fromEntries(this.channelResumes), null, 2));
-        fs.renameSync(tmpPath, this.channelResumePath);
-      } catch (writeErr) {
-        try { fs.unlinkSync(tmpPath); } catch { /* ignore */ }
-        throw writeErr;
-      }
-    } catch (err) {
-      console.error(`[slack] Failed to save channel resume map: ${err}`);
-    }
-  }
-
-  private _noteOutboundMessage(channelId: string, text: string): void {
-    this.stallDetector.clearStallForChannel(channelId);
-    const sessionName = this.sessionRegistry.getSessionForChannel(channelId);
-    if (sessionName) {
-      this.stallDetector.trackOutboundMessage(channelId, sessionName, text);
-    }
   }
 
   private _chunkText(text: string): string[] {
