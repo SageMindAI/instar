@@ -2654,7 +2654,7 @@ export async function startServer(options: StartOptions): Promise<void> {
               if (imagePath === 'download-failed') {
                 return '[User sent a photo but the download failed]';
               }
-              return `[User sent a photo — read the image file at ${imagePath} to view it]`;
+              return `[User sent a photo — read the image file at ${imagePath} to view it. If the image cannot be processed, acknowledge you received it and describe what you can see, or let the user know the image format may not be supported.]`;
             },
           ).replace(
             /\[document:([^\]]+)\]/g,

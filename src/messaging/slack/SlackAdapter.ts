@@ -821,7 +821,15 @@ export class SlackAdapter implements MessagingAdapter {
           filePaths.push(savedPath);
 
           if (isImage) {
-            cleanText = cleanText ? `${cleanText} [image:${savedPath}]` : `[image:${savedPath}]`;
+            // Validate the downloaded file is actually a processable image
+            const imageValid = this._validateImageFile(savedPath);
+            if (imageValid) {
+              cleanText = cleanText ? `${cleanText} [image:${savedPath}]` : `[image:${savedPath}]`;
+            } else {
+              // File exists but isn't a valid/processable image — fall back to document
+              console.warn(`[slack] Downloaded image failed validation, treating as document: ${savedPath}`);
+              cleanText = cleanText ? `${cleanText} [document:${savedPath}]` : `[document:${savedPath}]`;
+            }
           } else if (isAudio && this.transcribeVoice) {
             // Voice message: transcribe and inject as [voice] transcript
             try {
@@ -1436,6 +1444,61 @@ export class SlackAdapter implements MessagingAdapter {
    * Check if a message mentions the bot (via @mention).
    * Slack encodes mentions as <@U12345> in message text.
    */
+  /**
+   * Validate that a downloaded file is a processable image.
+   * Checks magic bytes and file size to avoid Claude API "Could not process image" errors.
+   */
+  private _validateImageFile(filePath: string): boolean {
+    try {
+      const stats = fs.statSync(filePath);
+
+      // Too small to be a real image (< 100 bytes is likely an error page or empty)
+      if (stats.size < 100) {
+        console.warn(`[slack] Image too small (${stats.size} bytes): ${filePath}`);
+        return false;
+      }
+
+      // Too large for Claude API (> 20MB)
+      if (stats.size > 20 * 1024 * 1024) {
+        console.warn(`[slack] Image too large (${Math.round(stats.size / 1024 / 1024)}MB): ${filePath}`);
+        return false;
+      }
+
+      // Check magic bytes for supported image formats
+      const header = Buffer.alloc(16);
+      const fd = fs.openSync(filePath, 'r');
+      fs.readSync(fd, header, 0, 16, 0);
+      fs.closeSync(fd);
+
+      // JPEG: FF D8 FF
+      if (header[0] === 0xFF && header[1] === 0xD8 && header[2] === 0xFF) return true;
+      // PNG: 89 50 4E 47
+      if (header[0] === 0x89 && header[1] === 0x50 && header[2] === 0x4E && header[3] === 0x47) return true;
+      // GIF: 47 49 46
+      if (header[0] === 0x47 && header[1] === 0x49 && header[2] === 0x46) return true;
+      // WebP: RIFF....WEBP
+      if (header[0] === 0x52 && header[1] === 0x49 && header[2] === 0x46 && header[3] === 0x46
+        && header[8] === 0x57 && header[9] === 0x45 && header[10] === 0x42 && header[11] === 0x50) return true;
+      // BMP: 42 4D
+      if (header[0] === 0x42 && header[1] === 0x4D) return true;
+      // SVG: starts with < (text-based)
+      if (header[0] === 0x3C) return true;
+
+      // Check if it looks like HTML (Slack error page downloaded instead of image)
+      const headerStr = header.toString('utf-8', 0, 10).toLowerCase();
+      if (headerStr.includes('<!doctype') || headerStr.includes('<html')) {
+        console.warn(`[slack] Downloaded file is HTML, not an image: ${filePath}`);
+        return false;
+      }
+
+      console.warn(`[slack] Unknown image format (magic: ${header.slice(0, 4).toString('hex')}): ${filePath}`);
+      return false;
+    } catch (err) {
+      console.warn(`[slack] Image validation error: ${(err as Error).message}`);
+      return false;
+    }
+  }
+
   private _isBotMentioned(text: string): boolean {
     if (!this.botUserId) return false;
     return text.includes(`<@${this.botUserId}>`);

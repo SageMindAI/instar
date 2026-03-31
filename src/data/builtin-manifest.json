@@ -1,8 +1,8 @@
 {
   "$schema": "./builtin-manifest.schema.json",
   "schemaVersion": 1,
-  "generatedAt": "2026-03-31T03:44:52.246Z",
-  "instarVersion": "0.25.5",
+  "generatedAt": "2026-03-31T15:54:45.729Z",
+  "instarVersion": "0.25.6",
   "entryCount": 180,
   "entries": {
     "hook:session-start": {
@@ -1360,7 +1360,7 @@
       "type": "subsystem",
       "domain": "sessions",
       "sourcePath": "src/core/SessionManager.ts",
-      "contentHash": "6c86b8dd1319dff4248ebffb6ef013724c9a0e6188d611fb523662c08a2e53c1",
+      "contentHash": "d063977514b213b2a386b64dbf1d49a4d7a5efe8262e455280e472de10811af2",
       "since": "2025-01-01"
     },
     "subsystem:auto-updater": {
@@ -1392,7 +1392,7 @@
       "type": "subsystem",
       "domain": "scheduling",
       "sourcePath": "src/scheduler/JobScheduler.ts",
-      "contentHash": "5f5181ca4c50dedc5356056e48634153a1e721b06c62b53034cf879851ddace4",
+      "contentHash": "a15671c557bc938e0e82facafde627c3da8fd51239c93985dd8f8e233a449927",
       "since": "2025-01-01"
     },
     "subsystem:project-mapper": {

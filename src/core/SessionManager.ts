@@ -1278,7 +1278,7 @@ export class SessionManager extends EventEmitter {
         if (imagePath === 'download-failed') {
           return '[User sent a photo but the download failed]';
         }
-        return `[User sent a photo — read the image file at ${imagePath} to view it]`;
+        return `[User sent a photo — read the image file at ${imagePath} to view it. If the image cannot be processed, acknowledge you received it and let the user know the image format may not be supported.]`;
       }
     );
 

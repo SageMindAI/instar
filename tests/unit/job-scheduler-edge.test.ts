@@ -216,6 +216,20 @@ describe('JobScheduler edge cases', () => {
     });
   });
 
+  describe('missed job detection', () => {
+    it('triggers jobs that have never run on startup', async () => {
+      // Jobs with no prior run history should be triggered at startup,
+      // not silently skipped because checkMissedJobs requires lastRun.
+      createScheduler([makeJob('never-ran', { schedule: '0 */4 * * *' })]);
+      scheduler.start();
+      await new Promise(r => setTimeout(r, 50));
+
+      // The job should have been triggered as a "missed" job
+      expect(mockSM._spawnCount).toBe(1);
+      expect(mockSM._lastSpawnArgs?.name).toContain('never-ran');
+    });
+  });
+
   describe('consecutive failure tracking', () => {
     it('tracks multiple consecutive failures', async () => {
       createScheduler([makeJob('fail-job')]);
