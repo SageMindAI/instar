@@ -1,6 +1,6 @@
 {
   "name": "instar",
-  "version": "0.25.7",
+  "version": "0.25.8",
   "description": "Persistent autonomy infrastructure for AI agents",
   "type": "module",
   "main": "dist/index.js",
@@ -69,6 +69,7 @@
     "scripts",
     ".claude/skills/setup-wizard",
     ".claude/skills/secret-setup",
+    ".claude/skills/autonomous",
     ".claude/hooks",
     ".claude/settings.json"
   ],

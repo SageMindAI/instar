@@ -549,6 +549,31 @@ export class PostUpdateMigrator {
         result.upgraded.push('.claude/skills/autonomous/hooks: deployed stop hook files');
         patched = true;
       }
+
+      // Force-update autonomous skill files that reference old .claude/ state path.
+      // The state file was moved from .claude/autonomous-state.local.md to
+      // .instar/autonomous-state.local.md because Claude Code's settings
+      // self-modification prompt blocks writes to .claude/ even with
+      // --dangerously-skip-permissions. Also adds UUID validation for session_id.
+      const filesToUpdate = [
+        { src: 'hooks/autonomous-stop-hook.sh', dst: hookScript, executable: true },
+        { src: 'scripts/setup-autonomous.sh', dst: path.join(skillDir, 'scripts', 'setup-autonomous.sh'), executable: true },
+        { src: 'skill.md', dst: skillMd, executable: false },
+      ];
+      for (const { src, dst, executable } of filesToUpdate) {
+        if (fs.existsSync(dst)) {
+          const content = fs.readFileSync(dst, 'utf-8');
+          if (content.includes('.claude/autonomous-state') || content.includes('.claude/autonomous-emergency-stop')) {
+            const bundledSrc = path.join(bundledSkillDir, src);
+            if (fs.existsSync(bundledSrc)) {
+              fs.copyFileSync(bundledSrc, dst);
+              if (executable) fs.chmodSync(dst, 0o755);
+              result.upgraded.push(`${dst}: migrated autonomous state path from .claude/ to .instar/`);
+              patched = true;
+            }
+          }
+        }
+      }
     }
 
     // 2. Register in settings.json Stop hooks if missing

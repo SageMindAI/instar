@@ -3918,6 +3918,21 @@ export async function startServer(options: StartOptions): Promise<void> {
             return ownerId ? [ownerId] : [];
           },
           getProcessTree: (sessionName) => {
+            // Return only genuinely active processes — filter out Claude Code itself
+            // and baseline children (MCP servers, caffeinate, etc.) so that
+            // PresenceProxy tier 3 falls through to LLM assessment when the session
+            // is idle at its prompt. Without this filtering, the Claude node process
+            // alone makes tier 3 conclude "working" and skip stall detection.
+            const BASELINE_PATTERNS = [
+              /\bplaywright-mcp\b/,
+              /\bplaywright\/mcp\b/,
+              /\bmcp-stdio-entry\b/,
+              /\bmcp.*server\b/i,
+              /\bcaffeinate\b/,
+              /\bnpm exec\b.*mcp/,
+              /\bclaude\b/,
+              /\bnode\b.*\bclaude\b/,
+            ];
             try {
               const panePid = shellExecSync(
                 `tmux display-message -t '=${sessionName}' -p '#{pane_pid}' 2>/dev/null`
@@ -3935,7 +3950,10 @@ export async function startServer(options: StartOptions): Promise<void> {
               return psOutput.split('\n').map(line => {
                 const match = line.trim().match(/^(\d+)\s+(.+)$/);
                 return match ? { pid: parseInt(match[1], 10), command: match[2] } : null;
-              }).filter((p): p is { pid: number; command: string } => p !== null);
+              }).filter((p): p is { pid: number; command: string } => {
+                if (!p) return false;
+                return !BASELINE_PATTERNS.some(pattern => pattern.test(p.command));
+              });
             } catch {
               return [];
             }

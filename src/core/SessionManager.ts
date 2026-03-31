@@ -136,6 +136,10 @@ export class SessionManager extends EventEmitter {
    *  If it goes idle again after the nudge, the zombie detector kills it normally. */
   private errorNudgedSessions = new Set<string>();
 
+  /** Sessions where we've already retried Enter for stuck pasted text.
+   *  Key = session ID. Prevents infinite retry loops — one retry per session. */
+  private pasteRetried = new Set<string>();
+
   /** Cached count of running sessions, updated asynchronously by the monitor tick.
    *  Used by the health endpoint to avoid synchronous tmux polling. */
   private _cachedRunningCount = 0;
@@ -176,6 +180,7 @@ export class SessionManager extends EventEmitter {
       detector.cleanup(session.tmuxSession);
       this.relayLeases.delete(session.id);
       this.errorNudgedSessions.delete(session.id);
+      this.pasteRetried.delete(session.id);
     });
   }
 
@@ -371,6 +376,22 @@ export class SessionManager extends EventEmitter {
             const now = Date.now();
             if (!this.idlePromptSince.has(session.id)) {
               this.idlePromptSince.set(session.id, now);
+
+              // ── Pasted text stuck: detect unsubmitted paste and retry Enter ──
+              // Claude Code shows "[Pasted text #N]" when bracketed paste content
+              // sits in the input buffer without being submitted. This happens when
+              // the Enter key sent after the paste end sequence doesn't register.
+              // Re-send Enter to unstick it. Only try once per session to avoid loops.
+              if (!this.pasteRetried.has(session.id)) {
+                const recentForPaste = this.captureOutput(session.tmuxSession, 15);
+                if (recentForPaste && /\[Pasted text #\d+\]/.test(recentForPaste)) {
+                  this.pasteRetried.add(session.id);
+                  console.log(`[SessionManager] Session "${session.name}" has unsubmitted pasted text — resending Enter.`);
+                  this.sendKey(session.tmuxSession, 'Enter');
+                  this.idlePromptSince.delete(session.id); // Reset idle timer
+                  continue; // Skip to next session
+                }
+              }
 
               // ── Error nudge: on first idle detection, check terminal for API errors ──
               // If the session went idle because of an API error (not a natural stop),
@@ -1499,8 +1520,11 @@ export class SessionManager extends EventEmitter {
         execFileSync(this.config.tmuxPath, ['send-keys', '-t', exactTarget, '\x1b[201~'], {
           encoding: 'utf-8', timeout: 5000,
         });
-        // Brief delay to let the terminal process the bracketed paste
-        execFileSync('/bin/sleep', ['0.1'], { timeout: 2000 });
+        // Delay to let the terminal fully process the bracketed paste.
+        // 100ms was too short — Claude Code needs time to parse the paste end
+        // sequence and buffer the content before Enter can submit it.
+        // 500ms is conservative but prevents the "[Pasted text #1]" stuck state.
+        execFileSync('/bin/sleep', ['0.5'], { timeout: 2000 });
         // Send Enter to submit
         execFileSync(this.config.tmuxPath, ['send-keys', '-t', exactTarget, 'Enter'], {
           encoding: 'utf-8', timeout: 5000,
