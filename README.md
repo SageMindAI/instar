@@ -5,7 +5,7 @@
 <h1 align="center">instar</h1>
 
 <p align="center">
-  <strong>Persistent Claude Code agents with scheduling, sessions, memory, and Telegram.</strong>
+  <strong>Persistent Claude Code agents with scheduling, sessions, memory, and messaging.</strong>
 </p>
 
 <p align="center">
@@ -31,11 +31,11 @@
 npx instar
 ```
 
-One command. Guided setup. Talking to your agent from Telegram within minutes.
+One command. Guided setup. Talking to your agent from your phone within minutes.
 
 ---
 
-Instar turns Claude Code from a powerful CLI tool into a **coherent, autonomous partner**. Persistent identity, memory that survives every restart, job scheduling, two-way Telegram messaging, and the infrastructure to evolve.
+Instar turns Claude Code from a powerful CLI tool into a **coherent, autonomous partner**. Persistent identity, memory that survives every restart, job scheduling, two-way messaging (Telegram, WhatsApp, iMessage), and the infrastructure to evolve.
 
 ## Quick Start
 
@@ -48,10 +48,10 @@ npx instar
 # 2. Start your agent
 instar server start
 
-# 3. Message it on Telegram — it responds, runs jobs, and remembers everything
+# 3. Message it from your phone — it responds, runs jobs, and remembers everything
 ```
 
-The wizard discovers your environment, configures messaging (Telegram and/or WhatsApp), sets up identity files, and gets your agent running. **Within minutes, you're talking to your partner from your phone.**
+The wizard discovers your environment, configures messaging (Telegram, WhatsApp, and/or iMessage), sets up identity files, and gets your agent running. **Within minutes, you're talking to your partner from your phone.**
 
 **Requirements:** Node.js 20+ · [Claude Code CLI](https://docs.anthropic.com/en/docs/claude-code) · [API key](https://console.anthropic.com/) or Claude subscription
 
@@ -60,7 +60,7 @@ The wizard discovers your environment, configures messaging (Telegram and/or Wha
 ## How It Works
 
 ```
-You (Telegram / WhatsApp / Terminal)
+You (Telegram / WhatsApp / iMessage / Terminal)
          │
     conversation
          │
