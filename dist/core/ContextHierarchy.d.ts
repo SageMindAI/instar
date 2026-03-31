@@ -97,5 +97,6 @@ export declare class ContextHierarchy {
     private deploymentTemplate;
     private communicationTemplate;
     private architectureTemplate;
+    private researchNavigationTemplate;
 }
 //# sourceMappingURL=ContextHierarchy.d.ts.map

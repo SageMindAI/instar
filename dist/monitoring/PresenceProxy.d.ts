@@ -99,6 +99,16 @@ export declare function guardProxyOutput(text: string): {
     safe: boolean;
     reason?: string;
 };
+/**
+ * Check if terminal output indicates quota exhaustion.
+ * Returns a human-friendly message if detected, null otherwise.
+ *
+ * Only checks the LAST 15 lines of the snapshot to avoid false positives
+ * from historical quota errors that the session already recovered from.
+ * Quota errors are terminal — if the session recovered and kept working,
+ * the error scrolls up and out of the recent window.
+ */
+export declare function detectQuotaExhaustion(snapshot: string): string | null;
 export declare class PresenceProxy {
     private config;
     private states;

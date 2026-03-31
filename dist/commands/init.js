@@ -2376,6 +2376,46 @@ Write sync results to \\\`.instar/state/job-handoff-git-sync.md\\\`:
             fs.writeFileSync(skillFile, skill.content);
         }
     }
+    // Install autonomous skill with hooks and scripts (special case — needs full directory structure)
+    installAutonomousSkill(skillsDir);
+}
+/**
+ * Install the autonomous skill with its stop hook and setup script.
+ * Unlike simple skills (just a SKILL.md), autonomous mode requires:
+ * - hooks/hooks.json — registers the stop hook with Claude Code
+ * - hooks/autonomous-stop-hook.sh — structural enforcement script
+ * - scripts/setup-autonomous.sh — state file creation
+ *
+ * The stop hook is the critical piece — without it, autonomous mode has
+ * no structural enforcement and sessions exit normally after each response.
+ */
+function installAutonomousSkill(skillsDir) {
+    const autonomousDir = path.join(skillsDir, 'autonomous');
+    const hooksDir = path.join(autonomousDir, 'hooks');
+    const scriptsDir = path.join(autonomousDir, 'scripts');
+    // Copy from instar's bundled skill files if they exist
+    const bundledDir = path.join(path.dirname(path.dirname(__dirname)), '.claude', 'skills', 'autonomous');
+    if (fs.existsSync(bundledDir)) {
+        // Copy from bundled source
+        fs.mkdirSync(hooksDir, { recursive: true });
+        fs.mkdirSync(scriptsDir, { recursive: true });
+        const filesToCopy = [
+            { src: 'hooks/hooks.json', dst: path.join(hooksDir, 'hooks.json') },
+            { src: 'hooks/autonomous-stop-hook.sh', dst: path.join(hooksDir, 'autonomous-stop-hook.sh') },
+            { src: 'scripts/setup-autonomous.sh', dst: path.join(scriptsDir, 'setup-autonomous.sh') },
+            { src: 'skill.md', dst: path.join(autonomousDir, 'skill.md') },
+        ];
+        for (const { src, dst } of filesToCopy) {
+            const srcPath = path.join(bundledDir, src);
+            if (fs.existsSync(srcPath) && !fs.existsSync(dst)) {
+                fs.copyFileSync(srcPath, dst);
+                // Make shell scripts executable
+                if (dst.endsWith('.sh')) {
+                    fs.chmodSync(dst, 0o755);
+                }
+            }
+        }
+    }
 }
 function getDefaultJobs(port) {
     return [
@@ -4033,6 +4073,16 @@ function installClaudeSettings(projectDir, serverPort) {
     const hasCheckpoint = stopHooks.some(e => e.hooks?.some(h => h.command?.includes('scope-coherence-checkpoint.js')));
     if (!hasCheckpoint) {
         stopHooks.push({ matcher: '', hooks: [scopeCheckpointHook] });
+    }
+    // Register autonomous stop hook — structural enforcement for /autonomous mode.
+    // Must be FIRST in the Stop chain so it blocks exit before other hooks run.
+    const hasAutonomousHook = stopHooks.some(e => e.hooks?.some(h => h.command?.includes('autonomous-stop-hook')));
+    if (!hasAutonomousHook) {
+        hooks.Stop.unshift({ matcher: '', hooks: [{
+                    type: 'command',
+                    command: 'bash .claude/skills/autonomous/hooks/autonomous-stop-hook.sh',
+                    timeout: 10000,
+                }] });
     }
     // PermissionRequest: auto-approve all — subagents don't inherit --dangerously-skip-permissions.
     // Real safety is in PreToolUse hooks. Permission prompts just block autonomous work.

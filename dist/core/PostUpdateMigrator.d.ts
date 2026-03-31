@@ -84,6 +84,12 @@ export declare class PostUpdateMigrator {
      */
     private ensurePermissionAutoApprove;
     /**
+     * Ensure autonomous stop hook is registered and the skill files are deployed.
+     * This is the structural enforcement for /autonomous mode — without it,
+     * sessions exit normally after each response instead of looping on the task list.
+     */
+    private ensureAutonomousStopHook;
+    /**
      * Replace HTTP hooks with command hooks that use hook-event-reporter.js.
      * Claude Code HTTP hooks (type: "http") silently fail to fire as of v2.1.78.
      * This migration converts them to command hooks which reliably fire.

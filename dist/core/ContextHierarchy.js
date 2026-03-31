@@ -92,6 +92,14 @@ const DEFAULT_SEGMENTS = [
         file: 'architecture.md',
         description: 'System architecture, feature inventory, multi-user/multi-machine distinctions. ALWAYS consult /capabilities first.',
     },
+    {
+        id: 'research',
+        name: 'Research Navigation',
+        tier: 2,
+        triggers: ['researching', 'searching-broadly', 'spawning-agents', 'web-fetching', 'checking-state'],
+        file: 'research-navigation.md',
+        description: 'Canonical source hierarchy — check state files BEFORE broad searches. Web fetch optimization via smart-fetch.',
+    },
 ];
 export class ContextHierarchy {
     config;
@@ -257,6 +265,8 @@ export class ContextHierarchy {
                 return this.communicationTemplate();
             case 'architecture':
                 return this.architectureTemplate();
+            case 'research':
+                return `# Research & Navigation\n\n<!-- Add research navigation context here -->\n`;
             default:
                 return `# ${segment.name}\n\n<!-- Add context for: ${segment.description} -->\n`;
         }
@@ -504,6 +514,80 @@ Check \`/capabilities\` for the \`users\` section. Registration policies:
 | Project structure | GET /project-map |
 | Quick facts | GET /state/quick-facts |
 | CLI commands | \`instar --help\` |
+`;
+    }
+    researchNavigationTemplate() {
+        return `# Research Navigation
+
+> "Don't drive around looking for the building. Check the address first."
+
+## Canonical Sources — Check BEFORE Broad Searches
+
+For ANY question about current state, check the canonical source FIRST.
+Only explore broadly if the canonical source doesn't answer the question.
+
+| Question Category | Check First | Path / Command |
+|---|---|---|
+| What state is [X] in? | Quick Facts | \`GET /state/quick-facts\` or \`.instar/state/quick-facts.json\` |
+| What NOT to do? | Anti-Patterns | \`GET /state/anti-patterns\` or \`.instar/state/anti-patterns.json\` |
+| What projects exist? | Project Registry | \`GET /state/project-registry\` or \`.instar/state/project-registry.json\` |
+| What features are available? | Capabilities | \`GET /capabilities\` |
+| What jobs are scheduled? | Job State | \`GET /jobs\` or \`.instar/state/job-state.json\` |
+| Who is [person]? | Relationships | \`.instar/relationships/\` directory |
+| What happened in session X? | Session Reports | \`.instar/sessions/[ID]/report.md\` |
+| What proposals are pending? | Evolution Queue | \`GET /evolution/proposals\` |
+| What gaps exist? | Capability Gaps | \`GET /evolution/gaps\` |
+| What learnings do I have? | Learning Registry | \`GET /evolution/learnings\` |
+
+## The Hierarchy (When Sources Conflict)
+
+\`\`\`
+1. Server API responses (GET /state/*, /capabilities)
+   → Live, computed from current state
+
+2. JSON state files (.instar/state/*.json)
+   → Canonical on-disk state, designed to be current
+
+3. Agent identity files (AGENT.md, soul.md)
+   → Stable identity, rarely stale
+
+4. Session reports (.instar/sessions/*/report.md)
+   → Historical narrative — may describe PAST state
+
+5. Broad search results (grep/explore)
+   → Useful for discovery, unreliable for current state
+\`\`\`
+
+When a state file says X and a session report says not-X: the state file wins.
+
+## Web Content Fetching
+
+When fetching content from ANY URL, use the efficient method first:
+
+\`\`\`
+1. python3 .instar/scripts/smart-fetch.py URL --auto
+   → Checks llms.txt (machine-readable site map)
+   → Tries Accept: text/markdown (Cloudflare, ~80% token savings)
+   → Falls back to HTML text extraction
+
+2. WebFetch (built-in Claude Code tool)
+   → For URLs where smart-fetch isn't practical
+
+3. WebSearch / Exa MCP
+   → For discovery when you don't have a URL
+
+4. Playwright/Chrome MCP
+   → ONLY for pages requiring JS rendering or interaction
+\`\`\`
+
+## For Spawned Agents
+
+When spawning research agents, include canonical sources in the prompt:
+
+**Instead of**: "Search for deployment config across the codebase"
+**Use**: "First check \`.instar/state/quick-facts.json\` for deployment entries. If that doesn't answer it, search broadly."
+
+The agent prompt IS the seed. If the seed doesn't include the map, the agent searches blind.
 `;
     }
 }

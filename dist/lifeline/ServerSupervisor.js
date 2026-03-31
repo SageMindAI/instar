@@ -65,6 +65,8 @@ export class ServerSupervisor extends EventEmitter {
     lastCrashOutput = ''; // Last captured crash output for diagnostics
     doctorSessionSecret = null; // HMAC secret for doctor restart requests
     sleepWakeDetector = null; // Detects short sleeps that gap-based detection misses
+    wakeTransitionUntil = 0; // Timestamp until which we're in a wake transition (lenient health checks)
+    wakeTransitionMs = 60_000; // 60 seconds of lenient health checking after wake
     constructor(options) {
         super();
         this.projectDir = options.projectDir;
@@ -168,6 +170,7 @@ export class ServerSupervisor extends EventEmitter {
             ? Math.max(0, this.retryCooldownMs - (Date.now() - this.maxRetriesExhaustedAt))
             : 0;
         const inMaintenanceWait = this.maintenanceWaitStartedAt > 0;
+        const inWakeTransition = Date.now() < this.wakeTransitionUntil;
         return {
             running: this.isRunning,
             healthy: this.healthy,
@@ -183,6 +186,8 @@ export class ServerSupervisor extends EventEmitter {
             maxCircuitBreakerRetries: this.maxCircuitBreakerRetries,
             inMaintenanceWait,
             maintenanceWaitElapsedMs: inMaintenanceWait ? Date.now() - this.maintenanceWaitStartedAt : 0,
+            inWakeTransition,
+            wakeTransitionRemainingMs: inWakeTransition ? this.wakeTransitionUntil - Date.now() : 0,
         };
     }
     /**
@@ -198,6 +203,7 @@ export class ServerSupervisor extends EventEmitter {
         this.restartAttempts = 0;
         this.maxRetriesExhaustedAt = 0;
         this.slowRetryStartedAt = 0;
+        this.wakeTransitionUntil = 0;
         console.log('[Supervisor] Circuit breaker reset');
     }
     /**
@@ -437,7 +443,10 @@ export class ServerSupervisor extends EventEmitter {
         // detection below misses (its 2-minute threshold is too high for brief suspends).
         // On wake, reset failure counters so stale pre-sleep failures don't cascade.
         if (!this.sleepWakeDetector) {
-            this.sleepWakeDetector = new SleepWakeDetector();
+            // Use 15s drift threshold — low enough to catch real sleeps but high enough
+            // to avoid false positives from normal OS scheduling jitter (~5-10s on loaded systems)
+            // that still cause health check failures during the transition.
+            this.sleepWakeDetector = new SleepWakeDetector({ driftThresholdMs: 15_000 });
             this.sleepWakeDetector.on('wake', (event) => {
                 console.log(`[Supervisor] SleepWakeDetector: wake after ~${event.sleepDurationSeconds}s. Resetting failure counters.`);
                 this.restartAttempts = 0;
@@ -446,6 +455,7 @@ export class ServerSupervisor extends EventEmitter {
                 this.totalFailures = 0;
                 this.totalFailureWindowStart = 0;
                 this.spawnedAt = Date.now();
+                this.wakeTransitionUntil = Date.now() + this.wakeTransitionMs;
             });
             this.sleepWakeDetector.start();
         }
@@ -465,6 +475,7 @@ export class ServerSupervisor extends EventEmitter {
                 this.totalFailureWindowStart = 0;
                 // Give the server the full startup grace period from wake time
                 this.spawnedAt = now;
+                this.wakeTransitionUntil = now + this.wakeTransitionMs;
             }
             this.lastHealthCheckAt = now;
             // During startup grace period: probe health optimistically but don't act on failures.
@@ -523,14 +534,29 @@ export class ServerSupervisor extends EventEmitter {
                 else {
                     this.consecutiveFailures++;
                     if (this.consecutiveFailures >= this.unhealthyThreshold) {
-                        this.handleUnhealthy();
+                        // During wake transitions, don't kill a server that's still alive — it's
+                        // likely just slow to respond while the system recovers (disk I/O, network
+                        // reconfig, SQLite WAL replay). Only act if the server process is actually dead.
+                        if (Date.now() < this.wakeTransitionUntil && this.isServerSessionAlive()) {
+                            console.log(`[Supervisor] Health check failed during wake transition but server session is alive — waiting (${Math.round((this.wakeTransitionUntil - Date.now()) / 1000)}s remaining)`);
+                            this.consecutiveFailures = 0; // Reset so we don't immediately re-trigger
+                        }
+                        else {
+                            this.handleUnhealthy();
+                        }
                     }
                 }
             }
             catch {
                 this.consecutiveFailures++;
                 if (this.consecutiveFailures >= this.unhealthyThreshold) {
-                    this.handleUnhealthy();
+                    if (Date.now() < this.wakeTransitionUntil && this.isServerSessionAlive()) {
+                        console.log(`[Supervisor] Health check failed during wake transition but server session is alive — waiting (${Math.round((this.wakeTransitionUntil - Date.now()) / 1000)}s remaining)`);
+                        this.consecutiveFailures = 0;
+                    }
+                    else {
+                        this.handleUnhealthy();
+                    }
                 }
             }
             // Check for restart requests from the server (e.g., auto-updater)

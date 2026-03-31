@@ -2864,7 +2864,7 @@ export function createRoutes(ctx) {
             res.status(503).json({ error: 'Telegram not configured' });
             return;
         }
-        const { name, color } = req.body;
+        const { name, color, firstMessage } = req.body;
         if (!name || typeof name !== 'string' || name.trim().length < 1) {
             res.status(400).json({ error: '"name" is required (non-empty string)' });
             return;
@@ -2873,14 +2873,28 @@ export function createRoutes(ctx) {
             res.status(400).json({ error: '"name" must be 128 characters or fewer' });
             return;
         }
+        if (firstMessage !== undefined && (typeof firstMessage !== 'string' || firstMessage.length > 4096)) {
+            res.status(400).json({ error: '"firstMessage" must be a string of 4096 characters or fewer' });
+            return;
+        }
         // Color is optional — defaults to green (9367192)
         const iconColor = typeof color === 'number' ? color : 9367192;
         try {
-            const topic = await ctx.telegram.createForumTopic(name.trim(), iconColor);
-            res.status(201).json({
+            const topic = await ctx.telegram.findOrCreateForumTopic(name.trim(), iconColor);
+            // Send initial message if provided — goes through sendToTopic so it's
+            // properly logged to JSONL + TopicMemory. This ensures new sessions
+            // spawned in this topic will see the context in their thread history.
+            let messageSent = false;
+            if (firstMessage && !topic.reused) {
+                await ctx.telegram.sendToTopic(topic.topicId, firstMessage);
+                messageSent = true;
+            }
+            res.status(topic.reused ? 200 : 201).json({
                 topicId: topic.topicId,
                 name: name.trim(),
-                created: true,
+                created: !topic.reused,
+                reused: topic.reused,
+                messageSent,
             });
         }
         catch (err) {
@@ -2988,6 +3002,13 @@ export function createRoutes(ctx) {
                     sessionName: null,
                     platform: 'slack',
                 });
+            }
+            // Track for promise detection (detect "give me a minute" patterns)
+            if (ctx.slack.trackPromise) {
+                const sessionName = ctx.slack.getSessionForChannel(channelId);
+                if (sessionName) {
+                    ctx.slack.trackPromise(channelId, sessionName, text);
+                }
             }
             res.json({ ok: true, topicId: channelId, ts });
         }
@@ -4691,6 +4712,38 @@ export function createRoutes(ctx) {
     // ── Plan Prompt Relay (from hook) ─────────────────────────────
     // Receives plan mode entry events from the PreToolUse hook on EnterPlanMode.
     // Relays the plan to Telegram for user approval via inline keyboard.
+    // The hook polls /hooks/plan-prompt/status until the user responds.
+    // Track pending plan prompts so the hook can poll for resolution.
+    // Key: promptId, Value: { resolved, key, sessionName, createdAt }
+    const pendingPlanPrompts = new Map();
+    // Evict stale entries every 5 minutes (prompts older than 10 min)
+    setInterval(() => {
+        const cutoff = Date.now() - 10 * 60 * 1000;
+        for (const [id, entry] of pendingPlanPrompts) {
+            if (entry.createdAt < cutoff)
+                pendingPlanPrompts.delete(id);
+        }
+    }, 5 * 60 * 1000);
+    // Wire resolution: when a prompt callback fires, mark the plan prompt as resolved.
+    // This is called from the onPromptResponse path in TelegramAdapter.
+    const resolvePlanPrompt = (sessionName, key) => {
+        for (const [id, entry] of pendingPlanPrompts) {
+            if (entry.sessionName === sessionName && !entry.resolved) {
+                entry.resolved = true;
+                entry.key = key;
+                console.log(`[PlanRelay] Prompt ${id} resolved: session="${sessionName}" key="${key}"`);
+                break;
+            }
+        }
+    };
+    // Internal endpoint — called by onPromptResponse to mark plan prompts resolved
+    router.post('/hooks/plan-prompt/resolve', (req, res) => {
+        const { sessionName, key } = req.body;
+        if (sessionName && key) {
+            resolvePlanPrompt(sessionName, key);
+        }
+        res.json({ ok: true });
+    });
     router.post('/hooks/plan-prompt', async (req, res) => {
         const { event, session_id, tool_input, instar_sid } = req.body;
         if (!ctx.telegram) {
@@ -4730,6 +4783,8 @@ export function createRoutes(ctx) {
         }
         // Build a DetectedPrompt and relay it
         try {
+            const promptId = crypto.randomUUID().slice(0, 8);
+            const sessionName = tmuxSession || session?.tmuxSession || 'unknown';
             const prompt = {
                 type: 'plan',
                 raw: '',
@@ -4739,18 +4794,39 @@ export function createRoutes(ctx) {
                     { key: '2', label: 'Yes, manually approve edits' },
                     { key: '3', label: 'Tell Claude what to change' },
                 ],
-                sessionName: tmuxSession || session?.tmuxSession || 'unknown',
+                sessionName,
                 detectedAt: Date.now(),
-                id: crypto.randomUUID().slice(0, 8),
+                id: promptId,
             };
+            // Track the pending prompt so the hook can poll for resolution
+            pendingPlanPrompts.set(promptId, {
+                resolved: false,
+                sessionName,
+                createdAt: Date.now(),
+            });
             await ctx.telegram.relayPrompt(topicId, prompt);
-            console.log(`[PlanRelay] Relayed plan prompt to topic ${topicId} for session ${tmuxSession || session?.tmuxSession}`);
-            res.json({ ok: true, topicId });
+            console.log(`[PlanRelay] Relayed plan prompt ${promptId} to topic ${topicId} for session ${sessionName}`);
+            res.json({ ok: true, topicId, promptId });
         }
         catch (err) {
             console.error(`[PlanRelay] Failed:`, err instanceof Error ? err.message : err);
             res.status(500).json({ error: err instanceof Error ? err.message : String(err) });
         }
+    });
+    // Status endpoint — the hook polls this to know when the user has responded
+    router.get('/hooks/plan-prompt/status', (req, res) => {
+        const promptId = req.query.id;
+        if (!promptId) {
+            res.status(400).json({ error: 'missing id parameter' });
+            return;
+        }
+        const entry = pendingPlanPrompts.get(promptId);
+        if (!entry) {
+            // Unknown prompt — tell hook to stop polling
+            res.json({ resolved: true, key: '1', reason: 'unknown prompt' });
+            return;
+        }
+        res.json({ resolved: entry.resolved, key: entry.key });
     });
     // ── Telegram Callback Query Forwarding (from Lifeline) ────────
     // Receives inline keyboard callback queries that the Lifeline forwarded.
@@ -5010,6 +5086,17 @@ export function createRoutes(ctx) {
             return;
         }
         res.json({ ok: true, id: req.params.id, status });
+    });
+    // ── Implicit Evolution Detection ─────────────────────────────
+    // Scans open gaps/proposals for items already resolved by existing infrastructure.
+    // Born from Dawn's REC-52-2 pattern: detect when capability needs are already met.
+    router.get('/evolution/implicit', (_req, res) => {
+        if (!ctx.evolution) {
+            res.json({ implicit: [], count: 0 });
+            return;
+        }
+        const implicit = ctx.evolution.detectImplicitEvolution();
+        res.json({ implicit, count: implicit.length });
     });
     // ── Serendipity Protocol ─────────────────────────────────────
     router.get('/serendipity/stats', (_req, res) => {

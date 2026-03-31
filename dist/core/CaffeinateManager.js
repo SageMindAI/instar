@@ -131,30 +131,38 @@ export class CaffeinateManager extends EventEmitter {
         this.emit('restarted', { restartCount: this.restartCount });
     }
     cleanupStale() {
+        // Kill ALL orphaned caffeinate processes, not just the one in our PID file.
+        // Orphans accumulate when the server crashes without calling stop() — each
+        // restart spawns a new detached caffeinate but the old one keeps running.
+        // With repeated crash/restart cycles, dozens (or hundreds) of caffeinate
+        // processes pile up. We're about to spawn a fresh one, so kill them all.
         try {
-            if (fs.existsSync(this.pidFile)) {
-                const stalePid = parseInt(fs.readFileSync(this.pidFile, 'utf-8').trim(), 10);
-                if (!isNaN(stalePid) && stalePid > 0) {
+            const result = spawnSync('pgrep', ['-x', 'caffeinate'], {
+                encoding: 'utf-8',
+                timeout: 5000,
+            });
+            const pids = (result.stdout ?? '').trim().split('\n').filter(Boolean);
+            let killed = 0;
+            for (const pidStr of pids) {
+                const pid = parseInt(pidStr, 10);
+                if (!isNaN(pid) && pid > 0) {
                     try {
-                        const cmdline = (spawnSync('ps', ['-p', String(stalePid), '-o', 'comm='], {
-                            encoding: 'utf-8',
-                            timeout: 3000,
-                        }).stdout ?? '').trim();
-                        if (cmdline.includes('caffeinate')) {
-                            process.kill(stalePid, 'SIGTERM');
-                            console.log(`[CaffeinateManager] Killed stale caffeinate (PID: ${stalePid})`);
-                        }
+                        process.kill(pid, 'SIGTERM');
+                        killed++;
                     }
                     catch {
-                        // Process doesn't exist
+                        // Process already dead
                     }
                 }
-                this.removePidFile();
+            }
+            if (killed > 0) {
+                console.log(`[CaffeinateManager] Killed ${killed} orphaned caffeinate process${killed === 1 ? '' : 'es'}`);
             }
         }
         catch {
-            // PID file doesn't exist or can't be read
+            // pgrep not found or no caffeinate processes — both fine
         }
+        this.removePidFile();
     }
     writePidFile() {
         if (!this.pid)

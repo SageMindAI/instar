@@ -994,12 +994,18 @@ export class JobScheduler {
         const missedJobs = [];
         for (const job of enabledJobs) {
             const jobState = this.state.getJobState(job.slug);
-            if (!jobState?.lastRun)
-                continue;
-            const lastRun = new Date(jobState.lastRun).getTime();
             const task = this.cronTasks.get(job.slug);
             if (!task)
                 continue;
+            // Jobs that have never run: trigger on startup if their first expected
+            // run time has already passed (i.e., the job was added while the server
+            // was down and missed its first scheduled window).
+            if (!jobState?.lastRun) {
+                // Use a large overdueRatio so never-run jobs sort below truly-overdue jobs
+                missedJobs.push({ job, overdueRatio: 1.5 });
+                continue;
+            }
+            const lastRun = new Date(jobState.lastRun).getTime();
             // Get expected interval from next two runs
             const nextRun = task.nextRun();
             const nextNextRun = task.nextRuns(2)[1];

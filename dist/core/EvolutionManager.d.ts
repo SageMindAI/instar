@@ -188,6 +188,36 @@ export declare class EvolutionManager {
         actions: ActionState['stats'];
         highlights: string[];
     };
+    /**
+     * Detect gaps or proposals that may already be resolved by existing infrastructure.
+     *
+     * Scans open gaps and proposed items against:
+     *   - Implemented proposals (already built)
+     *   - Applied learnings (already absorbed)
+     *   - Addressed gaps (already resolved)
+     *
+     * Returns items that appear to have implicit resolutions, with evidence.
+     */
+    detectImplicitEvolution(): Array<{
+        type: 'gap' | 'proposal';
+        id: string;
+        title: string;
+        matchedBy: {
+            type: string;
+            id: string;
+            title: string;
+            similarity: string;
+        };
+    }>;
+    /**
+     * Simple keyword overlap matching. Returns the best match if overlap
+     * exceeds a threshold, or null if no match is strong enough.
+     */
+    private findKeywordMatch;
+    /**
+     * Extract meaningful keywords from text, filtering stop words.
+     */
+    private extractKeywords;
 }
 export {};
 //# sourceMappingURL=EvolutionManager.d.ts.map

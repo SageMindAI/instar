@@ -56,6 +56,13 @@ export declare class SessionManager extends EventEmitter {
     /** Track pending Telegram injections awaiting agent response.
      *  Key = tmuxSession name. Cleared when agent replies via /telegram/reply/:topicId. */
     private pendingInjections;
+    /** Track sessions that have been nudged after an API error.
+     *  Key = session ID. Prevents infinite nudge loops — each session gets ONE nudge.
+     *  If it goes idle again after the nudge, the zombie detector kills it normally. */
+    private errorNudgedSessions;
+    /** Sessions where we've already retried Enter for stuck pasted text.
+     *  Key = session ID. Prevents infinite retry loops — one retry per session. */
+    private pasteRetried;
     /** Cached count of running sessions, updated asynchronously by the monitor tick.
      *  Used by the health endpoint to avoid synchronous tmux polling. */
     private _cachedRunningCount;
@@ -292,7 +299,7 @@ export declare class SessionManager extends EventEmitter {
      * This avoids tmux load-buffer/paste-buffer which trigger macOS TCC
      * "access data from other apps" permission prompts.
      */
-    private injectMessage;
+    injectMessage(tmuxSession: string, text: string): void;
     /**
      * Raw tmux send-keys injection. No validation — just sends text to the session.
      * Used by injectMessage after provenance checks pass.

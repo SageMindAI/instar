@@ -495,5 +495,136 @@ export class EvolutionManager {
             highlights.push('All systems healthy — no pending evolution items');
         return { evolution, learnings, gaps, actions, highlights };
     }
+    // ── Implicit Evolution Detection ──────────────────────────────
+    //
+    // Inspired by Dawn's REC-52-2 pattern: scan open gaps and proposals
+    // to detect when a capability need is already satisfied by existing
+    // infrastructure (implemented proposals, applied learnings, addressed gaps).
+    // This prevents duplicate proposals and accelerates the feedback loop.
+    /**
+     * Detect gaps or proposals that may already be resolved by existing infrastructure.
+     *
+     * Scans open gaps and proposed items against:
+     *   - Implemented proposals (already built)
+     *   - Applied learnings (already absorbed)
+     *   - Addressed gaps (already resolved)
+     *
+     * Returns items that appear to have implicit resolutions, with evidence.
+     */
+    detectImplicitEvolution() {
+        const evolutionState = this.loadEvolution();
+        const gapState = this.loadGaps();
+        const learningState = this.loadLearnings();
+        const resolved = [];
+        // Build keyword index from implemented/resolved items
+        const implementedProposals = evolutionState.proposals.filter((p) => p.status === 'implemented');
+        const appliedLearnings = learningState.learnings.filter((l) => l.applied);
+        const addressedGaps = gapState.gaps.filter((g) => g.status === 'addressed');
+        // Check open proposals against implemented ones
+        const openProposals = evolutionState.proposals.filter((p) => p.status === 'proposed');
+        for (const open of openProposals) {
+            const match = this.findKeywordMatch(open.title + ' ' + open.description, [
+                ...implementedProposals.map((p) => ({
+                    type: 'implemented-proposal',
+                    id: p.id,
+                    title: p.title,
+                    text: p.title + ' ' + p.description,
+                })),
+                ...appliedLearnings.map((l) => ({
+                    type: 'applied-learning',
+                    id: l.id,
+                    title: l.title,
+                    text: l.title + ' ' + l.description,
+                })),
+            ]);
+            if (match) {
+                resolved.push({
+                    type: 'proposal',
+                    id: open.id,
+                    title: open.title,
+                    matchedBy: match,
+                });
+            }
+        }
+        // Check open gaps against resolved infrastructure
+        const openGaps = gapState.gaps.filter((g) => g.status === 'identified');
+        for (const gap of openGaps) {
+            const match = this.findKeywordMatch(gap.title + ' ' + gap.description, [
+                ...implementedProposals.map((p) => ({
+                    type: 'implemented-proposal',
+                    id: p.id,
+                    title: p.title,
+                    text: p.title + ' ' + p.description,
+                })),
+                ...addressedGaps.map((g2) => ({
+                    type: 'addressed-gap',
+                    id: g2.id,
+                    title: g2.title,
+                    text: g2.title + ' ' + g2.description + ' ' + (g2.resolution || ''),
+                })),
+            ]);
+            if (match) {
+                resolved.push({
+                    type: 'gap',
+                    id: gap.id,
+                    title: gap.title,
+                    matchedBy: match,
+                });
+            }
+        }
+        return resolved;
+    }
+    /**
+     * Simple keyword overlap matching. Returns the best match if overlap
+     * exceeds a threshold, or null if no match is strong enough.
+     */
+    findKeywordMatch(query, candidates) {
+        const queryWords = this.extractKeywords(query);
+        if (queryWords.size < 2)
+            return null;
+        let bestMatch = null;
+        let bestScore = 0;
+        for (const candidate of candidates) {
+            const candidateWords = this.extractKeywords(candidate.text);
+            const intersection = new Set([...queryWords].filter(w => candidateWords.has(w)));
+            // Jaccard-like overlap score
+            const union = new Set([...queryWords, ...candidateWords]);
+            const score = intersection.size / union.size;
+            // Require at least 30% overlap and 3+ shared keywords
+            if (score > bestScore && score >= 0.3 && intersection.size >= 3) {
+                bestScore = score;
+                bestMatch = {
+                    type: candidate.type,
+                    id: candidate.id,
+                    title: candidate.title,
+                    similarity: `${Math.round(score * 100)}% keyword overlap`,
+                };
+            }
+        }
+        return bestMatch;
+    }
+    /**
+     * Extract meaningful keywords from text, filtering stop words.
+     */
+    extractKeywords(text) {
+        const stopWords = new Set([
+            'the', 'a', 'an', 'is', 'are', 'was', 'were', 'be', 'been', 'being',
+            'have', 'has', 'had', 'do', 'does', 'did', 'will', 'would', 'could',
+            'should', 'may', 'might', 'can', 'shall', 'to', 'of', 'in', 'for',
+            'on', 'with', 'at', 'by', 'from', 'up', 'about', 'into', 'through',
+            'during', 'before', 'after', 'above', 'below', 'between', 'and',
+            'but', 'or', 'nor', 'not', 'so', 'yet', 'both', 'either', 'neither',
+            'each', 'every', 'all', 'any', 'few', 'more', 'most', 'other',
+            'some', 'such', 'no', 'only', 'own', 'same', 'than', 'too', 'very',
+            'just', 'because', 'as', 'until', 'while', 'if', 'then', 'that',
+            'this', 'these', 'those', 'it', 'its', 'when', 'where', 'which',
+            'what', 'who', 'how', 'why', 'also', 'add', 'use', 'using', 'used',
+        ]);
+        return new Set(text
+            .toLowerCase()
+            .replace(/[^a-z0-9\s-]/g, ' ')
+            .split(/\s+/)
+            .filter(w => w.length > 2 && !stopWords.has(w)));
+    }
 }
 //# sourceMappingURL=EvolutionManager.js.map

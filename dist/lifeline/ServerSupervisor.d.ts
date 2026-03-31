@@ -70,6 +70,8 @@ export declare class ServerSupervisor extends EventEmitter {
     private lastCrashOutput;
     private doctorSessionSecret;
     private sleepWakeDetector;
+    private wakeTransitionUntil;
+    private readonly wakeTransitionMs;
     constructor(options: {
         projectDir: string;
         projectName: string;
@@ -110,6 +112,8 @@ export declare class ServerSupervisor extends EventEmitter {
         maxCircuitBreakerRetries: number;
         inMaintenanceWait: boolean;
         maintenanceWaitElapsedMs: number;
+        inWakeTransition: boolean;
+        wakeTransitionRemainingMs: number;
     };
     /**
      * Reset the circuit breaker — allows restart attempts to resume.

@@ -28,6 +28,23 @@ const IDLE_PROMPT_PATTERNS = [
     // The bare prompt character at end of output (after stripping ANSI)
 ];
 /**
+ * Patterns in terminal output that indicate an API or tool error caused the session to stop.
+ * When detected at the idle prompt, we nudge the session to continue instead of killing it.
+ */
+const TERMINAL_ERROR_PATTERNS = [
+    'API Error:',
+    'invalid_request_error',
+    'Could not process',
+    'overloaded_error',
+    'rate_limit_error',
+    'Request timed out',
+    'Internal server error',
+    'ServiceUnavailable',
+    'ECONNREFUSED',
+    'ETIMEDOUT',
+    'fetch failed',
+];
+/**
  * Process names that are always running in a Claude Code session (MCP servers, etc.)
  * These do NOT indicate activity — they're background infrastructure.
  */
@@ -64,6 +81,13 @@ export class SessionManager extends EventEmitter {
     /** Track pending Telegram injections awaiting agent response.
      *  Key = tmuxSession name. Cleared when agent replies via /telegram/reply/:topicId. */
     pendingInjections = new Map();
+    /** Track sessions that have been nudged after an API error.
+     *  Key = session ID. Prevents infinite nudge loops — each session gets ONE nudge.
+     *  If it goes idle again after the nudge, the zombie detector kills it normally. */
+    errorNudgedSessions = new Set();
+    /** Sessions where we've already retried Enter for stuck pasted text.
+     *  Key = session ID. Prevents infinite retry loops — one retry per session. */
+    pasteRetried = new Set();
     /** Cached count of running sessions, updated asynchronously by the monitor tick.
      *  Used by the health endpoint to avoid synchronous tmux polling. */
     _cachedRunningCount = 0;
@@ -99,6 +123,8 @@ export class SessionManager extends EventEmitter {
         this.on('sessionComplete', (session) => {
             detector.cleanup(session.tmuxSession);
             this.relayLeases.delete(session.id);
+            this.errorNudgedSessions.delete(session.id);
+            this.pasteRetried.delete(session.id);
         });
     }
     /**
@@ -223,6 +249,8 @@ export class SessionManager extends EventEmitter {
                 if (!this.config.protectedSessions.includes(session.tmuxSession) &&
                     this.detectCompletion(session.tmuxSession)) {
                     console.log(`[SessionManager] Session "${session.name}" completed (pattern detected). Cleaning up.`);
+                    // Emit beforeSessionKill so listeners (TopicResumeMap, SlackAdapter) can save resume UUIDs
+                    this.emit('beforeSessionKill', session);
                     try {
                         await execFileAsync(this.config.tmuxPath, ['kill-session', '-t', `=${session.tmuxSession}`]);
                     }
@@ -292,6 +320,37 @@ export class SessionManager extends EventEmitter {
                         const now = Date.now();
                         if (!this.idlePromptSince.has(session.id)) {
                             this.idlePromptSince.set(session.id, now);
+                            // ── Pasted text stuck: detect unsubmitted paste and retry Enter ──
+                            // Claude Code shows "[Pasted text #N]" when bracketed paste content
+                            // sits in the input buffer without being submitted. This happens when
+                            // the Enter key sent after the paste end sequence doesn't register.
+                            // Re-send Enter to unstick it. Only try once per session to avoid loops.
+                            if (!this.pasteRetried.has(session.id)) {
+                                const recentForPaste = this.captureOutput(session.tmuxSession, 15);
+                                if (recentForPaste && /\[Pasted text #\d+\]/.test(recentForPaste)) {
+                                    this.pasteRetried.add(session.id);
+                                    console.log(`[SessionManager] Session "${session.name}" has unsubmitted pasted text — resending Enter.`);
+                                    this.sendKey(session.tmuxSession, 'Enter');
+                                    this.idlePromptSince.delete(session.id); // Reset idle timer
+                                    continue; // Skip to next session
+                                }
+                            }
+                            // ── Error nudge: on first idle detection, check terminal for API errors ──
+                            // If the session went idle because of an API error (not a natural stop),
+                            // inject a nudge to get it working again instead of waiting 15m to kill.
+                            if (!this.errorNudgedSessions.has(session.id)) {
+                                const recentOutput = this.captureOutput(session.tmuxSession, 30);
+                                if (recentOutput) {
+                                    const hasError = TERMINAL_ERROR_PATTERNS.some(p => recentOutput.includes(p));
+                                    if (hasError) {
+                                        this.errorNudgedSessions.add(session.id);
+                                        console.log(`[SessionManager] Session "${session.name}" idle after API error — nudging to continue.`);
+                                        this.sendInput(session.tmuxSession, 'You hit an API error. Please continue your work — skip or work around the action that failed.');
+                                        this.idlePromptSince.delete(session.id); // Reset idle timer
+                                        continue; // Skip to next session
+                                    }
+                                }
+                            }
                         }
                         else {
                             const idleMs = now - this.idlePromptSince.get(session.id);
@@ -1082,7 +1141,7 @@ export class SessionManager extends EventEmitter {
             if (imagePath === 'download-failed') {
                 return '[User sent a photo but the download failed]';
             }
-            return `[User sent a photo — read the image file at ${imagePath} to view it]`;
+            return `[User sent a photo — read the image file at ${imagePath} to view it. If the image cannot be processed, acknowledge you received it and let the user know the image format may not be supported.]`;
         });
         // Transform [document:path] tags into explicit read instructions.
         transformed = transformed.replace(/\[document:([^\]]+)\]/g, (_, docPath) => {
@@ -1327,8 +1386,11 @@ export class SessionManager extends EventEmitter {
                 execFileSync(this.config.tmuxPath, ['send-keys', '-t', exactTarget, '\x1b[201~'], {
                     encoding: 'utf-8', timeout: 5000,
                 });
-                // Brief delay to let the terminal process the bracketed paste
-                execFileSync('/bin/sleep', ['0.1'], { timeout: 2000 });
+                // Delay to let the terminal fully process the bracketed paste.
+                // 100ms was too short — Claude Code needs time to parse the paste end
+                // sequence and buffer the content before Enter can submit it.
+                // 500ms is conservative but prevents the "[Pasted text #1]" stuck state.
+                execFileSync('/bin/sleep', ['0.5'], { timeout: 2000 });
                 // Send Enter to submit
                 execFileSync(this.config.tmuxPath, ['send-keys', '-t', exactTarget, 'Enter'], {
                     encoding: 'utf-8', timeout: 5000,

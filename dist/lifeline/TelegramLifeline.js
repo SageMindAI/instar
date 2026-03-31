@@ -870,6 +870,10 @@ export class TelegramLifeline {
     hasNotifiedServerDown = false;
     /** Suppressed "server down" count during current outage. */
     suppressedServerDownCount = 0;
+    /** Timestamp of last "server down" notification sent (for cross-outage rate limiting). */
+    lastServerDownNotifyAt = 0;
+    /** Minimum interval between "server down" notifications, even across separate outages (30 min). */
+    static SERVER_DOWN_COOLDOWN_MS = 30 * 60_000;
     /** Per-topic timestamps for rate-limiting queue acknowledgment messages. */
     lastQueueAckAt = new Map();
     /** Minimum interval between "your message has been queued" acks per topic (2 minutes). */
@@ -888,6 +892,7 @@ export class TelegramLifeline {
                 const data = JSON.parse(fs.readFileSync(rateLimitPath, 'utf-8'));
                 this.hasNotifiedServerDown = data.hasNotifiedServerDown ?? false;
                 this.suppressedServerDownCount = data.suppressedServerDownCount ?? 0;
+                this.lastServerDownNotifyAt = data.lastServerDownNotifyAt ?? 0;
             }
         }
         catch {
@@ -903,6 +908,7 @@ export class TelegramLifeline {
             fs.writeFileSync(tmpPath, JSON.stringify({
                 hasNotifiedServerDown: this.hasNotifiedServerDown,
                 suppressedServerDownCount: this.suppressedServerDownCount,
+                lastServerDownNotifyAt: this.lastServerDownNotifyAt,
                 savedAt: new Date().toISOString(),
             }));
             fs.renameSync(tmpPath, rateLimitPath);
@@ -936,7 +942,20 @@ export class TelegramLifeline {
             console.log(`[Lifeline] Suppressing duplicate "server down" notification (${this.suppressedServerDownCount} suppressed this outage)`);
             return;
         }
+        // Cross-outage rate limit: suppress if we notified within the cooldown window.
+        // This prevents spam during flap cycles (e.g., Power Nap causing repeated down→up→down).
+        const now = Date.now();
+        if (this.lastServerDownNotifyAt > 0 &&
+            (now - this.lastServerDownNotifyAt) < TelegramLifeline.SERVER_DOWN_COOLDOWN_MS) {
+            this.hasNotifiedServerDown = true;
+            this.suppressedServerDownCount++;
+            this.saveRateLimitState();
+            const remainingMin = Math.round((TelegramLifeline.SERVER_DOWN_COOLDOWN_MS - (now - this.lastServerDownNotifyAt)) / 60_000);
+            console.log(`[Lifeline] Suppressing "server down" notification — cooldown active (${remainingMin}min remaining)`);
+            return;
+        }
         this.hasNotifiedServerDown = true;
+        this.lastServerDownNotifyAt = now;
         const topicId = this.lifelineTopicId ?? 1;
         const message = `Server went down: ${reason}\n\n` +
             `Your messages will be queued until recovery. Use /lifeline status to check.`;

@@ -181,5 +181,6 @@ export interface PendingPrompt {
     channelId: string;
     messageTs: string;
     createdAt: number;
+    sessionName?: string;
 }
 //# sourceMappingURL=types.d.ts.map

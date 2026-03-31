@@ -87,6 +87,10 @@ export declare class TelegramLifeline {
     private hasNotifiedServerDown;
     /** Suppressed "server down" count during current outage. */
     private suppressedServerDownCount;
+    /** Timestamp of last "server down" notification sent (for cross-outage rate limiting). */
+    private lastServerDownNotifyAt;
+    /** Minimum interval between "server down" notifications, even across separate outages (30 min). */
+    private static readonly SERVER_DOWN_COOLDOWN_MS;
     /** Per-topic timestamps for rate-limiting queue acknowledgment messages. */
     private lastQueueAckAt;
     /** Minimum interval between "your message has been queued" acks per topic (2 minutes). */

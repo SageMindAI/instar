@@ -207,7 +207,7 @@ function classifyError(errorMessage) {
     if (lower.includes('parsing') || lower.includes('json') || lower.includes('syntax')) {
         return 'parsing';
     }
-    if (lower.includes('api') || lower.includes('rate limit') || lower.includes('429') || lower.includes('500') || lower.includes('503')) {
+    if (lower.includes('api') || lower.includes('rate limit') || lower.includes('invalid_request_error') || lower.includes('overloaded_error') || lower.includes('429') || lower.includes('400') || lower.includes('500') || lower.includes('502') || lower.includes('503')) {
         return 'api';
     }
     if (lower.includes('internal') || lower.includes('segfault') || lower.includes('heap')) {

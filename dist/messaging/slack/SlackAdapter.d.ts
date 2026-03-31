@@ -39,6 +39,8 @@ export declare class SlackAdapter implements MessagingAdapter {
     private authorizedUsers;
     private channelHistory;
     private pendingPrompts;
+    private seenMessageTs;
+    private seenMessageTsCleanupTimer;
     private userCache;
     private promptEvictionTimer;
     private housekeepingTimer;
@@ -47,12 +49,51 @@ export declare class SlackAdapter implements MessagingAdapter {
     private channelRegistryPath;
     private channelResumeMap;
     private channelResumeMapPath;
+    private pendingStalls;
+    private stallCheckTimer;
+    private pendingPromises;
     /** Called when a prompt gate response is received */
     onPromptResponse: ((channelId: string, promptId: string, value: string) => void) | null;
     /** Called when a message is logged (for dual-write to SQLite) */
     onMessageLogged: ((entry: LogEntry) => void) | null;
     /** Called when a stall is detected */
-    onStallDetected: ((channelId: string, sessionName: string, messageText: string) => void) | null;
+    onStallDetected: ((channelId: string, sessionName: string, messageText: string, injectedAt: number) => void) | null;
+    /** Called to interrupt a session (send Escape) */
+    onInterruptSession: ((sessionName: string) => Promise<boolean>) | null;
+    /** Called to restart a session */
+    onRestartSession: ((sessionName: string, channelId: string) => Promise<void>) | null;
+    /** Called to list running sessions */
+    onListSessions: (() => Array<{
+        name: string;
+        tmuxSession: string;
+        status: string;
+        alive: boolean;
+    }>) | null;
+    /** Called to check if a session is alive */
+    onIsSessionAlive: ((tmuxSession: string) => boolean) | null;
+    /** Called to transcribe a voice/audio file (via Whisper API) */
+    transcribeVoice: ((filePath: string) => Promise<string>) | null;
+    /** Called to handle standby commands (unstick, quiet, resume, restart) */
+    onStandbyCommand: ((channelId: string, command: string, userId: string) => Promise<boolean>) | null;
+    /** Called to get triage status for a channel's session */
+    onGetTriageStatus: ((channelId: string) => {
+        active: boolean;
+        classification?: string;
+        checkCount: number;
+        lastCheck?: string;
+    } | null) | null;
+    /** Called to classify why a session died */
+    onClassifySessionDeath: ((sessionName: string) => Promise<{
+        cause: string;
+        detail: string;
+    } | null>) | null;
+    /** Intelligence provider for LLM-gated stall confirmation */
+    intelligence: {
+        evaluate: (prompt: string, opts: {
+            maxTokens: number;
+            temperature: number;
+        }) => Promise<string>;
+    } | null;
     constructor(config: Record<string, unknown>, stateDir: string);
     start(): Promise<void>;
     stop(): Promise<void>;
@@ -65,6 +106,8 @@ export declare class SlackAdapter implements MessagingAdapter {
         autoJoinChannels: boolean;
         respondMode: SlackRespondMode;
     };
+    /** Get the bot's own Slack user ID (for distinguishing bot vs user messages). */
+    getBotUserId(): string | null;
     /** Check if a user is authorized. */
     isAuthorized(userId: string): boolean;
     /** Send a message to a specific channel. */
@@ -122,6 +165,36 @@ export declare class SlackAdapter implements MessagingAdapter {
     } | null;
     /** Remove a resume entry (consumed after resume). */
     removeChannelResume(channelId: string): void;
+    /** Track an injected message for stall detection. */
+    trackMessageInjection(channelId: string, sessionName: string, text: string): void;
+    /** Clear stall tracking for a channel (agent responded). */
+    clearStallTracking(channelId: string): void;
+    /** Start periodic stall checking (stalls + promise expiry, LLM-gated). */
+    startStallDetection(timeoutMs?: number, promiseTimeoutMs?: number): void;
+    /** Get pending stall count. */
+    getPendingStallCount(): number;
+    /** Track a promise from the agent ("give me a minute" etc.) */
+    trackPromise(channelId: string, sessionName: string, text: string): void;
+    /** Clear promise tracking for a channel. */
+    clearPromiseTracking(channelId: string): void;
+    private _isPromiseMessage;
+    private _isFollowThroughMessage;
+    /** LLM-gated stall alert confirmation. Returns true if alert should be sent. Fail-open. */
+    confirmStallAlert(context: {
+        type: 'stall' | 'promise-expired';
+        sessionName: string;
+        messageText: string;
+        minutesElapsed: number;
+        sessionAlive: boolean;
+    }): Promise<boolean>;
+    /** Get adapter status. */
+    getStatus(): {
+        started: boolean;
+        uptime: number | null;
+        pendingStalls: number;
+        pendingPromises: number;
+        channelMappings: number;
+    };
     private _loadChannelRegistry;
     private _saveChannelRegistry;
     private _loadChannelResumeMap;
@@ -135,7 +208,7 @@ export declare class SlackAdapter implements MessagingAdapter {
     private _handleInteraction;
     private _handleFileShared;
     /** Register a pending prompt (for interaction validation). */
-    registerPendingPrompt(messageTs: string, promptId: string, channelId: string): void;
+    registerPendingPrompt(messageTs: string, promptId: string, channelId: string, sessionName?: string): void;
     private _startPromptEviction;
     /**
      * Relay a prompt to the user via Block Kit interactive message.
@@ -188,11 +261,22 @@ export declare class SlackAdapter implements MessagingAdapter {
      * Only called in dedicated mode or when autoJoinChannels is true.
      * Runs asynchronously — doesn't block startup.
      */
+    /**
+     * Backfill ring buffers with recent channel history from Slack's API.
+     * This runs on startup so that sessions spawned after a server restart
+     * have conversation context instead of starting from scratch.
+     */
+    private _backfillChannelHistory;
     private _autoJoinAllChannels;
     /**
      * Check if a message mentions the bot (via @mention).
      * Slack encodes mentions as <@U12345> in message text.
      */
+    /**
+     * Validate that a downloaded file is a processable image.
+     * Checks magic bytes and file size to avoid Claude API "Could not process image" errors.
+     */
+    private _validateImageFile;
     private _isBotMentioned;
     private _chunkText;
 }

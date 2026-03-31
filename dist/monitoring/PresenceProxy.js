@@ -76,6 +76,42 @@ export function guardProxyOutput(text) {
     }
     return { safe: true };
 }
+// ─── Quota Exhaustion Detection ─────────────────────────────────────────────
+/** Patterns that indicate Claude's API quota has been exhausted */
+const QUOTA_EXHAUSTION_PATTERNS = [
+    /you've hit your limit/i,
+    /\/extra-usage to finish/i,
+    /resets?\s+\d{1,2}(?::\d{2})?\s*(?:am|pm)?\s*\(/i, // "resets 7pm (America/..."
+    /usage limit.*reached/i,
+    /quota.*exceeded/i,
+    /rate limit.*exceeded/i,
+];
+/**
+ * Check if terminal output indicates quota exhaustion.
+ * Returns a human-friendly message if detected, null otherwise.
+ *
+ * Only checks the LAST 15 lines of the snapshot to avoid false positives
+ * from historical quota errors that the session already recovered from.
+ * Quota errors are terminal — if the session recovered and kept working,
+ * the error scrolls up and out of the recent window.
+ */
+export function detectQuotaExhaustion(snapshot) {
+    // Only scan recent output — old quota errors in the scrollback are stale
+    const lines = snapshot.split('\n');
+    const recentOutput = lines.slice(-15).join('\n');
+    for (const pattern of QUOTA_EXHAUSTION_PATTERNS) {
+        if (pattern.test(recentOutput)) {
+            // Try to extract the reset time
+            const resetMatch = recentOutput.match(/resets?\s+(\d{1,2}(?::\d{2})?\s*(?:am|pm)?\s*\([^)]+\))/i);
+            const resetTime = resetMatch ? resetMatch[1] : null;
+            if (resetTime) {
+                return `The agent has hit its Claude API usage limit. Quota resets ${resetTime}. The session is paused until then — no work is being done.`;
+            }
+            return 'The agent has hit its Claude API usage limit. The session is paused until the quota resets — no work is being done.';
+        }
+    }
+    return null;
+}
 // ─── Long-Running Process Whitelist ─────────────────────────────────────────
 const LONG_RUNNING_PATTERNS = [
     /npm\s+(install|ci|run\s+build|run\s+test)/i,
@@ -311,6 +347,10 @@ export class PresenceProxy {
     }
     // ─── Tier Scheduling ───────────────────────────────────────────────────
     scheduleTier(topicId, tier, delayMs) {
+        // Don't schedule if state no longer exists or was cancelled
+        const currentState = this.states.get(topicId);
+        if (!currentState || currentState.cancelled)
+            return;
         const key = `${topicId}-tier${tier}`;
         // Clear any existing timer for this tier
         const existing = this.timers.get(key);
@@ -371,6 +411,21 @@ export class PresenceProxy {
         const isConversation = state.conversationHistory.length > 0
             && state.conversationHistory.some(m => m.role === 'proxy');
         let message;
+        // ── Quota exhaustion: detect before LLM call (saves tokens + gives clear message) ──
+        if (snapshot) {
+            const quotaMessage = detectQuotaExhaustion(snapshot);
+            if (quotaMessage) {
+                message = `${this.prefix} ${quotaMessage}`;
+                // Skip LLM, cancel further tiers — quota is a definitive state, not ambiguous
+                if (state.cancelled)
+                    return;
+                state.tier1FiredAt = Date.now();
+                await this.sendProxyMessage(topicId, message, 1);
+                this.persistState(topicId, state);
+                state.conversationHistory.push({ role: 'proxy', text: message, timestamp: Date.now() });
+                return; // Don't schedule tier 2/3 — nothing more to assess
+            }
+        }
         if (!snapshot || snapshot.trim().length < 10) {
             message = `${this.prefix} ${this.config.agentName} is active but hasn't produced visible output yet. Your message has been delivered.`;
         }
@@ -401,7 +456,10 @@ export class PresenceProxy {
         this.persistState(topicId, state);
         // Add to conversation history
         state.conversationHistory.push({ role: 'proxy', text: message, timestamp: Date.now() });
-        // Schedule Tier 2
+        // Schedule Tier 2 — re-check cancelled after async sendProxyMessage
+        // (agent may have responded while we were sending the tier 1 message)
+        if (state.cancelled)
+            return;
         const remainingToTier2 = this.tier2DelayMs - (Date.now() - state.userMessageAt);
         if (remainingToTier2 > 0) {
             this.scheduleTier(topicId, 2, remainingToTier2);
@@ -417,6 +475,18 @@ export class PresenceProxy {
         const hash = snapshot ? crypto.createHash('sha256').update(snapshot).digest('hex') : null;
         state.tier2Snapshot = snapshot;
         state.tier2SnapshotHash = hash;
+        // ── Quota exhaustion: check before LLM call ──
+        if (snapshot) {
+            const quotaMessage = detectQuotaExhaustion(snapshot);
+            if (quotaMessage) {
+                if (state.cancelled)
+                    return;
+                state.tier2FiredAt = Date.now();
+                await this.sendProxyMessage(topicId, `${this.prefix} 2-minute update — ${quotaMessage}`, 2);
+                this.persistState(topicId, state);
+                return; // Don't schedule tier 3
+            }
+        }
         // Check if output changed since Tier 1
         const outputChanged = state.tier1SnapshotHash !== hash;
         let message;
@@ -438,7 +508,9 @@ export class PresenceProxy {
         await this.sendProxyMessage(topicId, message, 2);
         this.persistState(topicId, state);
         state.conversationHistory.push({ role: 'proxy', text: message, timestamp: Date.now() });
-        // Schedule Tier 3
+        // Schedule Tier 3 — re-check cancelled after async sendProxyMessage
+        if (state.cancelled)
+            return;
         const remainingToTier3 = this.tier3DelayMs - (Date.now() - state.userMessageAt);
         if (remainingToTier3 > 0) {
             this.scheduleTier(topicId, 3, remainingToTier3);
@@ -466,6 +538,24 @@ export class PresenceProxy {
         const lines = this.config.maxTmuxLines?.t3 ?? 200;
         const raw = alive ? this.config.captureSessionOutput(state.sessionName, lines) : null;
         const snapshot = raw ? sanitizeTmuxOutput(raw, this.config.credentialPatterns) : null;
+        // ── Quota exhaustion: check before LLM call ──
+        if (snapshot) {
+            const quotaMessage = detectQuotaExhaustion(snapshot);
+            if (quotaMessage) {
+                if (state.cancelled) {
+                    this.config.releaseTriageMutex?.(state.sessionName, 'presence-proxy');
+                    return;
+                }
+                state.tier3FiredAt = Date.now();
+                state.tier3Assessment = 'waiting';
+                state.tier3Summary = quotaMessage;
+                await this.sendProxyMessage(topicId, `${this.prefix} 5-minute check — ${quotaMessage}`, 3);
+                this.config.releaseTriageMutex?.(state.sessionName, 'presence-proxy');
+                this.persistState(topicId, state);
+                this.cleanupState(topicId);
+                return;
+            }
+        }
         // Process tree check (authoritative)
         const processes = alive ? this.config.getProcessTree(state.sessionName) : [];
         const hasActiveProcesses = processes.length > 0;
