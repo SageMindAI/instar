@@ -1244,12 +1244,25 @@ function wireIMessageRouting(
     }
 
     if (targetSession && sessionManager.isSessionAlive(targetSession)) {
-      // Session alive — build context file and inject with reference
-      console.log(`[imessage→session] Injecting into ${targetSession}: "${text.slice(0, 80)}"`);
-      const bootstrapMessage = buildIMessageInjection(sender, text, senderName);
-      sessionManager.injectMessage(targetSession, bootstrapMessage);
-      imessage.trackMessageInjection(sender, targetSession, text);
-    } else {
+      // Session registered and tmux session exists — verify it's actually responsive
+      const ready = await sessionManager.waitForClaudeReady(targetSession, 15_000);
+      if (ready) {
+        // Session alive and ready — inject with context
+        console.log(`[imessage→session] Injecting into ${targetSession}: "${text.slice(0, 80)}"`);
+        const bootstrapMessage = buildIMessageInjection(sender, text, senderName);
+        sessionManager.injectMessage(targetSession, bootstrapMessage);
+        imessage.trackMessageInjection(sender, targetSession, text);
+        return;
+      }
+      // Session stuck or unresponsive — kill it and fall through to respawn
+      console.warn(`[imessage→session] Session ${targetSession} not ready after 15s — killing and respawning`);
+      try {
+        const stuckSession = sessionManager.listRunningSessions().find(s => s.tmuxSession === targetSession);
+        if (stuckSession) sessionManager.killSession(stuckSession.id);
+      } catch { /* ok if already dead */ }
+    }
+
+    {
       // Session dead or missing — spawn a new one with full context
       spawningSenders.add(senderNorm);
       try {
@@ -1266,26 +1279,11 @@ function wireIMessageRouting(
         );
         imessage.registerSession(sender, newSession);
 
-        // Wait for Claude to be ready before injecting
+        // Wait for Claude to be ready (matches Slack's waitForClaudeReady pattern)
         const waitStart = Date.now();
-        const maxWait = 90_000;
-        let ready = false;
-
-        while (Date.now() - waitStart < maxWait) {
-          await new Promise(r => setTimeout(r, 500));
-          if (!sessionManager.isSessionAlive(newSession)) {
-            console.error(`[imessage→session] Session "${newSession}" died during startup`);
-            break;
-          }
-          const output = sessionManager.captureOutput(newSession, 20);
-          if (output && (output.includes('❯') || output.includes('bypass permissions') || /\/effort/.test(output))) {
-            ready = true;
-            break;
-          }
-        }
+        const ready = await sessionManager.waitForClaudeReady(newSession, 90_000);
 
         if (ready) {
-          await new Promise(r => setTimeout(r, 1500)); // stabilization
           // Inject the bootstrap message (includes context file reference)
           sessionManager.injectMessage(newSession, bootstrapMessage);
           imessage.trackMessageInjection(sender, newSession, text);
@@ -1306,6 +1304,9 @@ function wireIMessageRouting(
           // Timeout but alive — inject anyway
           sessionManager.injectMessage(newSession, bootstrapMessage);
           console.log(`[imessage→session] Spawned "${newSession}" — injected after timeout`);
+          pendingMessages.delete(senderNorm);
+        } else {
+          console.error(`[imessage→session] Session "${newSession}" died during startup — messages lost`);
           pendingMessages.delete(senderNorm);
         }
       } catch (err) {
