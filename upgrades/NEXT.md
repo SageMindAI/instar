@@ -1,35 +1,22 @@
 # Upgrade Guide — vNEXT
 
 <!-- bump: patch -->
-<!-- Valid values: patch, minor, major -->
-<!-- patch = bug fixes, refactors, test additions, doc updates -->
-<!-- minor = new features, new APIs, new capabilities (backwards-compatible) -->
-<!-- major = breaking changes to existing APIs or behavior -->
 
 ## What Changed
 
-<!-- Describe what changed technically. What new features, APIs, behavioral changes? -->
-<!-- Write this for the AGENT — they need to understand the system deeply. -->
+**Slack standalone file support** — Previously, files drag-and-dropped into Slack without accompanying text were silently ignored. These arrive as `file_shared` events containing only a `file_id` (no download URL), so the handler logged them but never processed them. Now `_handleFileShared()` calls the Slack `files.info` API to fetch the full file metadata (`url_private`, mimetype, name), downloads with authenticated `FileHandler`, and routes through the standard message pipeline.
+
+**Scope dependency**: This feature uses `files.info` which requires the `files:read` bot scope. This scope was always listed as required but was never exercised at runtime until now. Slack apps created using the instar setup flow should already have it. If the scope is missing, the handler logs an actionable error message ("add files:read in your Slack app's OAuth settings") and fails gracefully — existing functionality is not affected.
+
+**Graceful degradation**: If `files.info` fails for any reason (missing scope, rate limit, network error), the file is simply not processed. No crash, no broken messages. Message-embedded files (sent with text) continue to work exactly as before via the existing inline handler.
 
 ## What to Tell Your User
 
-<!-- Write talking points the agent should relay to their user. -->
-<!-- This should be warm, conversational, user-facing — not a changelog. -->
-<!-- Focus on what THEY can now do, not internal plumbing. -->
-<!--                                                                    -->
-<!-- PROHIBITED in this section (will fail validation):                 -->
-<!--   camelCase config keys: silentReject, maxRetries, telegramNotify -->
-<!--   Inline code backtick references like silentReject: false        -->
-<!--   Fenced code blocks                                              -->
-<!--   Instructions to edit files or run commands                      -->
-<!--                                                                    -->
-<!-- CORRECT style: "I can turn that on for you" not "set X to false"  -->
-<!-- The agent relays this to their user — keep it human.              -->
-
-- **[Feature name]**: "[Brief, friendly description of what this means for the user]"
+- **Slack file support**: "Files shared in Slack without a message — like drag-and-dropping a PDF or image — are now picked up and processed automatically. Previously these were silently ignored. If your Slack app was set up with the standard permissions, this just works. If not, I can help you add the required permission."
 
 ## Summary of New Capabilities
 
 | Capability | How to Use |
 |-----------|-----------|
-| [Capability] | [Endpoint, command, or "automatic"] |
+| Standalone Slack file processing | Automatic — drag-and-drop files into Slack channels |
+| Missing scope detection | Automatic — actionable error logged if `files:read` scope is missing |
