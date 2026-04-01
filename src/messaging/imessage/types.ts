@@ -27,49 +27,14 @@ export interface IMessageConfig {
   /** Include attachment metadata in incoming messages (default: true) */
   includeAttachments?: boolean;
 
-  /** Auto-reconnect the RPC process on crash (default: true) */
-  autoReconnect?: boolean;
-
-  /** Max reconnection attempts before giving up (default: 10) */
-  maxReconnectAttempts?: number;
-
-  /** Base delay in ms for exponential backoff reconnection (default: 1000) */
-  reconnectBaseDelayMs?: number;
+  /** Poll interval for new messages in ms (default: 2000) */
+  pollIntervalMs?: number;
 
   /** Stall detection timeout in minutes (default: 5) */
   stallTimeoutMinutes?: number;
 
   /** Promise follow-through timeout in minutes (default: 10) */
   promiseTimeoutMinutes?: number;
-
-  /** Message log retention in days (default: 90) */
-  logRetentionDays?: number;
-}
-
-// ── JSON-RPC Protocol ──
-
-export interface JsonRpcRequest {
-  jsonrpc: '2.0';
-  id: number;
-  method: string;
-  params?: Record<string, unknown>;
-}
-
-export interface JsonRpcResponse {
-  jsonrpc: '2.0';
-  id: number;
-  result?: unknown;
-  error?: {
-    code: number;
-    message: string;
-    data?: unknown;
-  };
-}
-
-export interface JsonRpcNotification {
-  jsonrpc: '2.0';
-  method: string;
-  params?: Record<string, unknown>;
 }
 
 // ── iMessage Domain Types ──

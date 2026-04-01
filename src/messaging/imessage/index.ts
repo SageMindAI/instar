@@ -3,7 +3,6 @@
  */
 
 export { IMessageAdapter } from './IMessageAdapter.js';
-export { IMessageRpcClient } from './IMessageRpcClient.js';
 export { NativeBackend } from './NativeBackend.js';
 export type {
   IMessageConfig,
@@ -12,9 +11,6 @@ export type {
   IMessageChat,
   ConnectionState,
   ConnectionInfo,
-  JsonRpcRequest,
-  JsonRpcResponse,
-  JsonRpcNotification,
 } from './types.js';
 
 // Register with the adapter registry at module load time

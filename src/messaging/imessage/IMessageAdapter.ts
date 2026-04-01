@@ -28,7 +28,6 @@ import type {
 } from './types.js';
 
 const RECEIVED_IDS_MAX_SIZE = 1_000;
-const LOG_PURGE_INTERVAL_MS = 24 * 60 * 60 * 1000;
 
 export class IMessageAdapter implements MessagingAdapter {
   readonly platform = 'imessage';
@@ -49,7 +48,6 @@ export class IMessageAdapter implements MessagingAdapter {
   private started = false;
   private authorizedSenders: Set<string>;
   private receivedMessageIds = new Set<string>();
-  private logPurgeTimer: ReturnType<typeof setInterval> | null = null;
 
   // Callbacks (wired by server.ts)
   onMessageLogged: ((entry: LogEntry) => void) | null = null;
@@ -74,7 +72,7 @@ export class IMessageAdapter implements MessagingAdapter {
     // Initialize backend (read-only)
     this.backend = new NativeBackend({
       dbPath: this.config.dbPath,
-      pollIntervalMs: (this.config as unknown as Record<string, unknown>).pollIntervalMs as number | undefined,
+      pollIntervalMs: this.config.pollIntervalMs,
       includeAttachments: this.config.includeAttachments,
     });
 
@@ -117,20 +115,11 @@ export class IMessageAdapter implements MessagingAdapter {
     // Start stall detection
     this.stallDetector.start();
 
-    // Start log retention purge
-    this._startLogPurge();
-
     console.log('[imessage] Adapter started (backend: native)');
   }
 
   async stop(): Promise<void> {
     this.started = false;
-
-    if (this.logPurgeTimer) {
-      clearInterval(this.logPurgeTimer);
-      this.logPurgeTimer = null;
-    }
-
     this.stallDetector.stop();
     await this.backend.disconnect();
     console.log('[imessage] Adapter stopped');
@@ -340,16 +329,4 @@ export class IMessageAdapter implements MessagingAdapter {
     }
   }
 
-  private _startLogPurge(): void {
-    const retentionDays = this.config.logRetentionDays ?? 90;
-    if (retentionDays <= 0) return;
-
-    this.logPurgeTimer = setInterval(() => {
-      try {
-        const cutoff = new Date();
-        cutoff.setDate(cutoff.getDate() - retentionDays);
-        this.logger.search({ since: cutoff, limit: 1 });
-      } catch { /* non-critical */ }
-    }, LOG_PURGE_INTERVAL_MS);
-  }
 }

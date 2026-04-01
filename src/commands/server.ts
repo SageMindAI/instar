@@ -3849,7 +3849,7 @@ export async function startServer(options: StartOptions): Promise<void> {
     const { OrphanProcessReaper } = await import('../monitoring/OrphanProcessReaper.js');
     const orphanReaper = new OrphanProcessReaper(config, sessionManager, {
       pollIntervalMs: 60_000,      // Check every minute
-      orphanMaxAgeMs: 43_200_000,  // Kill Instar orphans after 12 hours (messaging sessions are long-lived)
+      orphanMaxAgeMs: 3_600_000,   // Kill Instar orphans after 1 hour
       externalReportAgeMs: 14_400_000, // Report external processes after 4 hours
       highMemoryThresholdMB: 500,  // Flag processes using >500MB
       autoKillOrphans: true,       // Auto-kill Instar orphans (safe — only project-prefixed tmux sessions)

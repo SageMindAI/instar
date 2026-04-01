@@ -1,1 +1,0 @@
-{"version":3,"file":"PlatformProbe.d.ts","sourceRoot":"","sources":["../../../src/monitoring/probes/PlatformProbe.ts"],"names":[],"mappings":"AAAA;;;;;;;GAOG;AAMH,OAAO,KAAK,EAAE,KAAK,EAAe,MAAM,sBAAsB,CAAC;AAE/D,MAAM,WAAW,iBAAiB;IAChC,yCAAyC;IACzC,QAAQ,EAAE,MAAM,CAAC;CAClB;AAyFD,wBAAgB,oBAAoB,CAAC,IAAI,EAAE,iBAAiB,GAAG,KAAK,EAAE,CAmIrE"}

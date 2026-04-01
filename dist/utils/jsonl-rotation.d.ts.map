@@ -1,1 +1,0 @@
-{"version":3,"file":"jsonl-rotation.d.ts","sourceRoot":"","sources":["../../src/utils/jsonl-rotation.ts"],"names":[],"mappings":"AAAA;;;;;;;;;;;;GAYG;AAOH,MAAM,WAAW,eAAe;IAC9B,yEAAyE;IACzE,QAAQ,CAAC,EAAE,MAAM,CAAC;IAClB,wEAAwE;IACxE,SAAS,CAAC,EAAE,MAAM,CAAC;CACpB;AASD;;;;;GAKG;AACH,wBAAgB,gBAAgB,CAAC,QAAQ,EAAE,MAAM,EAAE,OAAO,CAAC,EAAE,eAAe,GAAG,OAAO,CAyCrF"}
