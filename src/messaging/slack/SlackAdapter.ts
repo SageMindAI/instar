@@ -992,7 +992,12 @@ export class SlackAdapter implements MessagingAdapter {
         return;
       }
     } catch (err) {
-      console.error(`[slack] files.info failed for ${fileId}: ${(err as Error).message}`);
+      const errMsg = (err as Error).message;
+      if (errMsg.includes('missing_scope')) {
+        console.error(`[slack] files.info requires 'files:read' scope — add it in your Slack app's OAuth settings and reinstall the app`);
+      } else {
+        console.error(`[slack] files.info failed for ${fileId}: ${errMsg}`);
+      }
       return;
     }
 

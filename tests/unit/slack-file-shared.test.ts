@@ -174,6 +174,34 @@ describe('SlackAdapter file_shared handling', () => {
     expect(messages.length).toBe(0);
   });
 
+  it('logs actionable message when files:read scope is missing', async () => {
+    const { adapter, messages, apiClient } = createTestAdapter();
+
+    const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    apiClient.call = vi.fn(async (method: string) => {
+      if (method === 'files.info') {
+        throw new Error('missing_scope');
+      }
+      return { ok: true };
+    });
+
+    const handleFileShared = (adapter as any)._handleFileShared.bind(adapter);
+    await handleFileShared({
+      file_id: 'F_TEST',
+      user_id: 'U_TEST',
+      channel_id: 'C_TEST_CHAN',
+    });
+
+    // Should fail gracefully with actionable scope message
+    expect(messages.length).toBe(0);
+    expect(consoleSpy).toHaveBeenCalledWith(
+      expect.stringContaining("files:read"),
+    );
+
+    consoleSpy.mockRestore();
+  });
+
   it('handles missing file_id or channel_id', async () => {
     const { adapter, messages, apiClient } = createTestAdapter();
     apiClient.call = vi.fn();
