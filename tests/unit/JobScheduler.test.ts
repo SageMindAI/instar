@@ -14,6 +14,18 @@ describe('JobScheduler', () => {
     project = createTempProject();
     mockSM = createMockSessionManager();
     jobsFile = createSampleJobsFile(project.stateDir);
+
+    // Pre-seed lastRun so checkMissedJobs doesn't trigger jobs at startup.
+    // Missed-job detection is tested separately in job-scheduler-edge.test.ts.
+    for (const slug of ['health-check', 'email-check']) {
+      project.state.saveJobState({
+        slug,
+        lastRun: new Date().toISOString(),
+        lastResult: 'success',
+        runCount: 1,
+        consecutiveFailures: 0,
+      });
+    }
   });
 
   afterEach(() => {

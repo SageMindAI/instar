@@ -199,6 +199,19 @@ function createTestMachine(machineId: string, opts?: {
   if (opts?.jobs) {
     const jobsFile = createJobsFile(dir, opts.jobs);
     const sessionManager = mockSessionManager();
+
+    // Pre-seed lastRun so checkMissedJobs doesn't trigger jobs at startup.
+    // These tests test claim coordination, not missed-job detection.
+    for (const job of opts.jobs) {
+      state.saveJobState({
+        slug: job.slug,
+        lastRun: new Date().toISOString(),
+        lastResult: 'success',
+        runCount: 1,
+        consecutiveFailures: 0,
+      });
+    }
+
     const scheduler = new JobScheduler(
       createSchedulerConfig(jobsFile),
       sessionManager,

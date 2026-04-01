@@ -134,6 +134,14 @@ describe('scheduler skips jobs claimed by remote machines', () => {
     });
 
     stateManager = new StateManager(tmpDir);
+    // Pre-seed lastRun so checkMissedJobs doesn't fire at startup
+    stateManager.saveJobState({
+      slug: 'daily-sync',
+      lastRun: new Date().toISOString(),
+      lastResult: 'success',
+      runCount: 1,
+      consecutiveFailures: 0,
+    });
     sessionManager = mockSessionManager();
     scheduler = new JobScheduler(
       createSchedulerConfig(jobsFile),
@@ -220,6 +228,14 @@ describe('scheduler broadcasts claims before spawning', () => {
     });
 
     const stateManager = new StateManager(tmpDir);
+    // Pre-seed lastRun so checkMissedJobs doesn't fire at startup
+    stateManager.saveJobState({
+      slug: 'daily-sync',
+      lastRun: new Date().toISOString(),
+      lastResult: 'success',
+      runCount: 1,
+      consecutiveFailures: 0,
+    });
     const sessionManager = mockSessionManager();
     scheduler = new JobScheduler(
       createSchedulerConfig(jobsFile),
