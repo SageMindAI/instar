@@ -25,7 +25,8 @@ import { SleepWakeDetector } from '../core/SleepWakeDetector.js';
 
 /** Execute a shell command safely, returning stdout. */
 function shellExec(cmd: string, timeout = 5000): string {
-  return spawnSync('/bin/sh', ['-c', cmd], { encoding: 'utf-8', timeout }).stdout ?? '';
+  const shell = process.env.SHELL || '/bin/zsh';
+  return spawnSync(shell, ['-c', cmd], { encoding: 'utf-8', timeout }).stdout ?? '';
 }
 
 export interface SupervisorEvents {
@@ -369,7 +370,33 @@ export class ServerSupervisor extends EventEmitter {
       console.error(`[Supervisor] Preflight: node symlink check failed: ${err}`);
     }
 
-    // 3. Stale lifeline lock — can prevent the lifeline from restarting properly.
+    // 3. Stuck git rebase — prevents git-sync from working, blocks updates
+    try {
+      const gitStatus = spawnSync('git', ['status'], {
+        encoding: 'utf-8',
+        timeout: 5000,
+        cwd: this.projectDir,
+      });
+      const statusText = gitStatus.stdout || '';
+      if (statusText.includes('rebase in progress') || statusText.includes('interactive rebase in progress')) {
+        console.log('[Supervisor] Preflight: stuck git rebase detected — aborting');
+        const abortResult = spawnSync('git', ['rebase', '--abort'], {
+          encoding: 'utf-8',
+          timeout: 10_000,
+          cwd: this.projectDir,
+        });
+        if (abortResult.status === 0) {
+          healed.push('stuck git rebase aborted');
+          console.log('[Supervisor] Preflight: git rebase aborted successfully');
+        } else {
+          console.error(`[Supervisor] Preflight: git rebase --abort failed: ${abortResult.stderr}`);
+        }
+      }
+    } catch (err) {
+      console.error(`[Supervisor] Preflight: git state check failed: ${err}`);
+    }
+
+    // 4. Stale lifeline lock — can prevent the lifeline from restarting properly.
     const lockFile = path.join(this.stateDir, 'state', 'lifeline.lock');
     try {
       if (fs.existsSync(lockFile)) {
@@ -852,7 +879,7 @@ export class ServerSupervisor extends EventEmitter {
       }
 
       const slowElapsed = Date.now() - (this.slowRetryStartedAt + this.slowRetryIntervalMs * Math.floor((Date.now() - this.slowRetryStartedAt) / this.slowRetryIntervalMs));
-      if (slowElapsed < 10_000) { // Within 10s of a 2-hour boundary
+      if (slowElapsed < 60_000) { // Within 60s of a 2-hour boundary (wider window to avoid missed retries)
         console.log(`[Supervisor] Slow retry attempt (${Math.round((Date.now() - this.slowRetryStartedAt) / 3600_000)}h since circuit breaker exhaustion)`);
 
         // Kill existing session if alive

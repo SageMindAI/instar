@@ -22,6 +22,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { TreeGenerator } from '../knowledge/TreeGenerator.js';
 import { HTTP_HOOK_TEMPLATES, buildHttpHookSettings } from '../data/http-hook-templates.js';
+import { getMigrationDefaults, applyDefaults } from '../config/ConfigDefaults.js';
 
 export interface MigrationResult {
   /** What was upgraded */
@@ -1388,65 +1389,57 @@ The user has been talking to you (possibly for days). A generic greeting like "H
       result.skipped.push('config.json: dashboard PIN already set');
     }
 
-    // External operations — add defaults for existing agents.
-    // Conservative: supervised floor, no auto-elevation (existing agents need to opt in).
-    if (!config.externalOperations) {
-      config.externalOperations = {
-        enabled: true,
-        sentinel: { enabled: true },
-        services: {},
-        readOnlyServices: [],
-        trust: {
-          floor: 'supervised',
-          autoElevateEnabled: false,
-          elevationThreshold: 10,
-        },
-      };
-      patched = true;
-      result.upgraded.push('config.json: added externalOperations defaults (supervised mode)');
-    } else {
-      result.skipped.push('config.json: externalOperations already configured');
-    }
+    // Apply defaults from the canonical ConfigDefaults registry.
+    // This single call replaces ALL individual migration blocks (externalOperations,
+    // promptGate, threadline, etc.). Adding a new default to ConfigDefaults.ts
+    // automatically applies it to existing agents on update.
+    try {
+      // Uses imported getMigrationDefaults and applyDefaults from ConfigDefaults.ts
+      const agentType = (config.agentType as string) === 'standalone' ? 'standalone' : 'managed-project';
+      const defaults = getMigrationDefaults(agentType as any);
+      const { patched: defaultsPatched, changes, skipped } = applyDefaults(config, defaults);
 
-    // PromptGate — enable by default for all agents.
-    // Without this, permission prompts in sessions are invisible to users and
-    // cause sessions to hang indefinitely waiting for input that never comes.
-    const monitoring = (config.monitoring ?? {}) as Record<string, unknown>;
-    if (!monitoring.promptGate) {
-      monitoring.promptGate = {
-        enabled: true,
-        autoApprove: {
-          enabled: true,
-          fileCreation: true,
-          fileEdits: true,
-          planApproval: false,
-        },
-        dryRun: false,
-      };
-      config.monitoring = monitoring;
-      patched = true;
-      result.upgraded.push('config.json: enabled PromptGate with auto-approve (file edits auto-approved, plans relayed to user)');
-    } else {
-      result.skipped.push('config.json: promptGate already configured');
-    }
+      if (defaultsPatched) {
+        patched = true;
+        // Record migration version for audit trail
+        const migrations = (config._instar_migrations ?? []) as string[];
+        const version = 'unknown';
+        migrations.push(`defaults-${version}-${new Date().toISOString()}`);
+        config._instar_migrations = migrations;
 
-    // Threadline relay — add config block so infrastructure is ready (opt-in).
-    // relayEnabled defaults to false — the agent explains and offers to enable conversationally.
-    if (!config.threadline) {
-      config.threadline = {
-        relayEnabled: false,
-        visibility: 'public',
-        capabilities: ['chat'],
-      };
-      patched = true;
-      result.upgraded.push('config.json: added threadline config (relay ready, opt-in)');
-    } else {
-      result.skipped.push('config.json: threadline already configured');
+        for (const change of changes) {
+          result.upgraded.push(`config.json: ${change}`);
+        }
+      }
+      for (const skip of skipped) {
+        result.skipped.push(`config.json: ${skip}`);
+      }
+    } catch (err) {
+      // Fallback: if ConfigDefaults import fails, log error but don't crash migration
+      result.errors.push(`config.json defaults: ${err instanceof Error ? err.message : String(err)}`);
     }
 
     if (patched) {
       try {
-        fs.writeFileSync(configPath, JSON.stringify(config, null, 2));
+        // Atomic write: backup, then write to tmp, then rename
+        const bak = configPath + '.bak';
+        const tmp = configPath + '.tmp';
+        fs.copyFileSync(configPath, bak);
+        fs.writeFileSync(tmp, JSON.stringify(config, null, 2));
+        fs.renameSync(tmp, configPath);
+
+        // Audit log
+        try {
+          const securityLogPath = path.join(this.config.stateDir, 'security.jsonl');
+          const auditEntry = {
+            event: 'config-migration',
+            timestamp: new Date().toISOString(),
+            version: 'unknown',
+            changes: result.upgraded.filter(u => u.startsWith('config.json:')),
+            source: 'PostUpdateMigrator',
+          };
+          fs.appendFileSync(securityLogPath, JSON.stringify(auditEntry) + '\n');
+        } catch { /* audit log is best-effort */ }
       } catch (err) {
         result.errors.push(`config.json write: ${err instanceof Error ? err.message : String(err)}`);
       }

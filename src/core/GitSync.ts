@@ -191,6 +191,50 @@ export class GitSyncManager {
     // No git repo — return clean no-op (standalone agent without git backup)
     if (!this.isGitRepo()) return result;
 
+    // 0. Pre-flight: detect and fix stuck rebase / detached HEAD before attempting pull
+    try {
+      const statusOut = this.gitExec(['status']);
+      if (statusOut.includes('rebase in progress') || statusOut.includes('interactive rebase in progress')) {
+        console.log('[GitSync] Pre-flight: stuck rebase detected — aborting before pull');
+        try {
+          this.gitExec(['rebase', '--abort']);
+          console.log('[GitSync] Pre-flight: rebase aborted successfully');
+        } catch (abortErr) {
+          console.error(`[GitSync] Pre-flight: rebase abort failed: ${abortErr}`);
+        }
+      }
+      // Check for detached HEAD (no branch)
+      try {
+        const branch = this.gitExec(['symbolic-ref', '--short', 'HEAD']).trim();
+        if (!branch) throw new Error('no branch');
+      } catch {
+        // Detached HEAD — try to get back on main/master
+        console.log('[GitSync] Pre-flight: detached HEAD detected — attempting to checkout main branch');
+        try {
+          // Try 'main' first, then 'master'
+          try {
+            this.gitExec(['checkout', 'main']);
+          } catch {
+            this.gitExec(['checkout', 'master']);
+          }
+          console.log('[GitSync] Pre-flight: back on main branch');
+        } catch (checkoutErr) {
+          console.error(`[GitSync] Pre-flight: could not recover from detached HEAD: ${checkoutErr}`);
+          DegradationReporter.getInstance().report({
+            feature: 'GitSync.pull',
+            primary: 'Clean git pull',
+            fallback: 'Skipping pull (detached HEAD)',
+            reason: 'Git is in detached HEAD state and auto-recovery failed. Run: git checkout main',
+            impact: 'Git sync disabled until HEAD is reattached to a branch.',
+          });
+          return result;
+        }
+      }
+    } catch (preflightErr) {
+      // Non-fatal — continue with pull attempt
+      console.warn(`[GitSync] Pre-flight check warning: ${preflightErr}`);
+    }
+
     // 1. Pull with rebase
     try {
       const beforeHead = this.gitHead();

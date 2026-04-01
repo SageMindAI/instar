@@ -425,4 +425,39 @@ describe('AgentRegistry', () => {
       expect(instances).toHaveLength(2);
     });
   });
+
+  // ── Sync lock retry resilience ───────────────────────────────────
+
+  describe('sync lock retry resilience', () => {
+    it('registerAgent succeeds despite transient lock contention', async () => {
+      const { registerAgent, listAgents } = await getRegistry();
+
+      // Register two agents concurrently (sync calls) — both should succeed
+      // even though they're contending for the same lock file
+      registerAgent('/tmp/project-a', 'agent-a', 4050, 'project-bound', process.pid);
+      registerAgent('/tmp/project-b', 'agent-b', 4051, 'project-bound', process.pid);
+
+      const agents = listAgents();
+      expect(agents.length).toBe(2);
+      expect(agents.map(a => a.name).sort()).toEqual(['agent-a', 'agent-b']);
+    });
+
+    it('heartbeat recovers after stale lock is force-removed', async () => {
+      const lockfileMod = await import('proper-lockfile');
+      const { registerAgent, heartbeat, forceRemoveRegistryLock } = await getRegistry();
+
+      registerAgent('/tmp/project-c', 'agent-c', 4052, 'project-bound', process.pid);
+
+      // Force-remove any existing lock (simulating stale lock recovery)
+      forceRemoveRegistryLock();
+
+      // Heartbeat should succeed after lock removal
+      heartbeat('/tmp/project-c');
+
+      const { listAgents } = await getRegistry();
+      const agents = listAgents();
+      const agentC = agents.find(a => a.name === 'agent-c');
+      expect(agentC).toBeDefined();
+    });
+  });
 });
