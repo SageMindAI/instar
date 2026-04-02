@@ -367,7 +367,7 @@ describe('SessionMonitor', () => {
       expect(deps.triggerTriage).toHaveBeenCalled();
     });
 
-    it('does not call recovery for idle sessions', async () => {
+    it('calls recovery for idle sessions when user expects response (context exhaustion check)', async () => {
       const mockRecovery = { checkAndRecover: vi.fn(async () => ({ recovered: false, failureType: null, message: '' })) };
       deps = createMockDeps({
         getActiveTopicSessions: vi.fn(() => new Map([[903, 'session-mr3']])),
@@ -386,8 +386,9 @@ describe('SessionMonitor', () => {
       await monitor.poll();
       vi.advanceTimersByTime(16 * 60_000);
       await monitor.poll();
-      // Idle sessions should NOT trigger mechanical recovery
-      expect(mockRecovery.checkAndRecover).not.toHaveBeenCalled();
+      // Recovery is now called for all statuses (including idle) when user expects
+      // a response — context exhaustion can manifest in alive/idle sessions
+      expect(mockRecovery.checkAndRecover).toHaveBeenCalled();
     });
   });
 });
