@@ -251,6 +251,7 @@ export function generateClaudeMd(
   port: number,
   hasTelegram: boolean,
   hasWhatsApp: boolean = false,
+  hasIMessage: boolean = false,
 ): string {
   let content = `# CLAUDE.md — ${projectName}
 
@@ -1224,6 +1225,38 @@ When both Telegram and WhatsApp are configured:
 - Attention items can be surfaced on WhatsApp with interactive buttons
 - Health endpoint includes WhatsApp status when authenticated
 - **Message Bridge**: messages from one platform are forwarded to the other with a \`[via WhatsApp]\` or \`[via Telegram]\` prefix. Link channels via the bridge registry or the \`/messaging/bridge\` API endpoint. Loop detection prevents infinite forwarding.
+`;
+  }
+
+  if (hasIMessage) {
+    content += `
+## iMessage Relay
+
+When user input starts with \`[imessage:SENDER]\`, the message came from a user via iMessage. After responding, relay the response back:
+
+\`\`\`bash
+cat <<'EOF' | .claude/scripts/imessage-reply.sh SENDER
+Your response text here
+EOF
+\`\`\`
+
+Strip the \`[imessage:...]\` prefix before interpreting the message. Only relay conversational text — not tool output.
+
+The SENDER is a phone number in E.164 format (e.g., \`+14081234567\`) or an email address (e.g., \`user@icloud.com\`).
+
+### Session Continuity (CRITICAL)
+
+When your first message starts with \`CONTINUATION\`, you are **resuming an existing conversation**. The inline context contains recent message history. You MUST:
+
+1. **Read the context first** — it tells you what the conversation is about
+2. **Pick up where you left off** — do NOT introduce yourself or ask "how can I help?"
+3. **Reference the prior context** — show the user you know what they were discussing
+
+### Important Notes
+
+- The reply script sends via \`imsg send\` CLI directly (NOT through the server API)
+- Server notification for logging happens automatically
+- Only messages from authorized senders are processed (fail-closed)
 `;
   }
 

@@ -276,6 +276,14 @@ export class SessionManager extends EventEmitter {
     try {
       const running = this.state.listSessions({ status: 'running' });
       for (const session of running) {
+        // Grace period: don't check sessions that started less than 15 seconds ago.
+        // Claude Code takes several seconds to start — the process might not be
+        // visible in tmux yet when the monitor runs its first check.
+        if (session.startedAt) {
+          const ageMs = Date.now() - new Date(session.startedAt).getTime();
+          if (ageMs < 15_000) continue;
+        }
+
         const alive = await this.isSessionAliveAsync(session.tmuxSession);
         if (!alive) {
           // Check if this session had a pending Telegram injection that never got a response
@@ -613,7 +621,7 @@ export class SessionManager extends EventEmitter {
         timeout: 5000,
       });
     } catch {
-      // @silent-fallback-ok — session existence check
+      // tmux session doesn't exist — it's dead
       return false;
     }
 
@@ -633,7 +641,12 @@ export class SessionManager extends EventEmitter {
         if (startCmd && startCmd !== paneCmd) {
           return true;
         }
+        console.log(`[SessionManager] Session "${tmuxSession}" has bare shell (${paneCmd}) — marking dead. start_command: ${startCmd}`);
         return false;
+      }
+      // Unknown command — log it and assume alive
+      if (paneCmd) {
+        console.log(`[SessionManager] Session "${tmuxSession}" has unknown pane command: "${paneCmd}" — assuming alive`);
       }
       return true;
     } catch {
@@ -1126,16 +1139,18 @@ export class SessionManager extends EventEmitter {
     };
     this.state.saveSession(session);
 
-    // Wait for Claude to be ready, then send the initial message
+    // Wait for Claude to be ready, then send the initial message.
     // Resume sessions load large JONSLs which trigger TUI redraws — use longer timeout
     // and a stabilization delay to avoid injecting text that gets wiped by the redraw.
-    const readyTimeout = options?.resumeSessionId ? 60000 : 30000;
+    // Fresh sessions also get a generous timeout (90s) to handle slow API auth,
+    // large CLAUDE.md loading, and session-start hook execution.
+    const readyTimeout = options?.resumeSessionId ? 120_000 : 90_000;
     if (initialMessage) {
-      this.waitForClaudeReady(tmuxSession, readyTimeout).then((ready) => {
+      this.waitForClaudeReadyWithRetry(tmuxSession, readyTimeout).then((ready) => {
         if (ready) {
           // Stabilization delay: Claude's TUI may redraw after loading large JONSLs,
           // clearing any text injected too early. Wait for the redraw to settle.
-          const stabilizationMs = options?.resumeSessionId ? 5000 : 0;
+          const stabilizationMs = options?.resumeSessionId ? 5000 : 1000;
           setTimeout(() => {
             this.injectMessage(tmuxSession, initialMessage);
             console.log(`[SessionManager] Injected initial message into "${tmuxSession}" (${initialMessage.length} chars${stabilizationMs ? ', after stabilization delay' : ''})`);
@@ -1245,8 +1260,8 @@ export class SessionManager extends EventEmitter {
     this.state.saveSession(session);
 
     // Wait for Claude to be ready
-    const readyTimeout = options.resumeSessionId ? 60000 : 30000;
-    await this.waitForClaudeReady(tmuxSession, readyTimeout);
+    const readyTimeout = options.resumeSessionId ? 120_000 : 90_000;
+    await this.waitForClaudeReadyWithRetry(tmuxSession, readyTimeout);
 
     return tmuxSession;
   }
@@ -1385,6 +1400,67 @@ export class SessionManager extends EventEmitter {
 
     const ref = `${tag} [Long message saved to ${filepath} — read it to see the full message]`;
     this.injectMessage(tmuxSession, ref);
+  }
+
+  /**
+   * Inject an iMessage into a tmux session.
+   * Tags with [imessage:SENDER] and handles long messages via temp files.
+   * Tracks injection for stall detection (uses a synthetic numeric topicId
+   * derived from hashing the sender identifier).
+   */
+  injectIMessageMessage(tmuxSession: string, sender: string, text: string, senderName?: string): void {
+    const FILE_THRESHOLD = 500;
+
+    // Generate a stable numeric ID from sender for pendingInjections tracking
+    // (pendingInjections uses topicId: number, so we hash the sender string)
+    let senderHash = 0;
+    for (let i = 0; i < sender.length; i++) {
+      senderHash = ((senderHash << 5) - senderHash + sender.charCodeAt(i)) | 0;
+    }
+    const syntheticTopicId = Math.abs(senderHash);
+
+    this.pendingInjections.set(tmuxSession, { topicId: syntheticTopicId, injectedAt: Date.now(), text: text.slice(0, 200) });
+
+    // Build tag: [imessage:+14081234567 from Justin]
+    const safeName = senderName ? senderName.replace(/[\[\]]/g, '') : undefined;
+    const nameTag = safeName ? ` from ${safeName}` : '';
+    const tag = `[imessage:${sender}${nameTag}]`;
+    const taggedText = `${tag} ${text}`;
+
+    if (taggedText.length <= FILE_THRESHOLD) {
+      this.injectMessage(tmuxSession, taggedText);
+      return;
+    }
+
+    // Write full message to temp file with restricted permissions
+    const tmpDir = path.join('/tmp', 'instar-imessage');
+    fs.mkdirSync(tmpDir, { recursive: true, mode: 0o700 });
+    const senderSlug = sender.replace(/[^a-zA-Z0-9]/g, '').slice(-8);
+    const filename = `msg-${senderSlug}-${Date.now()}.txt`;
+    const filepath = path.join(tmpDir, filename);
+    fs.writeFileSync(filepath, taggedText, { mode: 0o600 });
+
+    const ref = `${tag} [Long message saved to ${filepath} — read it to see the full message]`;
+    this.injectMessage(tmuxSession, ref);
+  }
+
+  /**
+   * Clear the injection tracker for an iMessage sender.
+   * Called from the /imessage/reply/:recipient route.
+   */
+  clearIMessageInjectionTracker(sender: string): void {
+    // Compute the same hash used in injectIMessageMessage
+    let senderHash = 0;
+    for (let i = 0; i < sender.length; i++) {
+      senderHash = ((senderHash << 5) - senderHash + sender.charCodeAt(i)) | 0;
+    }
+    const syntheticTopicId = Math.abs(senderHash);
+
+    for (const [session, info] of this.pendingInjections) {
+      if (info.topicId === syntheticTopicId) {
+        this.pendingInjections.delete(session);
+      }
+    }
   }
 
   /**
@@ -1564,21 +1640,112 @@ export class SessionManager extends EventEmitter {
         console.error(`[SessionManager] Session "${tmuxSession}" died during startup`);
         return false;
       }
-      const output = this.captureOutput(tmuxSession, 5);
-      // Check only the last 3 lines for Claude Code's prompt character (❯).
-      // Checking all captured lines can false-positive on ❯ appearing in prior output
-      // (e.g., during TUI redraw of a resumed session's history).
-      const lines = (output || '').split('\n').filter(l => l.trim());
-      const tail = lines.slice(-3).join('\n');
-      if (tail.includes('❯') || tail.includes('bypass permissions')) {
+      if (this.detectClaudePrompt(tmuxSession)) {
         console.log(`[SessionManager] Claude ready in "${tmuxSession}" after ${Date.now() - start}ms`);
         return true;
       }
       await new Promise(r => setTimeout(r, 500));
     }
     // Log what we see on timeout for debugging
-    const finalOutput = this.captureOutput(tmuxSession, 20);
-    console.error(`[SessionManager] Claude not ready in "${tmuxSession}" after ${timeoutMs}ms. Output: ${(finalOutput || '').slice(-200)}`);
+    const finalOutput = this.captureOutput(tmuxSession, 30);
+    console.error(`[SessionManager] Claude not ready in "${tmuxSession}" after ${timeoutMs}ms. Output: ${(finalOutput || '').slice(-300)}`);
+    return false;
+  }
+
+  /**
+   * Detect whether Claude Code's prompt is visible in a tmux session.
+   * Also auto-accepts consent dialogs that block startup.
+   *
+   * Checks multiple indicators across a wider capture window to handle
+   * varying TUI layouts (different terminal sizes, large banners, etc.)
+   */
+  private detectClaudePrompt(tmuxSession: string): boolean {
+    // Capture a generous window — Claude Code's TUI can have many blank lines
+    // below the prompt in large panes. Using only 5 lines risks missing content.
+    const output = this.captureOutput(tmuxSession, 20);
+    if (!output) return false;
+
+    const lines = output.split('\n').filter(l => l.trim());
+    if (lines.length === 0) return false;
+
+    // Auto-accept consent/ToS dialogs that block startup.
+    // Claude Code shows "1. No, exit / 2. Yes, I accept" on first run or after updates.
+    // If we don't accept, any injected text selects "No" and crashes the session.
+    const fullText = lines.join('\n');
+    if (fullText.includes('Yes, I accept') && fullText.includes('No, exit')) {
+      console.log(`[SessionManager] Consent dialog detected in "${tmuxSession}" — auto-accepting`);
+      try {
+        // Press Down to select "Yes, I accept", then Enter to confirm
+        execFileSync(this.config.tmuxPath, ['send-keys', '-t', `=${tmuxSession}:`, 'Down'], {
+          encoding: 'utf-8', timeout: 5000,
+        });
+        execFileSync(this.config.tmuxPath, ['send-keys', '-t', `=${tmuxSession}:`, 'Enter'], {
+          encoding: 'utf-8', timeout: 5000,
+        });
+      } catch {
+        // Best-effort — if this fails, the session will be stuck but not crashed
+      }
+      return false; // Not ready yet — will be ready on next poll
+    }
+
+    // Check the last 6 non-blank lines for readiness indicators.
+    // Claude Code's TUI shows: prompt (❯), status bar (bypass permissions / model info),
+    // and separators. Using a wider tail catches all of these even when
+    // blank lines or separators push them around.
+    const tail = lines.slice(-6).join('\n');
+
+    // Primary: the prompt character
+    if (tail.includes('❯')) return true;
+
+    // Secondary: permission mode indicators (visible in status bar)
+    if (tail.includes('bypass permissions')) return true;
+
+    // Tertiary: model/effort indicators in the status bar
+    // These appear when Claude Code has fully loaded and is ready for input.
+    if (/\/(effort|model|fast)/.test(tail)) return true;
+
+    // Quaternary: the "medium · /effort" or "high · /effort" pattern
+    if (/(?:low|medium|high)\s*·\s*\/effort/.test(tail)) return true;
+
+    return false;
+  }
+
+  /**
+   * Wait for Claude to be ready with a two-phase approach:
+   * 1. Primary wait: poll for the prompt within the timeout
+   * 2. Extended wait: if the session is alive but prompt wasn't detected,
+   *    do a final longer check — Claude may have just finished loading
+   *
+   * This handles cases where Claude Code takes longer than expected due to
+   * API auth refresh, large CLAUDE.md parsing, session-start hooks, or
+   * network latency. The extended phase catches sessions that are "almost ready."
+   */
+  private async waitForClaudeReadyWithRetry(tmuxSession: string, timeoutMs: number): Promise<boolean> {
+    const ready = await this.waitForClaudeReady(tmuxSession, timeoutMs);
+    if (ready) return true;
+
+    // Session not ready after primary timeout — check if it's still alive
+    if (!this.tmuxSessionExists(tmuxSession)) {
+      return false;
+    }
+
+    // Extended wait: the session is alive but prompt wasn't detected.
+    // Give it one more chance with a 15-second grace period.
+    // This catches the case where Claude Code was almost done loading
+    // when the primary timeout hit.
+    console.log(`[SessionManager] Session "${tmuxSession}" alive after primary timeout — starting 15s extended wait`);
+    const extendedStart = Date.now();
+    while (Date.now() - extendedStart < 15_000) {
+      if (!this.tmuxSessionExists(tmuxSession)) {
+        return false;
+      }
+      if (this.detectClaudePrompt(tmuxSession)) {
+        console.log(`[SessionManager] Claude ready in "${tmuxSession}" during extended wait (${Date.now() - extendedStart}ms after primary timeout)`);
+        return true;
+      }
+      await new Promise(r => setTimeout(r, 1000));
+    }
+
     return false;
   }
 

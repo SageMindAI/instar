@@ -126,6 +126,11 @@ export interface QrUpdateEvent {
   timestamp: string;
 }
 
+export interface OutboundRateLimitedEvent {
+  recipient: string;  // masked
+  reason: string;
+}
+
 // ── Event map ──────────────────────────────────────────────────────
 
 export interface MessagingEventMap {
@@ -146,6 +151,7 @@ export interface MessagingEventMap {
   'receipt:read': ReadReceiptEvent;
   'reaction:ack': AckReactionEvent;
   'whatsapp:qr-update': QrUpdateEvent;
+  'rate:outbound-limited': OutboundRateLimitedEvent;
 }
 
 export type MessagingEventName = keyof MessagingEventMap;
