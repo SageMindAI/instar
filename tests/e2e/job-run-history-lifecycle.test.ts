@@ -97,6 +97,18 @@ describeMaybe('E2E: Job Run History lifecycle', () => {
     // Stand up real components
     state = new StateManager(stateDir);
 
+    // Pre-seed lastRun so checkMissedJobs doesn't auto-trigger jobs at startup.
+    // Missed-job detection is tested separately in job-scheduler-edge.test.ts.
+    for (const slug of ['hist-test-job', 'hist-secondary']) {
+      state.saveJobState({
+        slug,
+        lastRun: new Date().toISOString(),
+        lastResult: 'success',
+        runCount: 1,
+        consecutiveFailures: 0,
+      });
+    }
+
     sessionManager = new SessionManager(
       {
         tmuxPath: tmuxPath!,

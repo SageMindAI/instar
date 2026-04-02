@@ -969,19 +969,136 @@ export class SlackAdapter implements MessagingAdapter {
     // Files attached to messages are handled inline in _handleMessage.
     // This handler catches standalone file_shared events (e.g., drag-and-drop without text).
     const userId = event.user_id as string ?? event.user as string;
+    const channelId = event.channel_id as string;
+    const fileId = event.file_id as string;
 
     // AuthGate — check before download (prevents disk exhaustion from unauthorized users)
     if (!userId || !this.isAuthorized(userId)) {
       return;
     }
 
-    // Standalone file_shared events are rare — most files come as message attachments.
-    // The file_id is in the event, but we'd need files.info to get the URL.
-    // For now, message-embedded files (handled in _handleMessage) cover the primary use case.
-    const fileId = event.file_id as string;
-    if (fileId) {
-      console.log(`[slack] file_shared event for ${fileId} — handled inline with message`);
+    if (!fileId || !channelId) {
+      console.warn(`[slack] file_shared event missing file_id or channel_id`);
+      return;
     }
+
+    // Fetch file metadata from Slack API (url_private, mimetype, name, etc.)
+    let fileInfo: Record<string, unknown>;
+    try {
+      const response = await this.apiClient.call('files.info', { file: fileId });
+      fileInfo = response.file as Record<string, unknown>;
+      if (!fileInfo) {
+        console.warn(`[slack] files.info returned no file for ${fileId}`);
+        return;
+      }
+    } catch (err) {
+      const errMsg = (err as Error).message;
+      if (errMsg.includes('missing_scope')) {
+        console.error(`[slack] files.info requires 'files:read' scope — add it in your Slack app's OAuth settings and reinstall the app`);
+      } else {
+        console.error(`[slack] files.info failed for ${fileId}: ${errMsg}`);
+      }
+      return;
+    }
+
+    const url = fileInfo.url_private as string;
+    const mimetype = fileInfo.mimetype as string ?? '';
+    const filename = fileInfo.name as string ?? 'file';
+
+    if (!url) {
+      console.warn(`[slack] file ${fileId} has no url_private`);
+      return;
+    }
+
+    // Download and process the file
+    const ts = `file-${fileId}-${Date.now()}`;
+    let cleanText = '';
+
+    try {
+      const isImage = mimetype.startsWith('image/');
+      const isAudio = mimetype.startsWith('audio/');
+      const destName = `${isImage ? 'photo' : isAudio ? 'voice' : 'file'}-${Date.now()}-${fileId}.${filename.split('.').pop() ?? 'bin'}`;
+      const destPath = path.join(this.fileHandler.downloadDir, destName);
+      const savedPath = await this.fileHandler.downloadFile(url, destPath);
+
+      if (isImage) {
+        const imageValid = this._validateImageFile(savedPath);
+        cleanText = imageValid ? `[image:${savedPath}]` : `[document:${savedPath}]`;
+        if (!imageValid) {
+          console.warn(`[slack] Downloaded image failed validation, treating as document: ${savedPath}`);
+        }
+      } else if (isAudio && this.transcribeVoice) {
+        try {
+          const transcript = await this.transcribeVoice(savedPath);
+          cleanText = `[voice] ${transcript}`;
+        } catch (transcribeErr) {
+          console.warn(`[slack] Voice transcription failed: ${(transcribeErr as Error).message}`);
+          cleanText = `[document:${savedPath}]`;
+        }
+      } else {
+        cleanText = `[document:${savedPath}]`;
+      }
+    } catch (err) {
+      console.error(`[slack] Failed to download standalone file ${filename}: ${(err as Error).message}`);
+      cleanText = `[document:download-failed]`;
+    }
+
+    // Acknowledge with reaction on the file message
+    // (file_shared events don't have a message ts to react to, so skip reactions)
+
+    // Resolve user name
+    let senderName = userId;
+    try {
+      const info = await this.getUserInfo(userId);
+      senderName = info.name;
+    } catch {
+      // Use userId as fallback
+    }
+
+    // Log inbound file
+    const logEntry: LogEntry = {
+      messageId: ts,
+      channelId,
+      text: cleanText,
+      fromUser: true,
+      timestamp: new Date().toISOString(),
+      sessionName: null,
+      senderName: sanitizeDisplayName(senderName),
+      platformUserId: userId,
+      platform: 'slack',
+    };
+    this.logger.append(logEntry);
+    this.onMessageLogged?.(logEntry);
+
+    // Convert to Instar Message format and route to handler
+    const isDM = channelId.startsWith('D');
+    const message: Message = {
+      id: `slack-${ts}`,
+      userId,
+      content: cleanText,
+      channel: {
+        type: 'slack',
+        identifier: channelId,
+      },
+      receivedAt: new Date().toISOString(),
+      metadata: {
+        slackUserId: userId,
+        senderName: sanitizeDisplayName(senderName),
+        ts,
+        channelId,
+        isDM,
+      },
+    };
+
+    if (this.messageHandler) {
+      try {
+        await this.messageHandler(message);
+      } catch (err) {
+        console.error('[slack] Message handler error (file_shared):', (err as Error).message);
+      }
+    }
+
+    console.log(`[slack] Processed standalone file_shared: ${fileId} (${mimetype}) in ${channelId}`);
   }
 
   // ── Prompt Gate ──

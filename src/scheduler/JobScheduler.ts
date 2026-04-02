@@ -383,6 +383,13 @@ export class JobScheduler {
   }
 
   /**
+   * Clear the pending job queue.
+   */
+  clearQueue(): void {
+    this.queue.length = 0;
+  }
+
+  /**
    * Resume — triggers start executing again.
    */
   resume(): void {

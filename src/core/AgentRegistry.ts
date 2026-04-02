@@ -38,10 +38,13 @@ const LOCK_OPTIONS_ASYNC = {
   retries: { retries: 5, factor: 2, minTimeout: 100 },
 };
 
-// lockSync doesn't support retries — use simple stale detection only
+// lockSync doesn't support retries natively — we implement manual retries below
 const LOCK_OPTIONS_SYNC = {
   stale: 10_000,
 };
+
+const SYNC_LOCK_RETRIES = 5;
+const SYNC_LOCK_BASE_DELAY_MS = 100;
 
 /**
  * Validate an agent name for use in paths and registration.
@@ -167,25 +170,44 @@ function withLockSync<T>(fn: (registry: AgentRegistry) => T): T {
   }
 
   let release: (() => void) | undefined;
-  try {
-    release = lockfile.lockSync(registryPath(), LOCK_OPTIONS_SYNC);
-    const registry = loadRegistry();
-    const result = fn(registry);
-    saveRegistry(registry);
-    return result;
-  } catch (err) {
-    if (err instanceof Error && err.message.includes('ELOCKED')) {
-      throw new Error(
-        'Registry is locked by another process. If no other instar process is running, ' +
-        'delete ~/.instar/registry.json.lock and retry.'
-      );
-    }
-    throw err;
-  } finally {
-    if (release) {
-      try { release(); } catch { /* ignore */ }
+  let lastErr: unknown;
+
+  // Manual retry loop since lockSync doesn't support retries natively
+  for (let attempt = 0; attempt <= SYNC_LOCK_RETRIES; attempt++) {
+    try {
+      release = lockfile.lockSync(registryPath(), LOCK_OPTIONS_SYNC);
+      const registry = loadRegistry();
+      const result = fn(registry);
+      saveRegistry(registry);
+      return result;
+    } catch (err) {
+      lastErr = err;
+      if (release) {
+        try { release(); } catch { /* ignore */ }
+        release = undefined;
+      }
+      if (err instanceof Error && err.message.includes('ELOCKED') && attempt < SYNC_LOCK_RETRIES) {
+        // Exponential backoff: 100ms, 200ms, 400ms, 800ms, 1600ms
+        const delay = SYNC_LOCK_BASE_DELAY_MS * Math.pow(2, attempt);
+        const end = Date.now() + delay;
+        while (Date.now() < end) { /* busy-wait for sync context */ }
+        continue;
+      }
+      break;
+    } finally {
+      if (release) {
+        try { release(); } catch { /* ignore */ }
+      }
     }
   }
+
+  if (lastErr instanceof Error && lastErr.message.includes('ELOCKED')) {
+    throw new Error(
+      'Registry is locked by another process after retries. If no other instar process is running, ' +
+      'delete ~/.instar/registry.json.lock and retry.'
+    );
+  }
+  throw lastErr;
 }
 
 /**

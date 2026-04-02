@@ -36,6 +36,14 @@ function makeRecord(overrides: Partial<ExecutionRecord> = {}): ExecutionRecord {
   };
 }
 
+// Helper to generate timestamps relative to now, ensuring they're always within
+// the 30-day default analysis window. daysAgo=1 means yesterday, daysAgo=2 means
+// two days ago, etc. This prevents time-boundary failures in CI (the original
+// hardcoded 2026-03-0X timestamps fell outside the 30-day window as time passed).
+function daysAgo(n: number): string {
+  return new Date(Date.now() - n * 24 * 60 * 60 * 1000).toISOString();
+}
+
 // Helper to write records directly to journal JSONL
 function writeRecords(stateDir: string, jobSlug: string, records: ExecutionRecord[], agentId = 'default'): void {
   const dir = path.join(stateDir, 'state', 'execution-journal', agentId);
@@ -93,13 +101,13 @@ describe('PatternAnalyzer', () => {
       const records = [
         makeRecord({
           jobSlug: 'two-runs',
-          actualSteps: [{ step: 'step-a', timestamp: '2026-03-01T10:00:00Z', source: 'hook' }],
-          timestamp: '2026-03-01T10:00:00Z',
+          actualSteps: [{ step: 'step-a', timestamp: daysAgo(2), source: 'hook' }],
+          timestamp: daysAgo(2),
         }),
         makeRecord({
           jobSlug: 'two-runs',
-          actualSteps: [{ step: 'step-a', timestamp: '2026-03-02T10:00:00Z', source: 'hook' }],
-          timestamp: '2026-03-02T10:00:00Z',
+          actualSteps: [{ step: 'step-a', timestamp: daysAgo(1), source: 'hook' }],
+          timestamp: daysAgo(1),
         }),
       ];
       writeRecords(stateDir, 'two-runs', records);
@@ -117,13 +125,13 @@ describe('PatternAnalyzer', () => {
       const records = [
         makeRecord({
           jobSlug: 'custom-min',
-          actualSteps: [{ step: 'extra-step', timestamp: '2026-03-01T10:00:00Z', source: 'hook' }],
-          timestamp: '2026-03-01T10:00:00Z',
+          actualSteps: [{ step: 'extra-step', timestamp: daysAgo(2), source: 'hook' }],
+          timestamp: daysAgo(2),
         }),
         makeRecord({
           jobSlug: 'custom-min',
-          actualSteps: [{ step: 'extra-step', timestamp: '2026-03-02T10:00:00Z', source: 'hook' }],
-          timestamp: '2026-03-02T10:00:00Z',
+          actualSteps: [{ step: 'extra-step', timestamp: daysAgo(1), source: 'hook' }],
+          timestamp: daysAgo(1),
         }),
       ];
       writeRecords(stateDir, 'custom-min', records);
@@ -144,11 +152,11 @@ describe('PatternAnalyzer', () => {
         jobSlug: 'addition-test',
         definedSteps: ['step-a'],
         actualSteps: [
-          { step: 'step-a', timestamp: `2026-03-0${i + 1}T10:00:00Z`, source: 'hook' },
+          { step: 'step-a', timestamp: daysAgo(5 - i), source: 'hook' },
           // 'extra-step' appears in 4 of 5 runs (80%)
-          ...(i < 4 ? [{ step: 'extra-step', timestamp: `2026-03-0${i + 1}T10:01:00Z`, source: 'hook' as const }] : []),
+          ...(i < 4 ? [{ step: 'extra-step', timestamp: daysAgo(5 - i), source: 'hook' as const }] : []),
         ],
-        timestamp: `2026-03-0${i + 1}T10:00:00Z`,
+        timestamp: daysAgo(5 - i),
       }));
       writeRecords(stateDir, 'addition-test', records);
 
@@ -168,9 +176,9 @@ describe('PatternAnalyzer', () => {
         definedSteps: [],
         actualSteps: [
           // Appears in 3 of 5 runs (60%)
-          ...(i < 3 ? [{ step: 'sometimes-step', timestamp: `2026-03-0${i + 1}T10:00:00Z`, source: 'hook' as const }] : []),
+          ...(i < 3 ? [{ step: 'sometimes-step', timestamp: daysAgo(5 - i), source: 'hook' as const }] : []),
         ],
-        timestamp: `2026-03-0${i + 1}T10:00:00Z`,
+        timestamp: daysAgo(5 - i),
       }));
       writeRecords(stateDir, 'medium-add', records);
 
@@ -185,9 +193,9 @@ describe('PatternAnalyzer', () => {
         jobSlug: 'defined-test',
         definedSteps: ['my-step'],
         actualSteps: [
-          { step: 'my-step', timestamp: `2026-03-0${i + 1}T10:00:00Z`, source: 'hook' },
+          { step: 'my-step', timestamp: daysAgo(5 - i), source: 'hook' },
         ],
-        timestamp: `2026-03-0${i + 1}T10:00:00Z`,
+        timestamp: daysAgo(5 - i),
       }));
       writeRecords(stateDir, 'defined-test', records);
 
@@ -202,9 +210,9 @@ describe('PatternAnalyzer', () => {
         definedSteps: [],
         actualSteps: [
           // Appears in 2 of 5 runs (40%) — below 60% threshold
-          ...(i < 2 ? [{ step: 'rare-step', timestamp: `2026-03-0${i + 1}T10:00:00Z`, source: 'hook' as const }] : []),
+          ...(i < 2 ? [{ step: 'rare-step', timestamp: daysAgo(5 - i), source: 'hook' as const }] : []),
         ],
-        timestamp: `2026-03-0${i + 1}T10:00:00Z`,
+        timestamp: daysAgo(5 - i),
       }));
       writeRecords(stateDir, 'below-thresh', records);
 
@@ -222,11 +230,11 @@ describe('PatternAnalyzer', () => {
         jobSlug: 'omission-test',
         definedSteps: ['required-step', 'optional-step'],
         actualSteps: [
-          { step: 'required-step', timestamp: `2026-03-0${i + 1}T10:00:00Z`, source: 'hook' },
+          { step: 'required-step', timestamp: daysAgo(5 - i), source: 'hook' },
           // 'optional-step' only executed in 1 of 5 runs (80% omission)
-          ...(i === 0 ? [{ step: 'optional-step', timestamp: `2026-03-0${i + 1}T10:01:00Z`, source: 'hook' as const }] : []),
+          ...(i === 0 ? [{ step: 'optional-step', timestamp: daysAgo(5 - i), source: 'hook' as const }] : []),
         ],
-        timestamp: `2026-03-0${i + 1}T10:00:00Z`,
+        timestamp: daysAgo(5 - i),
       }));
       writeRecords(stateDir, 'omission-test', records);
 
@@ -245,9 +253,9 @@ describe('PatternAnalyzer', () => {
         definedSteps: ['sometimes-skip'],
         actualSteps: [
           // Executed in 3 of 5 runs (40% omission — below 50%)
-          ...(i < 3 ? [{ step: 'sometimes-skip', timestamp: `2026-03-0${i + 1}T10:00:00Z`, source: 'hook' as const }] : []),
+          ...(i < 3 ? [{ step: 'sometimes-skip', timestamp: daysAgo(5 - i), source: 'hook' as const }] : []),
         ],
-        timestamp: `2026-03-0${i + 1}T10:00:00Z`,
+        timestamp: daysAgo(5 - i),
       }));
       writeRecords(stateDir, 'no-omission', records);
 
@@ -262,9 +270,9 @@ describe('PatternAnalyzer', () => {
         definedSteps: ['check-mail'],
         actualSteps: [
           // Executed in 3 of 5 runs (40% omission)
-          ...(i < 3 ? [{ step: 'check-mail', timestamp: `2026-03-0${i + 1}T10:00:00Z`, source: 'hook' as const }] : []),
+          ...(i < 3 ? [{ step: 'check-mail', timestamp: daysAgo(5 - i), source: 'hook' as const }] : []),
         ],
-        timestamp: `2026-03-0${i + 1}T10:00:00Z`,
+        timestamp: daysAgo(5 - i),
       }));
       writeRecords(stateDir, 'custom-omit', records);
 
@@ -284,24 +292,24 @@ describe('PatternAnalyzer', () => {
         makeRecord({
           jobSlug: 'novel-test',
           actualSteps: [
-            { step: 'existing-step', timestamp: '2026-03-03T10:00:00Z', source: 'hook' },
-            { step: 'brand-new-step', timestamp: '2026-03-03T10:01:00Z', source: 'hook' },
+            { step: 'existing-step', timestamp: daysAgo(1), source: 'hook' },
+            { step: 'brand-new-step', timestamp: daysAgo(1), source: 'hook' },
           ],
-          timestamp: '2026-03-03T10:00:00Z',
+          timestamp: daysAgo(1),
         }),
         makeRecord({
           jobSlug: 'novel-test',
           actualSteps: [
-            { step: 'existing-step', timestamp: '2026-03-02T10:00:00Z', source: 'hook' },
+            { step: 'existing-step', timestamp: daysAgo(2), source: 'hook' },
           ],
-          timestamp: '2026-03-02T10:00:00Z',
+          timestamp: daysAgo(2),
         }),
         makeRecord({
           jobSlug: 'novel-test',
           actualSteps: [
-            { step: 'existing-step', timestamp: '2026-03-01T10:00:00Z', source: 'hook' },
+            { step: 'existing-step', timestamp: daysAgo(3), source: 'hook' },
           ],
-          timestamp: '2026-03-01T10:00:00Z',
+          timestamp: daysAgo(3),
         }),
       ];
       writeRecords(stateDir, 'novel-test', records);
@@ -318,16 +326,16 @@ describe('PatternAnalyzer', () => {
         makeRecord({
           jobSlug: 'not-novel',
           actualSteps: [
-            { step: 'seen-before', timestamp: '2026-03-03T10:00:00Z', source: 'hook' },
+            { step: 'seen-before', timestamp: daysAgo(1), source: 'hook' },
           ],
-          timestamp: '2026-03-03T10:00:00Z',
+          timestamp: daysAgo(1),
         }),
         makeRecord({
           jobSlug: 'not-novel',
           actualSteps: [
-            { step: 'seen-before', timestamp: '2026-03-02T10:00:00Z', source: 'hook' },
+            { step: 'seen-before', timestamp: daysAgo(2), source: 'hook' },
           ],
-          timestamp: '2026-03-02T10:00:00Z',
+          timestamp: daysAgo(2),
         }),
       ];
       writeRecords(stateDir, 'not-novel', records);
@@ -343,15 +351,15 @@ describe('PatternAnalyzer', () => {
           jobSlug: 'defined-novel',
           definedSteps: ['new-but-defined'],
           actualSteps: [
-            { step: 'new-but-defined', timestamp: '2026-03-03T10:00:00Z', source: 'hook' },
+            { step: 'new-but-defined', timestamp: daysAgo(1), source: 'hook' },
           ],
-          timestamp: '2026-03-03T10:00:00Z',
+          timestamp: daysAgo(1),
         }),
         makeRecord({
           jobSlug: 'defined-novel',
           definedSteps: ['new-but-defined'],
           actualSteps: [],
-          timestamp: '2026-03-02T10:00:00Z',
+          timestamp: daysAgo(2),
         }),
       ];
       writeRecords(stateDir, 'defined-novel', records);
@@ -370,7 +378,7 @@ describe('PatternAnalyzer', () => {
         jobSlug: 'drift-up',
         // First 3 runs: ~5min, Last 3 runs: ~15min (3x increase)
         durationMinutes: i < 3 ? 5 : 15,
-        timestamp: `2026-03-0${i + 1}T10:00:00Z`,
+        timestamp: daysAgo(6 - i),
       }));
       writeRecords(stateDir, 'drift-up', records);
 
@@ -387,7 +395,7 @@ describe('PatternAnalyzer', () => {
         jobSlug: 'drift-down',
         // First 3 runs: ~20min, Last 3 runs: ~5min (4x decrease)
         durationMinutes: i < 3 ? 20 : 5,
-        timestamp: `2026-03-0${i + 1}T10:00:00Z`,
+        timestamp: daysAgo(6 - i),
       }));
       writeRecords(stateDir, 'drift-down', records);
 
@@ -402,7 +410,7 @@ describe('PatternAnalyzer', () => {
       const records = Array.from({ length: 6 }, (_, i) => makeRecord({
         jobSlug: 'stable-dur',
         durationMinutes: 10 + (i % 2), // Fluctuates between 10 and 11
-        timestamp: `2026-03-0${i + 1}T10:00:00Z`,
+        timestamp: daysAgo(6 - i),
       }));
       writeRecords(stateDir, 'stable-dur', records);
 
@@ -414,8 +422,8 @@ describe('PatternAnalyzer', () => {
 
     it('returns insufficient-data for too few duration records', () => {
       const records = [
-        makeRecord({ jobSlug: 'few-dur', durationMinutes: 5, timestamp: '2026-03-01T10:00:00Z' }),
-        makeRecord({ jobSlug: 'few-dur', durationMinutes: 10, timestamp: '2026-03-02T10:00:00Z' }),
+        makeRecord({ jobSlug: 'few-dur', durationMinutes: 5, timestamp: daysAgo(2) }),
+        makeRecord({ jobSlug: 'few-dur', durationMinutes: 10, timestamp: daysAgo(1) }),
       ];
       writeRecords(stateDir, 'few-dur', records);
 
@@ -432,9 +440,9 @@ describe('PatternAnalyzer', () => {
         jobSlug: 'gate-test',
         // 4 of 5 runs have zero actual steps
         actualSteps: i === 0
-          ? [{ step: 'do-thing', timestamp: `2026-03-01T10:00:00Z`, source: 'hook' as const }]
+          ? [{ step: 'do-thing', timestamp: daysAgo(5 - i), source: 'hook' as const }]
           : [],
-        timestamp: `2026-03-0${i + 1}T10:00:00Z`,
+        timestamp: daysAgo(5 - i),
       }));
       writeRecords(stateDir, 'gate-test', records);
 
@@ -451,9 +459,9 @@ describe('PatternAnalyzer', () => {
         jobSlug: 'good-gate',
         // 4 of 5 runs have steps
         actualSteps: i < 4
-          ? [{ step: 'work', timestamp: `2026-03-0${i + 1}T10:00:00Z`, source: 'hook' as const }]
+          ? [{ step: 'work', timestamp: daysAgo(5 - i), source: 'hook' as const }]
           : [],
-        timestamp: `2026-03-0${i + 1}T10:00:00Z`,
+        timestamp: daysAgo(5 - i),
       }));
       writeRecords(stateDir, 'good-gate', records);
 
@@ -472,23 +480,23 @@ describe('PatternAnalyzer', () => {
           jobSlug: 'summary-job',
           definedSteps: ['step-a', 'step-b'],
           actualSteps: [
-            { step: 'step-a', timestamp: '2026-03-01T10:00:00Z', source: 'hook' },
-            { step: 'step-c', timestamp: '2026-03-01T10:01:00Z', source: 'hook' },
+            { step: 'step-a', timestamp: daysAgo(2), source: 'hook' },
+            { step: 'step-c', timestamp: daysAgo(2), source: 'hook' },
           ],
           outcome: 'success',
           durationMinutes: 10,
-          timestamp: '2026-03-01T10:00:00Z',
+          timestamp: daysAgo(2),
         }),
         makeRecord({
           jobSlug: 'summary-job',
           definedSteps: ['step-a', 'step-b'],
           actualSteps: [
-            { step: 'step-a', timestamp: '2026-03-02T10:00:00Z', source: 'hook' },
-            { step: 'step-b', timestamp: '2026-03-02T10:01:00Z', source: 'hook' },
+            { step: 'step-a', timestamp: daysAgo(1), source: 'hook' },
+            { step: 'step-b', timestamp: daysAgo(1), source: 'hook' },
           ],
           outcome: 'failure',
           durationMinutes: 20,
-          timestamp: '2026-03-02T10:00:00Z',
+          timestamp: daysAgo(1),
         }),
       ];
       writeRecords(stateDir, 'summary-job', records);
@@ -502,8 +510,8 @@ describe('PatternAnalyzer', () => {
 
     it('handles runs with no duration data', () => {
       const records = [
-        makeRecord({ jobSlug: 'no-dur', timestamp: '2026-03-01T10:00:00Z' }),
-        makeRecord({ jobSlug: 'no-dur', timestamp: '2026-03-02T10:00:00Z' }),
+        makeRecord({ jobSlug: 'no-dur', timestamp: daysAgo(2) }),
+        makeRecord({ jobSlug: 'no-dur', timestamp: daysAgo(1) }),
       ];
       writeRecords(stateDir, 'no-dur', records);
 
@@ -520,10 +528,10 @@ describe('PatternAnalyzer', () => {
         jobSlug: 'proposal-test',
         definedSteps: ['existing'],
         actualSteps: [
-          { step: 'existing', timestamp: `2026-03-0${i + 1}T10:00:00Z`, source: 'hook' },
-          { step: 'always-added', timestamp: `2026-03-0${i + 1}T10:01:00Z`, source: 'hook' },
+          { step: 'existing', timestamp: daysAgo(5 - i), source: 'hook' },
+          { step: 'always-added', timestamp: daysAgo(5 - i), source: 'hook' },
         ],
-        timestamp: `2026-03-0${i + 1}T10:00:00Z`,
+        timestamp: daysAgo(5 - i),
       }));
       writeRecords(stateDir, 'proposal-test', records);
 
@@ -544,7 +552,7 @@ describe('PatternAnalyzer', () => {
         jobSlug: 'omit-proposal',
         definedSteps: ['never-done'],
         actualSteps: [], // Never executed
-        timestamp: `2026-03-0${i + 1}T10:00:00Z`,
+        timestamp: daysAgo(5 - i),
       }));
       writeRecords(stateDir, 'omit-proposal', records);
 
@@ -560,18 +568,18 @@ describe('PatternAnalyzer', () => {
       const records = [
         makeRecord({
           jobSlug: 'novel-no-proposal',
-          actualSteps: [{ step: 'brand-new', timestamp: '2026-03-03T10:00:00Z', source: 'hook' }],
-          timestamp: '2026-03-03T10:00:00Z',
+          actualSteps: [{ step: 'brand-new', timestamp: daysAgo(1), source: 'hook' }],
+          timestamp: daysAgo(1),
         }),
         makeRecord({
           jobSlug: 'novel-no-proposal',
           actualSteps: [],
-          timestamp: '2026-03-02T10:00:00Z',
+          timestamp: daysAgo(2),
         }),
         makeRecord({
           jobSlug: 'novel-no-proposal',
           actualSteps: [],
-          timestamp: '2026-03-01T10:00:00Z',
+          timestamp: daysAgo(3),
         }),
       ];
       writeRecords(stateDir, 'novel-no-proposal', records);
@@ -586,7 +594,7 @@ describe('PatternAnalyzer', () => {
       const records = Array.from({ length: 6 }, (_, i) => makeRecord({
         jobSlug: 'drift-proposal',
         durationMinutes: i < 3 ? 5 : 15,
-        timestamp: `2026-03-0${i + 1}T10:00:00Z`,
+        timestamp: daysAgo(6 - i),
       }));
       writeRecords(stateDir, 'drift-proposal', records);
 
@@ -605,13 +613,13 @@ describe('PatternAnalyzer', () => {
     it('analyzes all jobs for an agent', () => {
       writeRecords(stateDir, 'job-a', Array.from({ length: 3 }, (_, i) => makeRecord({
         jobSlug: 'job-a',
-        actualSteps: [{ step: 'do-a', timestamp: `2026-03-0${i + 1}T10:00:00Z`, source: 'hook' }],
-        timestamp: `2026-03-0${i + 1}T10:00:00Z`,
+        actualSteps: [{ step: 'do-a', timestamp: daysAgo(3 - i), source: 'hook' }],
+        timestamp: daysAgo(3 - i),
       })));
       writeRecords(stateDir, 'job-b', Array.from({ length: 3 }, (_, i) => makeRecord({
         jobSlug: 'job-b',
-        actualSteps: [{ step: 'do-b', timestamp: `2026-03-0${i + 1}T10:00:00Z`, source: 'hook' }],
-        timestamp: `2026-03-0${i + 1}T10:00:00Z`,
+        actualSteps: [{ step: 'do-b', timestamp: daysAgo(3 - i), source: 'hook' }],
+        timestamp: daysAgo(3 - i),
       })));
 
       const reports = analyzer.analyzeAll();
@@ -629,13 +637,13 @@ describe('PatternAnalyzer', () => {
         definedSteps: ['always-skipped'],
         actualSteps: [
           // 100% addition (high confidence)
-          { step: 'always-added', timestamp: `2026-03-0${i + 1}T10:00:00Z`, source: 'hook' },
+          { step: 'always-added', timestamp: daysAgo(5 - i), source: 'hook' },
           // 60% addition (medium confidence)
-          ...(i < 3 ? [{ step: 'sometimes-added', timestamp: `2026-03-0${i + 1}T10:01:00Z`, source: 'hook' as const }] : []),
+          ...(i < 3 ? [{ step: 'sometimes-added', timestamp: daysAgo(5 - i), source: 'hook' as const }] : []),
           // Novel in latest run (low confidence) — only in run 0 (newest)
-          ...(i === 0 ? [{ step: 'novel-step', timestamp: `2026-03-0${i + 1}T10:02:00Z`, source: 'hook' as const }] : []),
+          ...(i === 0 ? [{ step: 'novel-step', timestamp: daysAgo(5 - i), source: 'hook' as const }] : []),
         ],
-        timestamp: `2026-03-0${i + 1}T10:00:00Z`,
+        timestamp: daysAgo(5 - i),
       }));
       writeRecords(stateDir, 'sort-test', records);
 
@@ -660,7 +668,7 @@ describe('PatternAnalyzer', () => {
     it('includes correct metadata in report', () => {
       writeRecords(stateDir, 'meta-test', [makeRecord({
         jobSlug: 'meta-test',
-        timestamp: '2026-03-01T10:00:00Z',
+        timestamp: daysAgo(1),
       })]);
 
       const report = analyzer.analyze('meta-test', { days: 14, agentId: 'my-agent' });

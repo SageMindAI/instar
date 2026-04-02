@@ -228,6 +228,16 @@ async function initFreshProject(projectName: string, options: InitOptions): Prom
       quotaTracking: false,
       memoryMonitoring: true,
       healthCheckIntervalMs: 30000,
+      promptGate: {
+        enabled: true,
+        autoApprove: {
+          enabled: true,
+          fileCreation: true,
+          fileEdits: true,
+          planApproval: false,
+        },
+        dryRun: false,
+      },
     },
     authToken,
     relationships: {
@@ -876,6 +886,16 @@ async function initStandaloneAgent(agentName: string, options: InitOptions): Pro
       quotaTracking: true,
       memoryMonitoring: true,
       healthCheckIntervalMs: 30000,
+      promptGate: {
+        enabled: true,
+        autoApprove: {
+          enabled: true,
+          fileCreation: true,
+          fileEdits: true,
+          planApproval: false,
+        },
+        dryRun: false,
+      },
     },
     authToken,
     externalOperations: {

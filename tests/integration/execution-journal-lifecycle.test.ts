@@ -13,6 +13,11 @@ import os from 'node:os';
 import { ExecutionJournal } from '../../src/core/ExecutionJournal.js';
 import { PatternAnalyzer } from '../../src/core/PatternAnalyzer.js';
 
+// Generate timestamps relative to now to stay within the 30-day analysis window.
+function daysAgo(n: number): string {
+  return new Date(Date.now() - n * 24 * 60 * 60 * 1000).toISOString();
+}
+
 describe('ExecutionJournal Lifecycle', () => {
   let tmpDir: string;
   let stateDir: string;
@@ -36,7 +41,7 @@ describe('ExecutionJournal Lifecycle', () => {
     journal.appendPendingStep({
       sessionId,
       jobSlug,
-      timestamp: '2026-03-04T18:00:00Z',
+      timestamp: daysAgo(2),
       command: 'curl http://localhost:3000/health',
       source: 'hook',
       stepLabel: 'check-api',
@@ -44,7 +49,7 @@ describe('ExecutionJournal Lifecycle', () => {
     journal.appendPendingStep({
       sessionId,
       jobSlug,
-      timestamp: '2026-03-04T18:00:03Z',
+      timestamp: daysAgo(2),
       command: 'redis-cli ping',
       source: 'hook',
       stepLabel: 'check-redis',
@@ -52,7 +57,7 @@ describe('ExecutionJournal Lifecycle', () => {
     journal.appendPendingStep({
       sessionId,
       jobSlug,
-      timestamp: '2026-03-04T18:00:05Z',
+      timestamp: daysAgo(2),
       command: 'psql -c "SELECT 1"',
       source: 'hook',
       stepLabel: 'check-db',
@@ -64,7 +69,7 @@ describe('ExecutionJournal Lifecycle', () => {
       jobSlug,
       definedSteps: ['check-api', 'check-db', 'report'],
       outcome: 'success',
-      startedAt: '2026-03-04T18:00:00Z',
+      startedAt: daysAgo(2),
     });
 
     expect(record).not.toBeNull();
@@ -156,7 +161,7 @@ describe('ExecutionJournal Lifecycle', () => {
     journal.appendPendingStep({
       sessionId: 'agent1-sess',
       jobSlug,
-      timestamp: '2026-03-04T18:00:00Z',
+      timestamp: daysAgo(2),
       command: 'curl http://app1/health',
       source: 'hook',
       stepLabel: 'check',
@@ -166,14 +171,14 @@ describe('ExecutionJournal Lifecycle', () => {
       jobSlug,
       agentId: 'agent-alpha',
       outcome: 'success',
-      startedAt: '2026-03-04T18:00:00Z',
+      startedAt: daysAgo(2),
     });
 
     // Agent 2 runs the same job
     journal.appendPendingStep({
       sessionId: 'agent2-sess',
       jobSlug,
-      timestamp: '2026-03-04T18:05:00Z',
+      timestamp: daysAgo(1),
       command: 'curl http://app2/health',
       source: 'hook',
       stepLabel: 'check',
@@ -183,7 +188,7 @@ describe('ExecutionJournal Lifecycle', () => {
       jobSlug,
       agentId: 'agent-beta',
       outcome: 'failure',
-      startedAt: '2026-03-04T18:05:00Z',
+      startedAt: daysAgo(1),
     });
 
     // Each agent sees only their own records
@@ -206,7 +211,7 @@ describe('ExecutionJournal Lifecycle', () => {
     journal.appendPendingStep({
       sessionId: 'sess-secret',
       jobSlug: 'deploy',
-      timestamp: '2026-03-04T18:00:00Z',
+      timestamp: daysAgo(2),
       command: 'curl -H "Authorization: Bearer sk-ant-api03-mysecretkey123456" http://api.anthropic.com/v1/messages',
       source: 'hook',
     });
@@ -215,7 +220,7 @@ describe('ExecutionJournal Lifecycle', () => {
       sessionId: 'sess-secret',
       jobSlug: 'deploy',
       outcome: 'success',
-      startedAt: '2026-03-04T18:00:00Z',
+      startedAt: daysAgo(2),
     });
 
     // Read back and verify secret is not present anywhere
@@ -241,7 +246,7 @@ describe('ExecutionJournal Lifecycle', () => {
       journal.appendPendingStep({
         sessionId,
         jobSlug,
-        timestamp: `2026-03-0${i + 1}T10:00:00Z`,
+        timestamp: daysAgo(5 - i),
         command: 'curl http://localhost:3000/health',
         source: 'hook',
         stepLabel: 'check-health',
@@ -252,7 +257,7 @@ describe('ExecutionJournal Lifecycle', () => {
         journal.appendPendingStep({
           sessionId,
           jobSlug,
-          timestamp: `2026-03-0${i + 1}T10:01:00Z`,
+          timestamp: daysAgo(5 - i),
           command: 'node generate-report.js',
           source: 'hook',
           stepLabel: 'run-report',
@@ -264,7 +269,7 @@ describe('ExecutionJournal Lifecycle', () => {
         journal.appendPendingStep({
           sessionId,
           jobSlug,
-          timestamp: `2026-03-0${i + 1}T10:02:00Z`,
+          timestamp: daysAgo(5 - i),
           command: 'find /var/log -mtime +7 -delete',
           source: 'hook',
           stepLabel: 'cleanup-logs',
@@ -276,8 +281,8 @@ describe('ExecutionJournal Lifecycle', () => {
         jobSlug,
         definedSteps,
         outcome: 'success',
-        startedAt: `2026-03-0${i + 1}T10:00:00Z`,
-        completedAt: `2026-03-0${i + 1}T10:${10 + i}:00Z`,
+        startedAt: daysAgo(5 - i),
+        completedAt: daysAgo(5 - i),
       });
     }
 

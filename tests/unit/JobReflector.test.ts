@@ -33,6 +33,11 @@ function makeRecord(overrides: Partial<ExecutionRecord> = {}): ExecutionRecord {
   };
 }
 
+// Generate timestamps relative to now to stay within the 30-day analysis window.
+function daysAgo(n: number): string {
+  return new Date(Date.now() - n * 24 * 60 * 60 * 1000).toISOString();
+}
+
 function writeRecords(stateDir: string, jobSlug: string, records: ExecutionRecord[], agentId = 'default'): void {
   const dir = path.join(stateDir, 'state', 'execution-journal', agentId);
   fs.mkdirSync(dir, { recursive: true });
@@ -116,12 +121,12 @@ describe('JobReflector', () => {
           sessionId: 'sess-001',
           definedSteps: ['check-api', 'check-db'],
           actualSteps: [
-            { step: 'check-api', timestamp: '2026-03-04T10:00:00Z', source: 'hook', command: 'curl http://localhost/health' },
-            { step: 'check-db', timestamp: '2026-03-04T10:01:00Z', source: 'hook', command: 'psql -c "SELECT 1"' },
+            { step: 'check-api', timestamp: daysAgo(1), source: 'hook', command: 'curl http://localhost/health' },
+            { step: 'check-db', timestamp: daysAgo(1), source: 'hook', command: 'psql -c "SELECT 1"' },
           ],
           outcome: 'success',
           durationMinutes: 5,
-          timestamp: '2026-03-04T10:00:00Z',
+          timestamp: daysAgo(1),
         }),
       ]);
 
@@ -232,13 +237,13 @@ describe('JobReflector', () => {
           jobSlug: 'targeted',
           sessionId: 'sess-newer',
           outcome: 'failure',
-          timestamp: '2026-03-04T12:00:00Z',
+          timestamp: daysAgo(1),
         }),
         makeRecord({
           jobSlug: 'targeted',
           sessionId: 'sess-older',
           outcome: 'success',
-          timestamp: '2026-03-04T10:00:00Z',
+          timestamp: daysAgo(2),
         }),
       ]);
 
@@ -286,7 +291,7 @@ describe('JobReflector', () => {
           jobSlug: 'dev-job',
           definedSteps: ['step-a'],
           actualSteps: [
-            { step: 'step-b', timestamp: '2026-03-04T10:00:00Z', source: 'hook' },
+            { step: 'step-b', timestamp: daysAgo(1), source: 'hook' },
           ],
           deviations: [
             { type: 'addition', step: 'step-b' },
@@ -310,7 +315,7 @@ describe('JobReflector', () => {
         jobSlug: 'history-job',
         outcome: i < 3 ? 'success' : 'failure',
         durationMinutes: 10 + i,
-        timestamp: `2026-03-0${i + 1}T10:00:00Z`,
+        timestamp: daysAgo(5 - i),
       })));
 
       await reflector.reflect('history-job');

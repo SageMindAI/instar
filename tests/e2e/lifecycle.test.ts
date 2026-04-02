@@ -250,6 +250,25 @@ describeMaybe('E2E: Instar lifecycle', () => {
   // ── Phase 6: Job trigger via API ─────────────────────────
 
   it('triggers a job via API and verifies event log', async () => {
+    // Pause the scheduler so cron-spawned sessions don't fill all job slots
+    scheduler.pause();
+
+    // Wait for any running job sessions to complete (mock-claude sleeps 2s)
+    await waitFor(
+      () => {
+        const running = sessionManager.listRunningSessions().filter(s => s.jobSlug);
+        return running.length === 0;
+      },
+      5000,
+      'running job sessions to drain',
+    );
+
+    // Clear any queued jobs that accumulated while paused, then resume.
+    // Without clearing, resume() calls processQueue() which may immediately
+    // fill job slots before our trigger call (race condition).
+    scheduler.clearQueue();
+    scheduler.resume();
+
     const triggerRes = await request(app)
       .post('/jobs/e2e-health/trigger')
       .set('Authorization', `Bearer ${AUTH_TOKEN}`)
