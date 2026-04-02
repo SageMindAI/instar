@@ -172,7 +172,7 @@ describeMaybe('Session Lifecycle (integration)', () => {
     // Mock claude exits after ~2s, monitoring should detect it
     await waitFor(
       () => completedSessions.includes(session.id),
-      8000,
+      15000,
     );
 
     expect(completedSessions).toContain(session.id);

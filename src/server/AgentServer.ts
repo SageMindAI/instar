@@ -105,6 +105,7 @@ export class AgentServer {
     localSigningKeyPem?: string;
     whatsapp?: import('../messaging/WhatsAppAdapter.js').WhatsAppAdapter;
     slack?: import('../messaging/slack/SlackAdapter.js').SlackAdapter;
+    imessage?: import('../messaging/imessage/IMessageAdapter.js').IMessageAdapter;
     whatsappBusinessBackend?: import('../messaging/backends/BusinessApiBackend.js').BusinessApiBackend;
     messageBridge?: import('../messaging/shared/MessageBridge.js').MessageBridge;
     hookEventReceiver?: import('../monitoring/HookEventReceiver.js').HookEventReceiver;
@@ -293,6 +294,7 @@ export class AgentServer {
       autonomousEvolution: options.autonomousEvolution ?? null,
       whatsapp: options.whatsapp ?? null,
       slack: options.slack ?? null,
+      imessage: options.imessage ?? null,
       messageBridge: options.messageBridge ?? null,
       hookEventReceiver: options.hookEventReceiver ?? null,
       worktreeMonitor: options.worktreeMonitor ?? null,

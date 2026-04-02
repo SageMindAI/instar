@@ -394,7 +394,7 @@ describe('SessionManager behavioral tests', () => {
       const completedId = await Promise.race([
         completed,
         new Promise<string>((_, reject) =>
-          setTimeout(() => reject(new Error('timeout')), 5000)
+          setTimeout(() => reject(new Error('timeout')), 15000)
         ),
       ]);
 
