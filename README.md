@@ -202,11 +202,6 @@ The AI systems we build today set precedents for how AI is treated tomorrow. **T
 
 iMessage support lets your agent send and receive iMessages on macOS. Messages are read directly from the native Messages database and sent via the [`imsg`](https://github.com/steipete/imsg) CLI.
 
-> **Note:** This feature is available on the `feat/imessage-adapter` branch and not yet in the published npm package. Install from this fork to try it:
-> ```bash
-> npm install github:rolandcanyon-cmd/instar#feat/imessage-adapter
-> ```
-
 ### Prerequisites
 
 1. **macOS** with Messages.app signed into an Apple ID
@@ -249,10 +244,12 @@ Add to your `.instar/config.json`:
 | Endpoint | Description |
 |----------|-------------|
 | `GET /imessage/status` | Connection state |
-| `POST /imessage/reply/:recipient` | Log outbound message (called by reply script) |
+| `POST /imessage/validate-send/:recipient` | Validate recipient + issue single-use send token (outbound safety layer) |
+| `POST /imessage/reply/:recipient` | Confirm delivery with send token (called by imessage-reply.sh after `imsg send`) |
 | `GET /imessage/chats` | List recent conversations |
 | `GET /imessage/chats/:chatId/history` | Message history for a chat |
 | `GET /imessage/search?q=query` | Search messages |
+| `GET /imessage/log-stats` | Outbound audit log statistics |
 
 ## Origin
 
