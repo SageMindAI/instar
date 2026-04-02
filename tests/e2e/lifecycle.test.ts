@@ -347,14 +347,14 @@ describeMaybe('E2E: Instar lifecycle', () => {
 
   // ── Phase 9: Session lifecycle (spawn → complete) ────────
 
-  it('detects session completion and updates state', async () => {
+  it('detects session completion and updates state', { timeout: 45000 }, async () => {
     // Pause the scheduler so cron jobs don't fill session slots
     scheduler.pause();
 
     // Wait for existing job sessions to complete (mock claude exits after ~2s)
     await waitFor(
       () => sessionManager.listRunningSessions().length < 3,
-      8000,
+      20000,
     );
 
     const session = await sessionManager.spawnSession({
@@ -362,13 +362,14 @@ describeMaybe('E2E: Instar lifecycle', () => {
       prompt: 'echo done',
     });
 
-    // Mock claude sleeps 2s then exits — wait for completion
+    // Mock claude sleeps 2s then exits — monitoring has a 15s grace period
+    // before checking new sessions, so we need >15s + margin here
     await waitFor(
       () => {
         const saved = state.getSession(session.id);
         return saved?.status === 'completed';
       },
-      8000,
+      25000,
     );
 
     const saved = state.getSession(session.id);
