@@ -17,7 +17,7 @@
 |---|---------|-------------|----------|-------|----------|
 | 1.1.1 | Text messages | Plain text from user | Yes | Yes | - |
 | 1.1.2 | Photo/image messages | User sends photo, downloaded to disk, passed as `[image:path]` | Yes | Yes | - |
-| 1.1.3 | Document/file messages | User sends file, downloaded with original filename, passed as `[document:path]` | Yes | Yes (via file_share subtype) | - |
+| 1.1.3 | Document/file messages | User sends file, downloaded with original filename, passed as `[document:path]` | Yes | Yes (v0.26.0: standalone file_shared events + message-embedded files; fetches metadata via files.info API) | - |
 | 1.1.4 | Voice messages | User sends voice memo, transcribed via Whisper (Groq/OpenAI), passed as `[voice] transcript` | Yes | Yes (v0.25.0: transcribeVoice callback; Groq/OpenAI) | - |
 | 1.1.5 | Sticker messages | Silently ignored | N/A | N/A | - |
 | 1.1.6 | Callback queries | Inline keyboard button presses (Prompt Gate responses) | Yes | Yes (Block Kit actions) | - |
@@ -369,3 +369,5 @@
 | 2.2 | 2026-03-30 | v0.25.3: StallTriageNurse (6.4), TriageOrchestrator (6.5), SessionRecovery, SessionMonitor all platform-agnostic — now cover Slack sessions |
 | 2.3 | 2026-03-30 | v0.25.4: Closed 4 stall detection gaps — LLM-gated stall alerts (6.2), promise tracking (6.3), !triage command (6.8, 7.10), session death classification (6.9) |
 | 1.1 | 2026-03-29 | v0.24.29: stuck session recovery (kill & respawn); Slack context file format changed from JSON to human-readable thread history; ring buffer now stores bot messages and backfills from Slack API on startup |
+| 2.4 | 2026-04-01 | v0.25.10: reliability hardening (no parity row changes) — stuck rebase auto-recovery in GitSync + ServerSupervisor, AgentRegistry sync lock retries, wider slow-retry window (10s→60s), shell detection fix |
+| 2.5 | 2026-04-01 | v0.26.0: standalone file_shared events now fully handled (1.1.3) — downloads file, validates type, routes as image/voice/document. Unified ConfigDefaults system (backend, no parity impact) |

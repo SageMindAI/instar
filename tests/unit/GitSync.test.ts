@@ -521,6 +521,97 @@ describe('GitSyncManager', () => {
     });
   });
 
+  // ── sync() pre-flight rebase/detached HEAD recovery ─────────────
+
+  describe('sync pre-flight recovery', () => {
+    it('aborts stuck rebase before pulling', async () => {
+      fs.mkdirSync(path.join(tmpDir, '.git'), { recursive: true });
+      const config = createConfig({ autoPush: false });
+      const manager = new GitSyncManager(config);
+
+      vi.mocked(execFileSync).mockImplementation((_cmd, args) => {
+        const a = args as string[];
+        // Pre-flight: git status returns stuck rebase
+        if (a[0] === 'status' && a.length === 1) return 'interactive rebase in progress; onto abc123\n';
+        // Pre-flight: git rebase --abort succeeds
+        if (a[0] === 'rebase' && a[1] === '--abort') return '';
+        // Pre-flight: git symbolic-ref --short HEAD succeeds (on branch after abort)
+        if (a[0] === 'symbolic-ref') return 'main';
+        // Sync: git rev-parse HEAD
+        if (a[0] === 'rev-parse') return 'abc123';
+        // Sync: git pull
+        if (a[0] === 'pull') return '';
+        // Sync: git status --porcelain
+        if (a[0] === 'status' && a.includes('--porcelain')) return '';
+        return '';
+      });
+
+      await manager.sync();
+
+      // Verify rebase --abort was called
+      const abortCalls = vi.mocked(execFileSync).mock.calls.filter(
+        (call) => call[0] === 'git' && (call[1] as string[])[0] === 'rebase' && (call[1] as string[])[1] === '--abort'
+      );
+      expect(abortCalls.length).toBe(1);
+    });
+
+    it('recovers from detached HEAD by checking out main', async () => {
+      fs.mkdirSync(path.join(tmpDir, '.git'), { recursive: true });
+      const config = createConfig({ autoPush: false });
+      const manager = new GitSyncManager(config);
+
+      vi.mocked(execFileSync).mockImplementation((_cmd, args) => {
+        const a = args as string[];
+        // Pre-flight: git status is clean (no rebase)
+        if (a[0] === 'status' && a.length === 1) return 'On branch main\n';
+        // Pre-flight: git symbolic-ref fails (detached HEAD)
+        if (a[0] === 'symbolic-ref') throw new Error('fatal: ref HEAD is not a symbolic ref');
+        // Pre-flight: git checkout main succeeds
+        if (a[0] === 'checkout' && a[1] === 'main') return '';
+        // Sync: git rev-parse HEAD
+        if (a[0] === 'rev-parse') return 'abc123';
+        // Sync: git pull
+        if (a[0] === 'pull') return '';
+        // Sync: git status --porcelain
+        if (a[0] === 'status' && a.includes('--porcelain')) return '';
+        return '';
+      });
+
+      await manager.sync();
+
+      // Verify checkout main was called
+      const checkoutCalls = vi.mocked(execFileSync).mock.calls.filter(
+        (call) => call[0] === 'git' && (call[1] as string[])[0] === 'checkout' && (call[1] as string[])[1] === 'main'
+      );
+      expect(checkoutCalls.length).toBe(1);
+    });
+
+    it('returns early with no pull when detached HEAD recovery fails', async () => {
+      fs.mkdirSync(path.join(tmpDir, '.git'), { recursive: true });
+      const config = createConfig({ autoPush: false });
+      const manager = new GitSyncManager(config);
+
+      vi.mocked(execFileSync).mockImplementation((_cmd, args) => {
+        const a = args as string[];
+        if (a[0] === 'status' && a.length === 1) return 'On branch main\n';
+        if (a[0] === 'symbolic-ref') throw new Error('fatal: ref HEAD is not a symbolic ref');
+        if (a[0] === 'checkout') throw new Error('error: pathspec not found');
+        return '';
+      });
+
+      const result = await manager.sync();
+
+      // Should return early with no pull — the preflight gave up
+      expect(result.pulled).toBe(false);
+      expect(result.pushed).toBe(false);
+      // Should NOT have attempted git pull (early return)
+      const pullCalls = vi.mocked(execFileSync).mock.calls.filter(
+        (call) => call[0] === 'git' && (call[1] as string[])[0] === 'pull'
+      );
+      expect(pullCalls.length).toBe(0);
+    });
+  });
+
   // ── sync() no-op for non-git repos ──────────────────────────────
 
   describe('sync for non-git repos', () => {

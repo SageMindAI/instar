@@ -227,12 +227,13 @@ export class SessionMonitor extends EventEmitter {
       return;
     }
 
-    // Only notify if the user has sent a message that's gone unanswered,
-    // or if the session was recently active (user expects a response)
+    // Only act if the user has sent a message that's gone unanswered.
+    // A session sitting idle after the agent responded is NORMAL — the user
+    // just hasn't sent a new message yet. "Recently active" is not a reason
+    // to escalate; only an unanswered user message is.
     const userExpectsResponse = snap.lastUserMessageAt > snap.lastAgentMessageAt;
-    const recentlyActive = now - snap.lastAgentMessageAt < 30 * 60 * 1000; // Agent was active within 30 min
 
-    if (!userExpectsResponse && !recentlyActive) return; // Session idle but no user waiting — don't bother
+    if (!userExpectsResponse) return; // Session idle but no unanswered message — normal state
 
     // Try mechanical recovery first (fast, no LLM) before escalating to triage
     if (this.deps.sessionRecovery && (snap.status === 'dead' || snap.status === 'unresponsive')) {
