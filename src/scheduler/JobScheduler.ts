@@ -677,7 +677,7 @@ export class JobScheduler {
    * The convention: [ATTENTION] on its own line (case-insensitive).
    */
   private hasAttentionSignal(output: string): boolean {
-    return /^\[ATTENTION\]/im.test(output);
+    return /\[ATTENTION\]/im.test(output);
   }
 
   /**

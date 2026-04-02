@@ -396,7 +396,42 @@ export class ServerSupervisor extends EventEmitter {
       console.error(`[Supervisor] Preflight: git state check failed: ${err}`);
     }
 
-    // 4. Stale lifeline lock — can prevent the lifeline from restarting properly.
+    // 4. Native module mismatch — better-sqlite3 compiled for wrong Node version.
+    //    This is the #1 cause of server crash-loops after a Node upgrade.
+    if (this.stateDir) {
+      const sqliteNode = path.join(this.stateDir, 'shadow-install', 'node_modules', 'better-sqlite3', 'build', 'Release', 'better_sqlite3.node');
+      if (fs.existsSync(sqliteNode)) {
+        try {
+          // Try loading the native module with the current Node — if it fails, rebuild
+          const result = spawnSync(process.execPath, ['-e', `require('${sqliteNode.replace(/'/g, "\\'")}')`], {
+            encoding: 'utf-8',
+            timeout: 10_000,
+            cwd: this.projectDir,
+          });
+          if (result.status !== 0 && result.stderr?.includes('NODE_MODULE_VERSION')) {
+            console.log('[Supervisor] Preflight: better-sqlite3 native module version mismatch — rebuilding');
+            const npmPath = this.findNpmPath();
+            if (npmPath) {
+              const rebuildResult = spawnSync(npmPath, ['rebuild', 'better-sqlite3', '--prefix', path.join(this.stateDir, 'shadow-install')], {
+                encoding: 'utf-8',
+                timeout: 60_000,
+                cwd: this.projectDir,
+              });
+              if (rebuildResult.status === 0) {
+                healed.push('better-sqlite3 rebuilt for current Node');
+                console.log('[Supervisor] Preflight: better-sqlite3 rebuilt successfully');
+              } else {
+                console.error(`[Supervisor] Preflight: better-sqlite3 rebuild failed: ${(rebuildResult.stderr || '').slice(-200)}`);
+              }
+            }
+          }
+        } catch (err) {
+          console.error(`[Supervisor] Preflight: native module check failed: ${err}`);
+        }
+      }
+    }
+
+    // 5. Stale lifeline lock — can prevent the lifeline from restarting properly.
     const lockFile = path.join(this.stateDir, 'state', 'lifeline.lock');
     try {
       if (fs.existsSync(lockFile)) {

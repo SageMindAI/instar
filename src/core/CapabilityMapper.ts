@@ -17,6 +17,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import * as crypto from 'crypto';
+import { fileURLToPath } from 'node:url';
 import { ManifestIntegrity } from '../security/ManifestIntegrity.js';
 import type { LLMSanitizer } from '../security/LLMSanitizer.js';
 
@@ -1020,6 +1021,7 @@ export class CapabilityMapper {
   private loadBuiltinManifest(): Record<string, BuiltinManifestEntry> {
     try {
       // Try loading from the installed package first
+      const __dirname = path.dirname(fileURLToPath(import.meta.url));
       const manifestPath = path.join(__dirname, '..', 'data', 'builtin-manifest.json');
       if (fs.existsSync(manifestPath)) {
         const data = JSON.parse(fs.readFileSync(manifestPath, 'utf-8'));

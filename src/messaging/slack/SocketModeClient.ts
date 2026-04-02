@@ -11,6 +11,13 @@
 import { SlackApiClient, SlackApiError } from './SlackApiClient.js';
 import type { SocketModeEnvelope, SocketModeConnectionInfo } from './types.js';
 
+// Polyfill WebSocket for Node <22 (global added in Node 22)
+if (typeof globalThis.WebSocket === 'undefined') {
+  const ws = await import('ws');
+  // @ts-expect-error ws package is API-compatible but has different TS types
+  globalThis.WebSocket = ws.default;
+}
+
 export interface SocketModeHandlers {
   onEvent: (type: string, payload: Record<string, unknown>) => Promise<void>;
   onInteraction: (payload: Record<string, unknown>) => Promise<void>;

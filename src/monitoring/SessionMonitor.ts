@@ -235,8 +235,11 @@ export class SessionMonitor extends EventEmitter {
 
     if (!userExpectsResponse) return; // Session idle but no unanswered message — normal state
 
-    // Try mechanical recovery first (fast, no LLM) before escalating to triage
-    if (this.deps.sessionRecovery && (snap.status === 'dead' || snap.status === 'unresponsive')) {
+    // Try mechanical recovery first (fast, no LLM) before escalating to triage.
+    // Run for ALL unhealthy statuses — context exhaustion can occur in alive sessions
+    // that appear "unresponsive" or even "idle" (the session is alive at a prompt
+    // but can't process input because the conversation is too long).
+    if (this.deps.sessionRecovery) {
       try {
         const recoveryResult = await this.deps.sessionRecovery.checkAndRecover(topicId, sessionName);
         this.emit('monitor:mechanical-recovery', { topicId, sessionName, result: recoveryResult });

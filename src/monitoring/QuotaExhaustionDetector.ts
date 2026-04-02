@@ -37,6 +37,9 @@ const CONTEXT_PATTERNS = [
   'token.*limit.*reached',
   'maximum.*context',
   'conversation is too long',
+  'conversation too long',
+  'error during compaction.*too long',
+  'press esc twice to go up a few messages',
 ];
 
 const CRASH_PATTERNS = [
@@ -111,11 +114,13 @@ export function classifySessionDeath(
     };
   }
 
-  // Context exhaustion
+  // Context exhaustion — boost confidence for strong signals
   if (contextMatch) {
+    const strongSignals = ['conversation too long', 'conversation is too long', 'error during compaction'];
+    const isStrong = strongSignals.some(s => output.includes(s));
     return {
       cause: 'context_exhausted',
-      confidence: 'medium',
+      confidence: isStrong ? 'high' : 'medium',
       detail: `Matched context pattern: "${contextMatch}"`,
     };
   }
@@ -133,10 +138,29 @@ export function classifySessionDeath(
 }
 
 /**
+ * Detect context exhaustion in tmux output from a LIVE session.
+ * Unlike classifySessionDeath (which classifies after death),
+ * this can be called on alive sessions to detect the error proactively.
+ */
+export function detectContextExhaustion(tmuxOutput: string): { matched: boolean; pattern: string | null; confidence: 'high' | 'medium' } {
+  if (!tmuxOutput || tmuxOutput.trim().length === 0) {
+    return { matched: false, pattern: null, confidence: 'medium' };
+  }
+  const output = tmuxOutput.toLowerCase();
+  const match = matchPatterns(output, CONTEXT_PATTERNS);
+  if (!match) {
+    return { matched: false, pattern: null, confidence: 'medium' };
+  }
+  const strongSignals = ['conversation too long', 'conversation is too long', 'error during compaction'];
+  const isStrong = strongSignals.some(s => output.includes(s));
+  return { matched: true, pattern: match, confidence: isStrong ? 'high' : 'medium' };
+}
+
+/**
  * Check if output matches any pattern in a group.
  * Returns the first matching pattern string, or null.
  */
-function matchPatterns(output: string, patterns: string[]): string | null {
+export function matchPatterns(output: string, patterns: string[]): string | null {
   for (const pattern of patterns) {
     try {
       if (new RegExp(pattern, 'i').test(output)) {

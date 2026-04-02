@@ -58,6 +58,8 @@
       display: flex;
       align-items: center;
       gap: 12px;
+      min-width: 0;
+      flex: 1;
     }
 
     .header h1 {
@@ -255,6 +257,7 @@
     .dropzone-container {
       display: flex;
       justify-content: center;
+      grid-column: 1 / -1;
       padding: 24px;
       overflow-y: auto;
       height: calc(100vh - 56px);
@@ -718,7 +721,11 @@
       display: flex;
       gap: 0;
       margin-left: 24px;
+      overflow-x: auto;
+      -webkit-overflow-scrolling: touch;
+      scrollbar-width: none; /* hide scrollbar on Firefox */
     }
+    .tab-bar::-webkit-scrollbar { display: none; }
 
     .tab-bar .tab {
       padding: 6px 16px;
@@ -732,6 +739,8 @@
       border-bottom: none;
       margin-bottom: -1px;
       transition: color 0.15s, background 0.15s;
+      white-space: nowrap;
+      flex-shrink: 0;
     }
 
     .tab-bar .tab:hover {
@@ -2259,10 +2268,12 @@
       display: flex;
       gap: 12px;
       margin-bottom: 16px;
+      flex-wrap: wrap;
     }
 
     .metric-card {
       flex: 1;
+      min-width: 100px;
       background: var(--bg-panel);
       border: 1px solid var(--border);
       border-radius: 8px;
@@ -3214,6 +3225,9 @@
       // Update active state in sidebar
       renderSessionList();
 
+      // Persist session in URL for refresh
+      updateFileUrl();
+
       // Focus input
       document.getElementById('termInput').focus();
     }
@@ -3399,7 +3413,18 @@
             pendingOutputData = null;
             term.clear();
             term.write(data);
+            // Delay scrollToBottom until after xterm renders the written data
+            requestAnimationFrame(() => {
+              term.scrollToBottom();
+              // Also scroll the browser viewport to show the terminal bottom
+              const container = document.getElementById('terminalContainer');
+              if (container) container.scrollIntoView({ block: 'end', behavior: 'instant' });
+            });
+          } else {
+            // No pending data — just snap to bottom of existing content
             term.scrollToBottom();
+            const container = document.getElementById('terminalContainer');
+            if (container) container.scrollIntoView({ block: 'end', behavior: 'instant' });
           }
           hideResumeButton();
         };
@@ -3425,6 +3450,7 @@
       document.getElementById('terminalView').style.display = 'none';
       document.getElementById('noSession').style.display = 'flex';
       renderSessionList();
+      updateFileUrl(); // Clear session from URL
     }
 
     // ── Input ────────────────────────────────────────────────
@@ -4478,9 +4504,16 @@
         } else {
           params.delete('path');
         }
+        params.delete('session');
       } else {
         params.delete('tab');
         params.delete('path');
+        // Persist active session in URL
+        if (activeSession) {
+          params.set('session', activeSession);
+        } else {
+          params.delete('session');
+        }
       }
       const qs = params.toString();
       const newUrl = window.location.pathname + (qs ? '?' + qs : '');
@@ -4491,6 +4524,7 @@
       const params = new URLSearchParams(window.location.search);
       const tab = params.get('tab');
       const filePath = params.get('path');
+      const sessionParam = params.get('session');
 
       if (tab === 'files') {
         switchTab('files');
@@ -4512,6 +4546,27 @@
           };
           waitForTree();
         }
+      } else if (sessionParam) {
+        // Restore active session from URL — wait for session list to populate
+        let attempts = 0;
+        const waitForSessions = () => {
+          if (sessions.length > 0) {
+            const match = sessions.find(s => s.tmuxSession === sessionParam);
+            if (match) {
+              selectSession(match.tmuxSession, match);
+            }
+            // If no match, session ended — clear stale param
+            if (!match) {
+              const p = new URLSearchParams(window.location.search);
+              p.delete('session');
+              const qs = p.toString();
+              history.replaceState(null, '', window.location.pathname + (qs ? '?' + qs : ''));
+            }
+          } else if (++attempts < 15) {
+            setTimeout(waitForSessions, 200);
+          }
+        };
+        waitForSessions();
       }
     }
 

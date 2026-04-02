@@ -316,7 +316,7 @@ export type { MachineRouteContext } from './server/machineRoutes.js';
 export { HealthChecker } from './monitoring/HealthChecker.js';
 export { QuotaTracker } from './monitoring/QuotaTracker.js';
 export type { RemoteQuotaResult } from './monitoring/QuotaTracker.js';
-export { classifySessionDeath } from './monitoring/QuotaExhaustionDetector.js';
+export { classifySessionDeath, detectContextExhaustion } from './monitoring/QuotaExhaustionDetector.js';
 export { AccountSwitcher } from './monitoring/AccountSwitcher.js';
 export { QuotaNotifier } from './monitoring/QuotaNotifier.js';
 export { KeychainCredentialProvider, ClaudeConfigCredentialProvider, createDefaultProvider, redactToken, redactEmail } from './monitoring/CredentialProvider.js';

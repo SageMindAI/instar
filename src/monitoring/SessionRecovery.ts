@@ -27,6 +27,7 @@ import { execFileSync } from 'node:child_process';
 import { detectToolCallStall, type StallInfo } from './stall-detector.js';
 import { detectCrashedSession, detectErrorLoop, type CrashInfo, type ErrorLoopInfo } from './crash-detector.js';
 import { truncateJsonlToSafePoint, type TruncationStrategy } from './jsonl-truncator.js';
+import { detectContextExhaustion } from './QuotaExhaustionDetector.js';
 
 // ============================================================================
 // Types
@@ -49,7 +50,7 @@ export interface RecoveryAttempt {
 
 export interface RecoveryResult {
   recovered: boolean;
-  failureType: 'stall' | 'crash' | 'error_loop' | null;
+  failureType: 'stall' | 'crash' | 'error_loop' | 'context_exhaustion' | null;
   strategy?: TruncationStrategy;
   attemptNumber?: number;
   message: string;
@@ -66,6 +67,10 @@ export interface SessionRecoveryDeps {
   respawnSession: (topicId: number, sessionName?: string, recoveryPrompt?: string) => Promise<void>;
   /** Send a message to a topic */
   sendToTopic?: (topicId: number, message: string) => Promise<void>;
+  /** Capture tmux output for a session (needed for context exhaustion detection) */
+  captureSessionOutput?: (sessionName: string, lines: number) => string | null;
+  /** Respawn a session fresh (no --resume) for context exhaustion recovery */
+  respawnSessionFresh?: (topicId: number, sessionName?: string, recoveryPrompt?: string) => Promise<void>;
 }
 
 // ============================================================================
@@ -105,15 +110,31 @@ export class SessionRecovery extends EventEmitter {
       return { recovered: false, failureType: null, message: 'Recovery disabled' };
     }
 
-    // 1. Find the JSONL file for this session
+    const processAlive = this.deps.isSessionAlive(sessionName);
+
+    // 1. Check for context exhaustion (process alive but conversation too long)
+    // This runs FIRST and doesn't need JSONL — it scans tmux output directly.
+    // A session at the "conversation too long" prompt is alive and not stalled,
+    // it just can't accept any more input without hitting the same error.
+    if (processAlive && this.deps.captureSessionOutput) {
+      const tmuxOutput = this.deps.captureSessionOutput(sessionName, 50);
+      if (tmuxOutput) {
+        const contextCheck = detectContextExhaustion(tmuxOutput);
+        if (contextCheck.matched) {
+          const result = await this.recoverFromContextExhaustion(topicId, sessionName, contextCheck.pattern || 'unknown');
+          this.logEvent(result, topicId, sessionName);
+          return result;
+        }
+      }
+    }
+
+    // 2. Find the JSONL file for this session (needed for stall/crash/error-loop detection)
     const jsonlPath = this.findJsonlForSession(sessionName);
     if (!jsonlPath) {
       return { recovered: false, failureType: null, message: 'No JSONL found' };
     }
 
-    const processAlive = this.deps.isSessionAlive(sessionName);
-
-    // 2. Check for stall (process alive but frozen)
+    // 3. Check for stall (process alive but frozen)
     if (processAlive) {
       const stall = detectToolCallStall(jsonlPath);
       if (stall) {
@@ -123,7 +144,7 @@ export class SessionRecovery extends EventEmitter {
       }
     }
 
-    // 3. Check for error loop (can happen with alive OR dead process)
+    // 4. Check for error loop (can happen with alive OR dead process)
     const errorLoop = detectErrorLoop(jsonlPath);
     if (errorLoop) {
       const result = await this.recoverFromErrorLoop(topicId, sessionName, jsonlPath, errorLoop);
@@ -131,7 +152,7 @@ export class SessionRecovery extends EventEmitter {
       return result;
     }
 
-    // 4. Check for crash (process dead with incomplete state)
+    // 5. Check for crash (process dead with incomplete state)
     if (!processAlive) {
       const crash = detectCrashedSession(jsonlPath, false);
       if (crash) {
@@ -172,12 +193,12 @@ export class SessionRecovery extends EventEmitter {
    * Aggregate recovery stats from the event log since a given timestamp.
    */
   getStats(sinceMs: number): {
-    attempts: { stall: number; crash: number; errorLoop: number };
-    successes: { stall: number; crash: number; errorLoop: number };
+    attempts: { stall: number; crash: number; errorLoop: number; contextExhaustion: number };
+    successes: { stall: number; crash: number; errorLoop: number; contextExhaustion: number };
   } {
     const stats = {
-      attempts: { stall: 0, crash: 0, errorLoop: 0 },
-      successes: { stall: 0, crash: 0, errorLoop: 0 },
+      attempts: { stall: 0, crash: 0, errorLoop: 0, contextExhaustion: 0 },
+      successes: { stall: 0, crash: 0, errorLoop: 0, contextExhaustion: 0 },
     };
 
     const eventLogPath = path.join(this.config.projectDir, '.instar', 'recovery-events.jsonl');
@@ -193,6 +214,7 @@ export class SessionRecovery extends EventEmitter {
         const key = entry.failureType === 'error_loop' ? 'errorLoop'
           : entry.failureType === 'stall' ? 'stall'
           : entry.failureType === 'crash' ? 'crash'
+          : entry.failureType === 'context_exhaustion' ? 'contextExhaustion'
           : null;
         if (!key) continue;
 
@@ -250,6 +272,66 @@ export class SessionRecovery extends EventEmitter {
         failureType: 'stall',
         attemptNumber,
         message: `Stall recovery respawn failed: ${err.message}`,
+      };
+    }
+  }
+
+  /**
+   * Recover from context exhaustion ("conversation too long").
+   *
+   * Unlike stall/crash recovery which truncates the JSONL and resumes,
+   * context exhaustion means the ENTIRE conversation is too large.
+   * Recovery strategy: kill the session and respawn FRESH with telegram
+   * history as the context seed. No --resume, no JSONL reuse.
+   */
+  private async recoverFromContextExhaustion(
+    topicId: number,
+    sessionName: string,
+    matchedPattern: string,
+  ): Promise<RecoveryResult> {
+    const key = `context:${sessionName}`;
+
+    if (!this.shouldAttempt(key)) {
+      return {
+        recovered: false,
+        failureType: 'context_exhaustion',
+        message: `Context exhaustion recovery exhausted or in cooldown for ${sessionName}`,
+      };
+    }
+
+    const attemptNumber = this.recordAttempt(key);
+
+    this.emit('recovery:context_exhaustion', { topicId, sessionName, matchedPattern, attemptNumber });
+
+    // Kill the session — it's stuck at the "conversation too long" prompt
+    this.deps.killSession(sessionName);
+
+    await new Promise(resolve => setTimeout(resolve, 3000));
+
+    const recoveryPrompt = sanitizeForPrompt(
+      `[RECOVERY] Your previous session hit the context window limit — the conversation became too long ` +
+      `for Claude to process. The session was killed and restarted FRESH with thread history. ` +
+      `You are NOT resuming the old conversation — this is a clean start with the recent message history ` +
+      `loaded as context. Continue helping the user from where the conversation left off.`
+    );
+
+    // Use respawnSessionFresh if available (no --resume), otherwise fall back to normal respawn
+    const respawnFn = this.deps.respawnSessionFresh || this.deps.respawnSession;
+
+    try {
+      await respawnFn(topicId, sessionName, recoveryPrompt);
+      return {
+        recovered: true,
+        failureType: 'context_exhaustion',
+        attemptNumber,
+        message: `Recovered from context exhaustion (pattern: "${matchedPattern}", attempt ${attemptNumber}) — fresh session spawned`,
+      };
+    } catch (err: any) { // @silent-fallback-ok — recovery code; returning recovered:false IS the degradation signal
+      return {
+        recovered: false,
+        failureType: 'context_exhaustion',
+        attemptNumber,
+        message: `Context exhaustion recovery respawn failed: ${err.message}`,
       };
     }
   }

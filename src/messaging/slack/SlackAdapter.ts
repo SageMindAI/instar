@@ -820,7 +820,36 @@ export class SlackAdapter implements MessagingAdapter {
           const savedPath = await this.fileHandler.downloadFile(url, destPath);
           filePaths.push(savedPath);
 
-          if (isImage) {
+          // Detect text-based content (snippets, plain text, code, markdown, CSV, etc.)
+          const isText = mimetype.startsWith('text/') ||
+            mimetype === 'application/json' ||
+            mimetype === 'application/xml' ||
+            mimetype === 'application/javascript' ||
+            mimetype === 'application/x-yaml' ||
+            mimetype === 'application/x-sh' ||
+            ['txt', 'md', 'csv', 'json', 'yaml', 'yml', 'xml', 'js', 'ts', 'py', 'sh', 'html', 'css', 'sql', 'log', 'conf', 'ini', 'toml', 'env'].includes(filename.split('.').pop()?.toLowerCase() ?? '');
+          const filetype = file.filetype as string ?? '';
+          const isSnippet = filetype === 'text' || filetype === 'snippet' || filetype === 'post';
+
+          if (isText || isSnippet) {
+            // Text-based content: inline the content directly into the message
+            // This prevents the agent from hallucinating because it can see the actual content
+            try {
+              const textContent = fs.readFileSync(savedPath, 'utf-8');
+              const title = file.title as string ?? filename;
+              const truncated = textContent.length > 10000 ? textContent.slice(0, 10000) + '\n... [truncated, full content saved to ' + savedPath + ']' : textContent;
+              cleanText = cleanText
+                ? `${cleanText}\n\n[User shared "${title}"]\n\`\`\`\n${truncated}\n\`\`\``
+                : `[User shared "${title}"]\n\`\`\`\n${truncated}\n\`\`\``;
+              // Also keep the file reference for the full content
+              if (textContent.length > 10000) {
+                cleanText += ` [Full content saved to ${savedPath}]`;
+              }
+            } catch {
+              // Fallback to document reference if read fails
+              cleanText = cleanText ? `${cleanText} [document:${savedPath}]` : `[document:${savedPath}]`;
+            }
+          } else if (isImage) {
             // Validate the downloaded file is actually a processable image
             const imageValid = this._validateImageFile(savedPath);
             if (imageValid) {

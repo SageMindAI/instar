@@ -997,8 +997,9 @@ function wireTelegramRouting(
         // Track for stall detection
         telegram.trackMessageInjection(topicId, targetSession, text);
       } else {
-        // Session died — check if it's a quota death before respawning
+        // Session died — classify death cause before deciding how to respawn
         let isQuotaDeath = false;
+        let isContextExhausted = false;
         try {
           const output = sessionManager.captureOutput(targetSession, 100);
           if (output) {
@@ -1010,11 +1011,37 @@ function wireTelegramRouting(
                 `🔴 Session died — quota limit reached.\n${classification.detail}\n\n` +
                 `Use /switch-account to switch, /login to add an account, or reply again to force restart.`
               ).catch(() => {});
+            } else if (classification.cause === 'context_exhausted') {
+              isContextExhausted = true;
+              telegram.sendToTopic(topicId,
+                `🔄 Conversation got too long — starting a fresh session with your recent history.`
+              ).catch(() => {});
             }
           }
         } catch { /* classification failed — fall through to respawn */ }
 
-        if (!isQuotaDeath) {
+        if (isContextExhausted) {
+          // Context exhaustion: respawn FRESH (no --resume) — the old conversation
+          // is too large to continue. The respawn path will load telegram thread
+          // history as context, giving the new session continuity.
+          if (spawningTopics.has(topicId)) {
+            console.log(`[telegram→session] Spawn already in progress for topic ${topicId} — skipping duplicate respawn`);
+            return;
+          }
+          spawningTopics.add(topicId);
+          // Remove the resume UUID so respawnSessionForTopic doesn't try --resume
+          if (_topicResumeMap) {
+            _topicResumeMap.remove(topicId);
+          }
+          respawnSessionForTopic(sessionManager, telegram, targetSession, topicId, text, topicMemory, resolvedUser ?? undefined)
+            .catch(err => {
+              console.error(`[telegram→session] Context exhaustion respawn failed:`, err);
+              telegram.sendToTopic(topicId, `❌ Fresh session restart failed. Try sending your message again.`).catch(() => {});
+            })
+            .finally(() => {
+              spawningTopics.delete(topicId);
+            });
+        } else if (!isQuotaDeath) {
           // Guard: skip respawn if one is already in progress for this topic.
           // Prevents the infinite respawn loop: dead session + rapid messages → each
           // message triggers a new respawn → multiple concurrent spawns → chaos.
@@ -3596,6 +3623,21 @@ export async function startServer(options: StartOptions): Promise<void> {
             if (slackChId && _slackAdapter) { await _slackAdapter.sendToChannel(slackChId, message); return; }
             if (telegram) await telegram.sendToTopic(topicId, message);
           },
+          captureSessionOutput: (name, lines) => {
+            return sessionManager.captureOutput(name, lines);
+          },
+          respawnSessionFresh: async (topicId, _sessionName, recoveryPrompt) => {
+            // Fresh respawn for context exhaustion — explicitly clear resume UUID
+            // so the new session starts clean with telegram history, not --resume.
+            if (_topicResumeMap) {
+              _topicResumeMap.remove(topicId);
+            }
+            if (telegram) {
+              const targetSession = telegram.getSessionForTopic(topicId);
+              if (!targetSession) return;
+              await respawnSessionForTopic(sessionManager, telegram, targetSession, topicId, undefined, topicMemory, undefined, recoveryPrompt, { silent: true });
+            }
+          },
         },
       );
       console.log(pc.green('  Session Recovery enabled (mechanical fast-path)'));
@@ -4884,11 +4926,28 @@ export async function startServer(options: StartOptions): Promise<void> {
     const featureRegistry = new FeatureRegistry(config.stateDir, {
       hmacKey: config.authToken || undefined,
     });
-    await featureRegistry.open();
+    let featureRegistryReady = false;
+    try {
+      await featureRegistry.open();
+      featureRegistryReady = true;
+    } catch (frErr: unknown) {
+      const msg = frErr instanceof Error ? frErr.message : String(frErr);
+      console.warn(pc.yellow(`  FeatureRegistry: failed to open (${msg.slice(0, 120)})`));
+      const { DegradationReporter } = await import('../monitoring/DegradationReporter.js');
+      DegradationReporter.getInstance().report({
+        feature: 'FeatureRegistry',
+        primary: 'SQLite-backed feature registry with discovery state tracking',
+        fallback: 'Feature definitions available in-memory only (no persistent state)',
+        reason: `FeatureRegistry open failed: ${msg.slice(0, 200)}`,
+        impact: 'Feature discovery state not persisted. Features default to definitions only.',
+      });
+    }
     for (const def of BUILTIN_FEATURES) {
       featureRegistry.register(def);
     }
-    featureRegistry.bootstrap(config as unknown as Record<string, unknown>);
+    if (featureRegistryReady) {
+      featureRegistry.bootstrap(config as unknown as Record<string, unknown>);
+    }
     {
       const summaries = featureRegistry.getSummaries();
       const enabledCount = summaries.filter((f: { enabled: boolean }) => f.enabled).length;

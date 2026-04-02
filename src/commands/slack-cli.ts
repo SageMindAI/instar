@@ -10,6 +10,13 @@ import path from 'node:path';
 import readline from 'node:readline';
 import pc from 'picocolors';
 
+// Polyfill WebSocket for Node <22 (global added in Node 22)
+if (typeof globalThis.WebSocket === 'undefined') {
+  const ws = await import('ws');
+  // @ts-expect-error ws package is API-compatible but has different TS types
+  globalThis.WebSocket = ws.default;
+}
+
 /**
  * Check if Slack event subscriptions are configured by connecting via WebSocket
  * and looking for event-related payloads. A connected WebSocket that receives

@@ -192,12 +192,14 @@ export class GitSyncManager {
     if (!this.isGitRepo()) return result;
 
     // 0. Pre-flight: detect and fix stuck rebase / detached HEAD before attempting pull
+    let rebaseJustAborted = false;
     try {
       const statusOut = this.gitExec(['status']);
       if (statusOut.includes('rebase in progress') || statusOut.includes('interactive rebase in progress')) {
         console.log('[GitSync] Pre-flight: stuck rebase detected — aborting before pull');
         try {
           this.gitExec(['rebase', '--abort']);
+          rebaseJustAborted = true;
           console.log('[GitSync] Pre-flight: rebase aborted successfully');
         } catch (abortErr) {
           console.error(`[GitSync] Pre-flight: rebase abort failed: ${abortErr}`);
@@ -235,10 +237,15 @@ export class GitSyncManager {
       console.warn(`[GitSync] Pre-flight check warning: ${preflightErr}`);
     }
 
-    // 1. Pull with rebase
+    // 1. Pull (use merge instead of rebase if we just aborted a stuck rebase, to avoid recreating the same conflict)
     try {
       const beforeHead = this.gitHead();
-      this.gitExec(['pull', '--rebase', '--autostash']);
+      if (rebaseJustAborted) {
+        console.log('[GitSync] Using merge pull (not rebase) after stuck rebase recovery');
+        this.gitExec(['pull', '--no-rebase', '--autostash']);
+      } else {
+        this.gitExec(['pull', '--rebase', '--autostash']);
+      }
       const afterHead = this.gitHead();
       result.pulled = beforeHead !== afterHead;
 

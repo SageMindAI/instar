@@ -2523,7 +2523,8 @@ function installAutonomousSkill(skillsDir: string): void {
   const scriptsDir = path.join(autonomousDir, 'scripts');
 
   // Copy from instar's bundled skill files if they exist
-  const bundledDir = path.join(path.dirname(path.dirname(__dirname)), '.claude', 'skills', 'autonomous');
+  const modDir = path.dirname(new URL(import.meta.url).pathname);
+  const bundledDir = path.join(path.dirname(path.dirname(modDir)), '.claude', 'skills', 'autonomous');
 
   if (fs.existsSync(bundledDir)) {
     // Copy from bundled source
