@@ -155,7 +155,7 @@ describeMaybe('Session Lifecycle (integration)', () => {
     limitProject.cleanup();
   });
 
-  it('emits sessionComplete via monitoring', async () => {
+  it('emits sessionComplete via monitoring', { timeout: 30000 }, async () => {
     const completedSessions: string[] = [];
     sm.on('sessionComplete', (session) => {
       completedSessions.push(session.id);
@@ -167,12 +167,13 @@ describeMaybe('Session Lifecycle (integration)', () => {
     });
 
     // Start monitoring with fast interval
+    // Note: SessionManager has a 15s grace period before checking new sessions,
+    // so this test needs a timeout > 15s + monitoring interval + margin
     sm.startMonitoring(500);
 
-    // Mock claude exits after ~2s, monitoring should detect it
     await waitFor(
       () => completedSessions.includes(session.id),
-      15000,
+      25000,
     );
 
     expect(completedSessions).toContain(session.id);

@@ -379,6 +379,10 @@ describe('SessionManager behavioral tests', () => {
         prompt: 'watch me',
       });
 
+      // Backdate startedAt to bypass the 15s grace period in monitorTick
+      session.startedAt = new Date(Date.now() - 30_000).toISOString();
+      state.saveSession(session);
+
       // Set up event listener
       const completed = new Promise<string>((resolve) => {
         manager.on('sessionComplete', (s) => resolve(s.id));
@@ -394,7 +398,7 @@ describe('SessionManager behavioral tests', () => {
       const completedId = await Promise.race([
         completed,
         new Promise<string>((_, reject) =>
-          setTimeout(() => reject(new Error('timeout')), 15000)
+          setTimeout(() => reject(new Error('timeout')), 5000)
         ),
       ]);
 
