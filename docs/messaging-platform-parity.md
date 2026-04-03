@@ -15,9 +15,9 @@
 
 | # | Feature | Description | Telegram | Slack | WhatsApp |
 |---|---------|-------------|----------|-------|----------|
-| 1.1.1 | Text messages | Plain text from user | Yes | Yes | - |
+| 1.1.1 | Text messages | Plain text from user | Yes | Yes (v0.26.8: link unfurl content extracted — attachment title/text from message.attachments[] inlined into message text, covering rich previews and integration content like Fathom transcripts, GitHub PRs, etc.) | - |
 | 1.1.2 | Photo/image messages | User sends photo, downloaded to disk, passed as `[image:path]` | Yes | Yes | - |
-| 1.1.3 | Document/file messages | User sends file, downloaded with original filename, passed as `[document:path]` | Yes | Yes (v0.26.1: standalone file_shared events + message-embedded files; fetches metadata via files.info API; v0.26.4: text-based files/snippets inlined as code blocks instead of document references; v0.26.5: three-tier snippet content resolution — event preview → files.info content field → downloaded file with HTML rejection) | - |
+| 1.1.3 | Document/file messages | User sends file, downloaded with original filename, passed as `[document:path]` | Yes | Yes (v0.26.1: standalone file_shared events + message-embedded files; fetches metadata via files.info API; v0.26.4: text-based files/snippets inlined as code blocks instead of document references; v0.26.5: three-tier snippet content resolution — event preview → files.info content field → downloaded file with HTML rejection; v0.26.8: prefers url_private_download over url_private; auth header preserved across CDN redirects via manual redirect handling) | - |
 | 1.1.4 | Voice messages | User sends voice memo, transcribed via Whisper (Groq/OpenAI), passed as `[voice] transcript` | Yes | Yes (v0.25.0: transcribeVoice callback; Groq/OpenAI) | - |
 | 1.1.5 | Sticker messages | Silently ignored | N/A | N/A | - |
 | 1.1.6 | Callback queries | Inline keyboard button presses (Prompt Gate responses) | Yes | Yes (Block Kit actions) | - |
@@ -376,3 +376,6 @@
 | 2.8 | 2026-04-02 | v0.26.3: reliability fixes — FeatureRegistry graceful degradation on sqlite3 failure, preflight native module auto-rebuild, smarter post-rebase pull strategy (no parity row changes) |
 | 2.9 | 2026-04-02 | v0.26.4: (1) iMessage adapter shipped to main (native macOS iMessage via chat.db polling + imsg CLI, outbound safety layer); (2) Slack text snippet inlining — text-based files now inlined as code blocks (1.1.3 updated) |
 | 2.10 | 2026-04-02 | v0.26.5: (1) Slack snippet HTML fallback fix — three-tier content resolution prevents agents from hallucinating on HTML error pages (1.1.3 updated); (2) Slack resume UUID heartbeat bug fix — UUIDs now correctly written to slack-channel-resume-map.json (internal fix, no parity row changes) |
+| 2.11 | 2026-04-02 | v0.26.6: Telegram message injection reliability improvements — rawInject retry path with sleep design to prevent race conditions (no parity row changes — implementation reliability only) |
+| 2.12 | 2026-04-03 | v0.26.7: session resume reliability hardening — (1) cross-topic UUID contamination fixed (proactive saves now use only authoritative claudeSessionId, never mtime fallback); (2) context exhaustion detection moved before health classification in SessionMonitor so exhausted sessions don't appear healthy (no parity row changes) |
+| 2.13 | 2026-04-03 | v0.26.8: Slack inbound message enrichment — (1) link unfurls and rich previews now extracted from message.attachments[] and inlined into message text (1.1.1 updated); (2) file download reliability: prefers url_private_download, preserves auth header across CDN redirects via manual redirect following (1.1.3 updated); (3) files.info failures now logged instead of silently swallowed |
