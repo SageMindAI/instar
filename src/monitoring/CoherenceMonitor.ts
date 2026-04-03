@@ -485,6 +485,15 @@ export class CoherenceMonitor extends EventEmitter {
             if (bad.pattern === 'localhost' && msg.text.includes('locally at')) continue;
             // Exception: localhost in code blocks or instructions
             if (bad.pattern === 'localhost' && (msg.text.includes('```') || msg.text.includes('curl'))) continue;
+            // Exception: "undefined" as part of technical descriptions (property paths,
+            // quoted terms, code discussions) — only flag standalone undefined that looks
+            // like a leaked JS value (e.g., "Hello undefined" or "value: undefined")
+            if (bad.pattern === 'undefined') {
+              const inCodeBlock = msg.text.includes('```');
+              const isPropertyPath = /\.\s*undefined|undefined\s*[.=]/.test(msg.text);
+              const isQuoted = /"undefined"|'undefined'|`undefined`/.test(msg.text);
+              if (inCodeBlock || isPropertyPath || isQuoted) continue;
+            }
             violations.push(`"${bad.pattern}" found in agent message (${bad.description})`);
           }
         }
