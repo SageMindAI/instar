@@ -199,6 +199,9 @@ export class SlackAdapter implements MessagingAdapter {
       console.warn('[slack] Could not fetch bot user ID — mention detection may not work');
     }
 
+    // Validate required scopes — check files:read which is needed for snippet/Post content
+    this._validateScopes();
+
     // Auto-join all public channels if in dedicated mode
     if (this.autoJoinChannels) {
       this._autoJoinAllChannels();
@@ -838,23 +841,40 @@ export class SlackAdapter implements MessagingAdapter {
             const title = file.title as string ?? filename;
             let textContent: string | null = null;
 
-            // Method 1: Check if Slack included preview/plain_text directly in the event
-            const preview = file.preview as string ?? file.plain_text as string ?? null;
-            if (preview && preview.length > 0) {
-              textContent = preview;
+            // Method 1: Use files.info API to get the FULL content field.
+            // This is the most reliable method, especially for Posts (rich text documents)
+            // whose preview field is intentionally truncated by Slack.
+            try {
+              const fileInfo = await this.apiClient.call('files.info', { file: file.id as string }) as Record<string, unknown>;
+              const fileData = fileInfo.file as Record<string, unknown> | undefined;
+              if (fileData) {
+                // For Posts, content is in Slack's internal rich text format — strip HTML tags
+                let content = fileData.content as string ?? null;
+                if (content && content.length > 0 && !content.startsWith('<!DOCTYPE')) {
+                  // Strip HTML tags from Post content (Slack stores Posts as HTML fragments)
+                  content = content.replace(/<[^>]+>/g, '').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&nbsp;/g, ' ').trim();
+                  if (content.length > 0) {
+                    textContent = content;
+                  }
+                }
+                // Fall back to plain_text or preview from files.info (not truncated like event preview)
+                if (!textContent) {
+                  const altContent = fileData.plain_text as string ?? fileData.preview as string ?? null;
+                  if (altContent && altContent.length > 0 && !altContent.startsWith('<!DOCTYPE')) {
+                    textContent = altContent;
+                  }
+                }
+              }
+            } catch (infoErr) {
+              console.warn(`[slack] files.info failed for ${file.id}: ${(infoErr as Error).message}`);
             }
 
-            // Method 2: Use files.info API to get the content field (works for snippets)
+            // Method 2: Check if Slack included preview/plain_text directly in the event.
+            // NOTE: For Posts, event preview is truncated — only use as fallback.
             if (!textContent) {
-              try {
-                const fileInfo = await this.apiClient.call('files.info', { file: file.id as string }) as Record<string, unknown>;
-                const fileData = fileInfo.file as Record<string, unknown> | undefined;
-                const content = fileData?.content as string ?? fileData?.preview as string ?? fileData?.plain_text as string ?? null;
-                if (content && content.length > 0 && !content.startsWith('<!DOCTYPE')) {
-                  textContent = content;
-                }
-              } catch (infoErr) {
-                console.warn(`[slack] files.info failed for ${file.id}: ${(infoErr as Error).message}`);
+              const preview = file.preview as string ?? file.plain_text as string ?? null;
+              if (preview && preview.length > 0) {
+                textContent = preview;
               }
             }
 
@@ -864,7 +884,7 @@ export class SlackAdapter implements MessagingAdapter {
                 const downloaded = fs.readFileSync(savedPath, 'utf-8');
                 // Check if Slack returned HTML instead of actual content
                 if (downloaded.startsWith('<!DOCTYPE') || downloaded.startsWith('<html')) {
-                  console.warn(`[slack] Downloaded snippet is HTML (auth issue?) — using preview instead`);
+                  console.warn(`[slack] Downloaded file is HTML (Post/canvas or auth issue) — file: ${file.id}`);
                   // textContent stays null — we'll note the issue
                 } else {
                   textContent = downloaded;
@@ -1613,6 +1633,38 @@ export class SlackAdapter implements MessagingAdapter {
       } catch (err) {
         console.warn(`[slack] Could not backfill channel ${channelId}: ${(err as Error).message}`);
       }
+    }
+  }
+
+  /**
+   * Validate that the bot token has the required OAuth scopes.
+   * Logs clear, actionable warnings for missing scopes at startup
+   * rather than failing silently at runtime.
+   */
+  private async _validateScopes(): Promise<void> {
+    const REQUIRED_SCOPES = ['files:read'];
+    try {
+      // Use a raw fetch to check response headers (API client doesn't expose them)
+      const response = await fetch('https://slack.com/api/auth.test', {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${this.config.botToken}`,
+          'Content-Type': 'application/json; charset=utf-8',
+        },
+        body: '{}',
+      });
+      const scopeHeader = response.headers.get('x-oauth-scopes') ?? '';
+      const grantedScopes = scopeHeader.split(',').map(s => s.trim());
+      const missing = REQUIRED_SCOPES.filter(s => !grantedScopes.includes(s));
+      if (missing.length > 0) {
+        console.error(
+          `[slack] ⚠️  Bot token is missing required scope(s): ${missing.join(', ')}. ` +
+          `File content (snippets, Posts, documents) will not be readable. ` +
+          `Add these scopes in your Slack app's OAuth & Permissions page and reinstall the app.`
+        );
+      }
+    } catch {
+      // Non-fatal — scope check is best-effort
     }
   }
 
