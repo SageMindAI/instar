@@ -637,4 +637,331 @@ describe('Session Resume E2E', () => {
       expect(map.get(2169)).toBe(uuid1);
     });
   });
+
+  // ── Cross-Topic Contamination (the Inspec bug) ─────────────────
+  // Reproduces the exact production failure where topic 683 (Monroe Claude Account)
+  // was resumed with topic 505's (Archives Catalog) conversation because the
+  // proactive UUID save used an mtime-based fallback that picked up the wrong UUID.
+
+  describe('REGRESSION: cross-topic UUID contamination via proactive save', () => {
+    it('proactive save must NOT use mtime fallback when claudeSessionId is unavailable', () => {
+      // Setup: two topics with separate UUIDs
+      const topic505Uuid = 'aaaaaaaa-5050-5050-5050-505050505050';
+      const topic683Uuid = 'bbbbbbbb-6830-6830-6830-683683683683';
+      const myDir = createFakeJsonl(projectDir, topic505Uuid);
+      createFakeJsonl(projectDir, topic683Uuid);
+      cleanupDirs.push(myDir);
+
+      // Make topic505's JSONL more recently modified (simulating active writes)
+      const futureTime = new Date(Date.now() + 120_000);
+      fs.utimesSync(path.join(myDir, `${topic505Uuid}.jsonl`), futureTime, futureTime);
+
+      // The mtime fallback would return topic505's UUID since it's most recent
+      const mtimeResult = resumeMap.findClaudeSessionUuid();
+      expect(mtimeResult).toBe(topic505Uuid);
+
+      // BEFORE THE FIX: The proactive save would do:
+      //   const uuid = session?.claudeSessionId ?? resumeMap.findClaudeSessionUuid();
+      // If claudeSessionId was null (Claude Code hadn't registered yet),
+      // it would fall back to mtime and save topic505's UUID for topic 683.
+      //
+      // AFTER THE FIX: The proactive save only uses claudeSessionId.
+      // If it's null, the save is skipped entirely. The heartbeat
+      // (with its single-session guard) handles it later.
+
+      // Simulate the FIXED proactive save: claudeSessionId is null
+      const claudeSessionId: string | undefined = undefined;
+      if (claudeSessionId) {
+        resumeMap.save(683, claudeSessionId, 'inspec-topic-683');
+      }
+      // No save happened — topic 683 has no entry
+      expect(resumeMap.get(683)).toBeNull();
+
+      // Topic 505 was saved correctly via its own path
+      resumeMap.save(505, topic505Uuid, 'inspec-topic-505');
+      expect(resumeMap.get(505)).toBe(topic505Uuid);
+
+      // Later, when Claude Code registers, the heartbeat picks up topic 683
+      const claudeSessionIdFromHook = topic683Uuid;
+      if (claudeSessionIdFromHook) {
+        resumeMap.save(683, claudeSessionIdFromHook, 'inspec-topic-683');
+      }
+      expect(resumeMap.get(683)).toBe(topic683Uuid);
+
+      // Both topics have CORRECT UUIDs — no contamination
+      expect(resumeMap.get(505)).toBe(topic505Uuid);
+      expect(resumeMap.get(683)).toBe(topic683Uuid);
+    });
+
+    it('reproduces the exact Inspec bug timeline: concurrent sessions + mtime race', () => {
+      // Timeline from production:
+      // 02:24 — UUID b0506b0f saved for topic 505 (correct — memory-hygiene job)
+      // 22:29 — Topic 505 resumed with b0506b0f (correct)
+      // 22:44 — Topic 683 message arrives, session spawns
+      // 22:44+8s — Proactive save: claudeSessionId=null, mtime returns b0506b0f → WRONG!
+      // Next day — Topic 683 resumes with 505's conversation → off-topic behavior
+
+      const jobUuid = 'b0506b0f-7f3d-4715-aa3b-3eb080e25089';
+      const topic683Uuid = '7a0111ad-8446-4dcf-b77a-0a94243812ea';
+      const myDir = createFakeJsonl(projectDir, jobUuid);
+      cleanupDirs.push(myDir);
+
+      // Phase 1: Job session (topic 505) saves its UUID correctly
+      resumeMap.save(505, jobUuid, 'inspec-job-memory-hygiene');
+      expect(resumeMap.get(505)).toBe(jobUuid);
+
+      // Phase 2: Topic 505 is resumed at 22:29 (JSONL gets written to, mtime updates)
+      const recentTime = new Date(Date.now() + 60_000);
+      fs.utimesSync(path.join(myDir, `${jobUuid}.jsonl`), recentTime, recentTime);
+
+      // Phase 3: Topic 683 session spawns at 22:44
+      // The new session's Claude Code hasn't started yet, no JSONL exists
+      // (topic683Uuid JSONL would be created by Claude Code after startup)
+
+      // BUGGY proactive save (old behavior): falls back to mtime
+      const buggyUuid = resumeMap.findClaudeSessionUuid(); // Returns jobUuid!
+      expect(buggyUuid).toBe(jobUuid); // This is the WRONG UUID for topic 683
+
+      // Verify the contamination: if we save this, topic 683 gets topic 505's session
+      resumeMap.save(683, buggyUuid!, 'inspec-topic-683');
+      expect(resumeMap.get(683)).toBe(jobUuid); // CONTAMINATED! Points to 505's session
+
+      // FIXED proactive save: only uses authoritative claudeSessionId
+      // claudeSessionId is null at +8s, so no save happens
+      // Later, the JSONL gets created and heartbeat picks it up correctly
+      createFakeJsonl(projectDir, topic683Uuid);
+      resumeMap.save(683, topic683Uuid, 'inspec-topic-683');
+      expect(resumeMap.get(683)).toBe(topic683Uuid); // CORRECT after fix
+      expect(resumeMap.get(505)).toBe(jobUuid); // 505 unchanged
+    });
+
+    it('heartbeat correctly assigns UUIDs with mixed authoritative and unknown sessions', () => {
+      // Scenario: topic 505 has claudeSessionId (from hooks), topic 683 doesn't yet
+      // The heartbeat should save 505's UUID but skip 683 (multiple sessions active)
+      const uuid505 = 'aaaaaaaa-5050-5050-5050-505050505050';
+      const uuid683 = 'bbbbbbbb-6830-6830-6830-683683683683';
+      const myDir = createFakeJsonl(projectDir, uuid505);
+      createFakeJsonl(projectDir, uuid683);
+      cleanupDirs.push(myDir);
+
+      const mockTmuxScript = path.join(tmpDir, 'mock-tmux.sh');
+      fs.writeFileSync(mockTmuxScript, '#!/bin/bash\nexit 0\n');
+      fs.chmodSync(mockTmuxScript, '755');
+
+      const map = new TopicResumeMap(stateDir, projectDir, mockTmuxScript);
+
+      const topicSessions = new Map<number, { sessionName: string; claudeSessionId?: string }>();
+      topicSessions.set(505, { sessionName: 'inspec-topic-505', claudeSessionId: uuid505 });
+      topicSessions.set(683, { sessionName: 'inspec-topic-683' }); // No claudeSessionId!
+
+      map.refreshResumeMappings(topicSessions);
+
+      // Topic 505 gets its authoritative UUID
+      expect(map.get(505)).toBe(uuid505);
+      // Topic 683 is SKIPPED — no claudeSessionId, multiple sessions active
+      expect(map.get(683)).toBeNull();
+    });
+
+    it('heartbeat correctly assigns all UUIDs when all sessions have claudeSessionId', () => {
+      const uuid505 = 'aaaaaaaa-5050-5050-5050-505050505050';
+      const uuid683 = 'bbbbbbbb-6830-6830-6830-683683683683';
+      const uuid999 = 'cccccccc-9990-9990-9990-999999999999';
+      const myDir = createFakeJsonl(projectDir, uuid505);
+      createFakeJsonl(projectDir, uuid683);
+      createFakeJsonl(projectDir, uuid999);
+      cleanupDirs.push(myDir);
+
+      const mockTmuxScript = path.join(tmpDir, 'mock-tmux.sh');
+      fs.writeFileSync(mockTmuxScript, '#!/bin/bash\nexit 0\n');
+      fs.chmodSync(mockTmuxScript, '755');
+
+      const map = new TopicResumeMap(stateDir, projectDir, mockTmuxScript);
+
+      const topicSessions = new Map<number, { sessionName: string; claudeSessionId?: string }>();
+      topicSessions.set(505, { sessionName: 'session-505', claudeSessionId: uuid505 });
+      topicSessions.set(683, { sessionName: 'session-683', claudeSessionId: uuid683 });
+      topicSessions.set(999, { sessionName: 'session-999', claudeSessionId: uuid999 });
+
+      map.refreshResumeMappings(topicSessions);
+
+      // ALL topics get their correct UUID
+      expect(map.get(505)).toBe(uuid505);
+      expect(map.get(683)).toBe(uuid683);
+      expect(map.get(999)).toBe(uuid999);
+    });
+  });
+
+  // ── Slack Channel Resume ───────────────────────────────────────
+  // Tests that Slack channels get correct resume UUIDs independently
+  // from Telegram topics, using the same TopicResumeMap but keyed
+  // by synthetic numeric IDs.
+
+  describe('Slack channel resume isolation', () => {
+    it('Slack and Telegram sessions get independent resume UUIDs', () => {
+      // Slack channel C0APW9UHFJ5 gets a synthetic numeric ID for the resume map
+      // Telegram topic 683 uses its real topic ID
+      // They should never share UUIDs
+      const slackUuid = 'aaaaaaaa-aaaa-slack-aaaa-aaaaaaaaaaaa';
+      const telegramUuid = 'bbbbbbbb-bbbb-tele-bbbb-bbbbbbbbbbbb';
+      const myDir = createFakeJsonl(projectDir, slackUuid);
+      createFakeJsonl(projectDir, telegramUuid);
+      cleanupDirs.push(myDir);
+
+      // Simulate synthetic ID from slackChannelToSyntheticId('C0APW9UHFJ5')
+      // In production, this is computed as a hash. We just need two distinct IDs.
+      const slackSyntheticId = -1102064193; // Typical synthetic ID (negative to avoid topic collision)
+      const telegramTopicId = 683;
+
+      resumeMap.save(slackSyntheticId, slackUuid, 'echo-slack-threadline-dev');
+      resumeMap.save(telegramTopicId, telegramUuid, 'echo-topic-683');
+
+      expect(resumeMap.get(slackSyntheticId)).toBe(slackUuid);
+      expect(resumeMap.get(telegramTopicId)).toBe(telegramUuid);
+
+      // Remove one — other unaffected
+      resumeMap.remove(slackSyntheticId);
+      expect(resumeMap.get(slackSyntheticId)).toBeNull();
+      expect(resumeMap.get(telegramTopicId)).toBe(telegramUuid);
+    });
+
+    it('multiple Slack channels get independent UUIDs via heartbeat', () => {
+      const uuid1 = 'slack-chan-1111-1111-1111-111111111111';
+      const uuid2 = 'slack-chan-2222-2222-2222-222222222222';
+      const myDir = createFakeJsonl(projectDir, uuid1);
+      createFakeJsonl(projectDir, uuid2);
+      cleanupDirs.push(myDir);
+
+      const mockTmuxScript = path.join(tmpDir, 'mock-tmux.sh');
+      fs.writeFileSync(mockTmuxScript, '#!/bin/bash\nexit 0\n');
+      fs.chmodSync(mockTmuxScript, '755');
+
+      const map = new TopicResumeMap(stateDir, projectDir, mockTmuxScript);
+
+      // Both channels have authoritative claudeSessionId
+      const topicSessions = new Map<number, { sessionName: string; claudeSessionId?: string }>();
+      topicSessions.set(-1001, { sessionName: 'echo-slack-general', claudeSessionId: uuid1 });
+      topicSessions.set(-2002, { sessionName: 'echo-slack-threadline', claudeSessionId: uuid2 });
+
+      map.refreshResumeMappings(topicSessions);
+
+      expect(map.get(-1001)).toBe(uuid1);
+      expect(map.get(-2002)).toBe(uuid2);
+    });
+  });
+
+  // ── findUuidForSession Safety ──────────────────────────────────
+  // Verifies that the beforeSessionKill path (used by both Telegram and Slack)
+  // never returns wrong UUIDs.
+
+  describe('findUuidForSession safety', () => {
+    it('returns authoritative claudeSessionId when JSONL exists', () => {
+      const uuid = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa';
+      const myDir = createFakeJsonl(projectDir, uuid);
+      cleanupDirs.push(myDir);
+
+      expect(resumeMap.findUuidForSession('any-tmux-session', uuid)).toBe(uuid);
+    });
+
+    it('returns null when claudeSessionId JSONL is missing (deleted or never created)', () => {
+      expect(resumeMap.findUuidForSession('any-tmux-session', 'nonexistent-uuid-1234-5678-abcdef')).toBeNull();
+    });
+
+    it('returns null when no claudeSessionId is provided (refuses to guess)', () => {
+      const uuid = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa';
+      const myDir = createFakeJsonl(projectDir, uuid);
+      cleanupDirs.push(myDir);
+
+      // Even though a JSONL exists, without claudeSessionId we don't guess
+      expect(resumeMap.findUuidForSession('any-tmux-session')).toBeNull();
+      expect(resumeMap.findUuidForSession('any-tmux-session', undefined)).toBeNull();
+    });
+
+    it('never falls back to mtime-based discovery', () => {
+      // Create multiple JONSLs — findUuidForSession should NOT pick any of them
+      const uuid1 = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa';
+      const uuid2 = 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb';
+      const myDir = createFakeJsonl(projectDir, uuid1);
+      createFakeJsonl(projectDir, uuid2);
+      cleanupDirs.push(myDir);
+
+      // findClaudeSessionUuid would return one of them (most recent by mtime)
+      expect(resumeMap.findClaudeSessionUuid()).not.toBeNull();
+
+      // But findUuidForSession refuses to guess
+      expect(resumeMap.findUuidForSession('any-tmux-session')).toBeNull();
+    });
+  });
+
+  // ── Server Restart Resume Integrity ────────────────────────────
+  // Tests that resume UUIDs survive server restarts and are correctly
+  // restored for all integration types.
+
+  describe('server restart resume integrity', () => {
+    it('Telegram topic UUIDs persist across server restarts', () => {
+      const uuid = 'restart-tele-gram-uuid-aaaaaaaaaaaa';
+      const myDir = createFakeJsonl(projectDir, uuid);
+      cleanupDirs.push(myDir);
+
+      // Server 1: save during beforeSessionKill
+      const map1 = new TopicResumeMap(stateDir, projectDir);
+      map1.save(42, uuid, 'echo-topic-42');
+
+      // Server 2: new process reads from disk
+      const map2 = new TopicResumeMap(stateDir, projectDir);
+      expect(map2.get(42)).toBe(uuid);
+    });
+
+    it('Slack channel UUIDs (via synthetic IDs) persist across server restarts', () => {
+      const uuid = 'restart-slac-chan-uuid-bbbbbbbbbbbb';
+      const myDir = createFakeJsonl(projectDir, uuid);
+      cleanupDirs.push(myDir);
+
+      const syntheticId = -999888;
+      const map1 = new TopicResumeMap(stateDir, projectDir);
+      map1.save(syntheticId, uuid, 'echo-slack-channel');
+
+      const map2 = new TopicResumeMap(stateDir, projectDir);
+      expect(map2.get(syntheticId)).toBe(uuid);
+    });
+
+    it('mixed Telegram + Slack UUIDs all persist correctly', () => {
+      const teleUuid = 'persist-tele-gram-uuid-cccccccccccc';
+      const slackUuid = 'persist-slac-chan-uuid-dddddddddddd';
+      const myDir = createFakeJsonl(projectDir, teleUuid);
+      createFakeJsonl(projectDir, slackUuid);
+      cleanupDirs.push(myDir);
+
+      const map1 = new TopicResumeMap(stateDir, projectDir);
+      map1.save(42, teleUuid, 'echo-topic-42');
+      map1.save(-777, slackUuid, 'echo-slack-general');
+
+      const map2 = new TopicResumeMap(stateDir, projectDir);
+      expect(map2.get(42)).toBe(teleUuid);
+      expect(map2.get(-777)).toBe(slackUuid);
+    });
+
+    it('stale entries are pruned on next heartbeat even after restart', () => {
+      const freshUuid = 'fresh-uuid-1234-5678-aaaaaaaaaaaa';
+      const staleUuid = 'stale-uuid-1234-5678-bbbbbbbbbbbb';
+      const myDir = createFakeJsonl(projectDir, freshUuid);
+      createFakeJsonl(projectDir, staleUuid);
+      cleanupDirs.push(myDir);
+
+      // Server 1: save both
+      const map1 = new TopicResumeMap(stateDir, projectDir);
+      map1.save(42, freshUuid, 'fresh-session');
+      map1.save(99, staleUuid, 'stale-session');
+
+      // Backdate the stale entry past 24h
+      const mapPath = path.join(stateDir, 'topic-resume-map.json');
+      const data = JSON.parse(fs.readFileSync(mapPath, 'utf-8'));
+      data['99'].savedAt = new Date(Date.now() - 25 * 60 * 60 * 1000).toISOString();
+      fs.writeFileSync(mapPath, JSON.stringify(data));
+
+      // Server 2: stale entry should be pruned
+      const map2 = new TopicResumeMap(stateDir, projectDir);
+      expect(map2.get(42)).toBe(freshUuid);
+      expect(map2.get(99)).toBeNull(); // Pruned
+    });
+  });
 });

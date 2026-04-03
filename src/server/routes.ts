@@ -2616,9 +2616,16 @@ export function createRoutes(ctx: RouteContext): Router {
       return;
     }
 
+    const nextRunTimes = ctx.scheduler.getNextRunTimes();
     const jobs = ctx.scheduler.getJobs().map(job => {
       const jobState = ctx.state.getJobState(job.slug);
-      return { ...job, state: jobState, runsOnThisMachine: ctx.scheduler!.isJobLocal(job.slug) };
+      // Merge live scheduler nextRun into state — fixes display bug where
+      // never-run jobs show as "unscheduled" despite having active cron tasks
+      const liveNext = nextRunTimes[job.slug];
+      const mergedState = jobState
+        ? { ...jobState, nextScheduled: jobState.nextScheduled ?? liveNext }
+        : liveNext ? { slug: job.slug, lastRun: null, lastResult: null, nextScheduled: liveNext, consecutiveFailures: 0 } : null;
+      return { ...job, state: mergedState, runsOnThisMachine: ctx.scheduler!.isJobLocal(job.slug) };
     });
 
     res.json({ jobs, queue: ctx.scheduler.getQueue() });
@@ -4962,15 +4969,16 @@ export function createRoutes(ctx: RouteContext): Router {
             fs.writeFileSync(sdRegistryPath, JSON.stringify(reg, null, 2));
           } catch { /* @silent-fallback-ok — registry write non-critical */ }
           // Proactive UUID save — always run, even after --resume (new session = new UUID)
+          // ONLY uses authoritative claudeSessionId — never mtime fallback, which can
+          // pick up a UUID from a different topic's concurrent session.
           if (ctx.topicResumeMap) {
             setTimeout(() => {
               try {
                 const sessions = ctx.sessionManager?.listRunningSessions() ?? [];
                 const session = sessions.find(s => s.tmuxSession === newSessionName);
-                const uuid = session?.claudeSessionId ?? ctx.topicResumeMap!.findClaudeSessionUuid();
-                if (uuid) {
-                  ctx.topicResumeMap!.save(topicId, uuid, newSessionName);
-                  console.log(`[secret-drop] Proactive UUID save: ${uuid} for topic ${topicId} (source: ${session?.claudeSessionId ? 'hook' : 'mtime'})`);
+                if (session?.claudeSessionId) {
+                  ctx.topicResumeMap!.save(topicId, session.claudeSessionId, newSessionName);
+                  console.log(`[secret-drop] Proactive UUID save: ${session.claudeSessionId} for topic ${topicId} (source: hook)`);
                 }
               } catch (err) {
                 console.error(`[secret-drop] Proactive UUID save failed:`, err);
@@ -5289,15 +5297,16 @@ export function createRoutes(ctx: RouteContext): Router {
             fs.writeFileSync(registryPath, JSON.stringify(reg, null, 2));
           } catch { /* @silent-fallback-ok — registry write non-critical */ }
           // Proactive UUID save — always run, even after --resume (new session = new UUID)
+          // ONLY uses authoritative claudeSessionId — never mtime fallback, which can
+          // pick up a UUID from a different topic's concurrent session.
           if (ctx.topicResumeMap) {
             setTimeout(() => {
               try {
                 const sessions = ctx.sessionManager?.listRunningSessions() ?? [];
                 const session = sessions.find(s => s.tmuxSession === newSessionName);
-                const uuid = session?.claudeSessionId ?? ctx.topicResumeMap!.findClaudeSessionUuid();
-                if (uuid) {
-                  ctx.topicResumeMap!.save(topicId, uuid, newSessionName);
-                  console.log(`[telegram-forward] Proactive UUID save: ${uuid} for topic ${topicId} (source: ${session?.claudeSessionId ? 'hook' : 'mtime'})`);
+                if (session?.claudeSessionId) {
+                  ctx.topicResumeMap!.save(topicId, session.claudeSessionId, newSessionName);
+                  console.log(`[telegram-forward] Proactive UUID save: ${session.claudeSessionId} for topic ${topicId} (source: hook)`);
                 }
               } catch (err) {
                 console.error(`[telegram-forward] Proactive UUID save failed:`, err);

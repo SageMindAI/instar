@@ -12,7 +12,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
-import { markdownToNodes, type TelegraphNode, type TelegraphElement } from './TelegraphService.js';
+import { marked } from 'marked';
 
 // ── Types ──────────────────────────────────────────────────────────
 
@@ -271,8 +271,7 @@ export class PrivateViewer {
    * Render a view as self-contained HTML.
    */
   renderHtml(view: PrivateView): string {
-    const nodes = markdownToNodes(view.markdown);
-    const bodyHtml = nodesToHtml(nodes);
+    const bodyHtml = marked.parse(view.markdown, { async: false, gfm: true }) as string;
 
     return `<!DOCTYPE html>
 <html lang="en">
@@ -355,6 +354,11 @@ export class PrivateViewer {
     img { max-width: 100%; border-radius: 4px; }
     figure { margin: 1rem 0; }
     figcaption { font-size: 0.85rem; color: #888; text-align: center; margin-top: 0.25rem; }
+    table { border-collapse: collapse; width: 100%; margin: 1rem 0; }
+    th, td { border: 1px solid #e0e0e0; padding: 0.5rem 0.75rem; text-align: left; }
+    th { background: #f0f0f0; font-weight: 600; }
+    tr:nth-child(even) { background: #fafafa; }
+    input[type="checkbox"] { margin-right: 0.4rem; }
     .footer {
       margin-top: 3rem;
       padding-top: 1rem;
@@ -384,35 +388,6 @@ export class PrivateViewer {
 
 // ── HTML Rendering ─────────────────────────────────────────────────
 
-function nodesToHtml(nodes: TelegraphNode[]): string {
-  return nodes.map(nodeToHtml).join('');
-}
-
-function nodeToHtml(node: TelegraphNode): string {
-  if (typeof node === 'string') {
-    return escapeHtml(node);
-  }
-
-  const element = node as TelegraphElement;
-  const tag = element.tag;
-
-  // Self-closing tags
-  if (tag === 'br') return '<br>';
-  if (tag === 'hr') return '<hr>';
-  if (tag === 'img') {
-    const src = element.attrs?.src ? ` src="${escapeAttr(element.attrs.src)}"` : '';
-    return `<img${src} alt="">`;
-  }
-
-  // Build attributes
-  let attrs = '';
-  if (element.attrs?.href) attrs += ` href="${escapeAttr(element.attrs.href)}"`;
-  if (element.attrs?.src) attrs += ` src="${escapeAttr(element.attrs.src)}"`;
-
-  const children = element.children ? nodesToHtml(element.children) : '';
-  return `<${tag}${attrs}>${children}</${tag}>`;
-}
-
 function escapeHtml(text: string): string {
   return text
     .replace(/&/g, '&amp;')
@@ -421,10 +396,3 @@ function escapeHtml(text: string): string {
     .replace(/"/g, '&quot;');
 }
 
-function escapeAttr(text: string): string {
-  return text
-    .replace(/&/g, '&amp;')
-    .replace(/"/g, '&quot;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;');
-}

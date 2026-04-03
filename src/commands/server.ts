@@ -526,18 +526,19 @@ async function spawnSessionForTopic(
   }
 
   // Proactive UUID save — schedule discovery after spawn.
-  // Prefer authoritative claudeSessionId from hook events (populated within seconds).
-  // Falls back to mtime-based JSONL scan only when there's no ambiguity.
+  // ONLY uses authoritative claudeSessionId from hook events.
+  // Never falls back to mtime-based JSONL scan — that can pick up a UUID from
+  // a different topic's session when multiple sessions are running concurrently.
+  // The heartbeat (refreshResumeMappings) has a proper single-session guard and
+  // will safely fill in the mapping within 60s if hooks haven't fired yet.
   if (_topicResumeMap) {
     setTimeout(() => {
       try {
-        // Check if hook events have already populated the authoritative UUID
         const sessions = sessionManager.listRunningSessions();
         const session = sessions.find(s => s.tmuxSession === newSessionName);
-        const uuid = session?.claudeSessionId ?? _topicResumeMap!.findClaudeSessionUuid();
-        if (uuid) {
-          _topicResumeMap!.save(topicId, uuid, newSessionName);
-          console.log(`[spawnSessionForTopic] Proactive UUID save: ${uuid} for topic ${topicId} (source: ${session?.claudeSessionId ? 'hook' : 'mtime'})`);
+        if (session?.claudeSessionId) {
+          _topicResumeMap!.save(topicId, session.claudeSessionId, newSessionName);
+          console.log(`[spawnSessionForTopic] Proactive UUID save: ${session.claudeSessionId} for topic ${topicId} (source: hook)`);
         }
       } catch (err) {
         console.error(`[spawnSessionForTopic] Proactive UUID save failed:`, err);
@@ -3193,11 +3194,10 @@ export async function startServer(options: StartOptions): Promise<void> {
               // refreshResumeMappings only writes to topic-resume-map.json
               // (keyed by synthetic numeric ID), but Slack message handling
               // reads from slack-channel-resume-map.json (keyed by channel ID).
-              const uuid = session?.claudeSessionId && _topicResumeMap!.jsonlExistsPublic(session.claudeSessionId)
-                ? session.claudeSessionId
-                : (runningSessions.length === 1 ? _topicResumeMap!.findClaudeSessionUuid() : null);
-              if (uuid) {
-                _slackAdapter.saveChannelResume(channelId, uuid, entry.sessionName);
+              // ONLY use authoritative claudeSessionId — never mtime fallback,
+              // which can cross-contaminate when multiple sessions are active.
+              if (session?.claudeSessionId && _topicResumeMap!.jsonlExistsPublic(session.claudeSessionId)) {
+                _slackAdapter.saveChannelResume(channelId, session.claudeSessionId, entry.sessionName);
               }
             }
           }

@@ -427,6 +427,19 @@ export class JobScheduler {
   }
 
   /**
+   * Get live nextScheduled times for all jobs from croner tasks.
+   * Returns a map of slug → ISO timestamp (or undefined if no cron task).
+   * This is the live schedule, independent of saved state files.
+   */
+  getNextRunTimes(): Record<string, string | undefined> {
+    const result: Record<string, string | undefined> = {};
+    for (const job of this.jobs) {
+      result[job.slug] = this.getNextRun(job.slug);
+    }
+    return result;
+  }
+
+  /**
    * Check if a job will run on this machine (for API visibility).
    */
   isJobLocal(slug: string): boolean {
