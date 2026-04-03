@@ -143,7 +143,7 @@ export interface TriageOrchestratorDeps extends TriageDeps {
   cancelJob: (jobId: string) => void;
 
   /** Inject a message into a tmux session */
-  injectMessage: (sessionName: string, text: string) => void;
+  injectMessage: (sessionName: string, text: string) => boolean;
 
   /** Capture output from a tmux session */
   captureTriageOutput: (sessionName: string, lines: number) => string | null;

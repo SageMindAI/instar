@@ -1497,7 +1497,7 @@ export class SessionManager extends EventEmitter {
    * This avoids tmux load-buffer/paste-buffer which trigger macOS TCC
    * "access data from other apps" permission prompts.
    */
-  injectMessage(tmuxSession: string, text: string): void {
+  injectMessage(tmuxSession: string, text: string): boolean {
     // ── Input Guard: Layer 1 + 1.5 (deterministic, synchronous) ──
     if (this.inputGuard) {
       const binding = this.getTopicBinding(tmuxSession);
@@ -1517,7 +1517,7 @@ export class SessionManager extends EventEmitter {
             messagePreview: text.slice(0, 100),
             reason: 'mismatched tag',
           });
-          return;
+          return false;
         }
 
         if (provenance === 'untagged') {
@@ -1536,7 +1536,7 @@ export class SessionManager extends EventEmitter {
 
             if (action === 'block') {
               console.error(`[InputGuard] BLOCKED injection pattern "${pattern}" in session "${tmuxSession}"`);
-              return;
+              return false;
             }
             if (action === 'warn') {
               // Inject the message, then inject warning afterward
@@ -1553,7 +1553,7 @@ export class SessionManager extends EventEmitter {
 
           // Layer 2: Async LLM topic coherence review (non-blocking)
           // Inject immediately, review in background
-          this.rawInject(tmuxSession, text);
+          const injected = this.rawInject(tmuxSession, text);
           this.inputGuard.reviewTopicCoherence(text, binding).then(result => {
             if (result.verdict === 'suspicious') {
               const action = this.inputGuard!['config'].action ?? 'warn';
@@ -1578,7 +1578,7 @@ export class SessionManager extends EventEmitter {
             // Fail open — message already injected, just log the error
             console.error(`[InputGuard] Coherence review error: ${err instanceof Error ? err.message : err}`);
           });
-          return;
+          return injected;
         }
         // provenance === 'verified' or 'unbound' — fall through to normal injection
       }
