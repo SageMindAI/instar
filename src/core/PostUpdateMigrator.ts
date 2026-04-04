@@ -9,7 +9,8 @@
  *   1. Re-installs hooks with the latest templates (behavioral upgrades)
  *   2. Patches CLAUDE.md with any new sections (awareness upgrades)
  *   3. Installs any new scripts (capability upgrades)
- *   4. Returns a human-readable migration report
+ *   4. Deploys missing built-in skills (exec:skill job support)
+ *   5. Returns a human-readable migration report
  *
  * Design principles:
  *   - Additive only: never remove or modify existing user customizations
@@ -24,6 +25,7 @@ import { fileURLToPath } from 'node:url';
 import { TreeGenerator } from '../knowledge/TreeGenerator.js';
 import { HTTP_HOOK_TEMPLATES, buildHttpHookSettings } from '../data/http-hook-templates.js';
 import { getMigrationDefaults, applyDefaults } from '../config/ConfigDefaults.js';
+import { installBuiltinSkills } from '../commands/init.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -68,11 +70,27 @@ export class PostUpdateMigrator {
     this.migrateSettings(result);
     this.migrateConfig(result);
     this.migrateGitignore(result);
+    this.migrateBuiltinSkills(result);
     this.migrateSelfKnowledgeTree(result);
     this.migrateSoulMd(result);
     this.migrateAgentMdSections(result);
 
     return result;
+  }
+
+  /**
+   * Deploy any missing built-in skills (e.g., guardian job skills added after initial setup).
+   * Non-destructive — only writes SKILL.md files that don't already exist.
+   */
+  private migrateBuiltinSkills(result: MigrationResult): void {
+    try {
+      const skillsDir = path.join(this.config.projectDir, '.claude', 'skills');
+      fs.mkdirSync(skillsDir, { recursive: true });
+      installBuiltinSkills(skillsDir, this.config.port);
+      result.skipped.push('built-in skills: checked (non-destructive)');
+    } catch (err) {
+      result.errors.push(`built-in skills: ${err}`);
+    }
   }
 
   /**

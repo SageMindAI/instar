@@ -146,6 +146,59 @@ try {
       (srcChanges.length > 5 ? `\n      • ...and ${srcChanges.length - 5} more` : '')
     );
   }
+  // ── 4. Adapter contract test gate ─────────────────────────────────────
+  // If messaging adapter source files changed, require contract test evidence.
+  // This prevents shipping integration code verified only by mocked unit tests.
+  // The evidence file is created by `npm run test:contract` when tests pass.
+
+  const ADAPTER_PATHS = [
+    'src/messaging/slack/',
+    'src/messaging/telegram/',
+    'src/messaging/whatsapp/',
+    'src/messaging/imessage/',
+  ];
+
+  const adapterChanges = srcChanges.filter(f =>
+    ADAPTER_PATHS.some(prefix => f.startsWith(prefix))
+  );
+
+  if (adapterChanges.length > 0) {
+    const evidencePath = path.join(ROOT, '.contract-test-evidence.json');
+    let evidenceValid = false;
+
+    if (fs.existsSync(evidencePath)) {
+      try {
+        const evidence = JSON.parse(fs.readFileSync(evidencePath, 'utf-8'));
+        const ageMs = Date.now() - (evidence.timestamp || 0);
+        const maxAgeMs = 4 * 60 * 60 * 1000; // 4 hours
+
+        if (ageMs < maxAgeMs && evidence.passed === true) {
+          evidenceValid = true;
+          const ageMin = Math.round(ageMs / 60000);
+          console.log(`  ✅ Contract tests passed ${ageMin}m ago (${evidence.suite})`);
+        } else if (ageMs >= maxAgeMs) {
+          console.log(`  ⏰ Contract test evidence is stale (${Math.round(ageMs / 3600000)}h old)`);
+        } else if (!evidence.passed) {
+          console.log(`  ❌ Contract test evidence shows FAILURE`);
+        }
+      } catch {
+        // Corrupt evidence file
+      }
+    }
+
+    if (!evidenceValid) {
+      errors.push(
+        `Adapter source files changed but no recent contract test evidence found.\n` +
+        `      Adapter files modified:\n` +
+        adapterChanges.slice(0, 5).map(f => `        • ${f}`).join('\n') +
+        (adapterChanges.length > 5 ? `\n        • ...and ${adapterChanges.length - 5} more` : '') +
+        `\n\n      Run contract tests against the REAL API before pushing:\n` +
+        `        SLACK_CONTRACT_BOT_TOKEN=xoxb-... npm run test:contract\n\n` +
+        `      This ensures your changes work against the actual API, not just mocked responses.\n` +
+        `      Contract test evidence expires after 4 hours.`
+      );
+    }
+  }
 } catch {
   // Git commands may fail in CI or detached HEAD — skip gracefully
 }

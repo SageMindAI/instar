@@ -1441,7 +1441,7 @@ curl http://localhost:${port}/evolution
  * Install built-in skills for evolution system.
  * Only writes skill files that don't already exist (preserves customizations).
  */
-function installBuiltinSkills(skillsDir: string, port: number): void {
+export function installBuiltinSkills(skillsDir: string, port: number): void {
   const skills: Record<string, { name: string; description: string; content: string }> = {
     'evolve': {
       name: 'evolve',
@@ -2503,8 +2503,49 @@ Write sync results to \\\`.instar/state/job-handoff-git-sync.md\\\`:
     }
   }
 
+  // Install /build skill from bundled file (too large for inline content)
+  installBuildSkill(skillsDir);
+
   // Install autonomous skill with hooks and scripts (special case — needs full directory structure)
   installAutonomousSkill(skillsDir);
+}
+
+/**
+ * Install the /build skill with its stop hook and state manager.
+ * The build skill provides a rigorous, structurally-enforced build pipeline
+ * with worktree isolation, quality gates, and graduated protection.
+ */
+function installBuildSkill(skillsDir: string): void {
+  const buildDir = path.join(skillsDir, 'build');
+  const skillFile = path.join(buildDir, 'skill.md');
+
+  // Only install if not already present (preserves customizations)
+  if (fs.existsSync(skillFile)) return;
+
+  // Try to copy from bundled .claude/skills/build/ first
+  const bundledSkill = path.join(__dirname, '..', '..', '.claude', 'skills', 'build', 'skill.md');
+  if (fs.existsSync(bundledSkill)) {
+    fs.mkdirSync(buildDir, { recursive: true });
+    fs.copyFileSync(bundledSkill, skillFile);
+    return;
+  }
+
+  // Fallback: write minimal skill inline
+  fs.mkdirSync(buildDir, { recursive: true });
+  fs.writeFileSync(skillFile, `---
+name: build
+description: Rigorous build process with worktree isolation, structured phases, quality gates, and self-improvement. Use for substantial build tasks.
+user_invocable: true
+---
+
+# /build — Rigorous Build Skill
+
+> Structure > Willpower. The pipeline won't let you skip the parts that matter.
+
+Use \`python3 playbook-scripts/build-state.py init "TASK" --size STANDARD\` to start.
+
+See the full skill documentation at: https://github.com/sagemindai/instar
+`);
 }
 
 /**
@@ -3578,6 +3619,15 @@ done
   // don't inherit --dangerously-skip-permissions, so they'd prompt without this.
   // Real safety is in PreToolUse hooks (dangerous-command-guard, external-communication-guard).
   fs.writeFileSync(path.join(hooksDir, 'auto-approve-permissions.js'), getAutoApprovePermissionsScript(), { mode: 0o755 });
+
+  // Build stop hook — structural enforcement for /build pipeline.
+  // Installed from template; only needs to exist when /build is active (registered dynamically).
+  const buildStopHookSrc = path.join(__dirname, '..', '..', 'src', 'templates', 'hooks', 'build-stop-hook.sh');
+  const buildStopHookDst = path.join(hooksDir, 'build-stop-hook.sh');
+  if (fs.existsSync(buildStopHookSrc) && !fs.existsSync(buildStopHookDst)) {
+    fs.copyFileSync(buildStopHookSrc, buildStopHookDst);
+    fs.chmodSync(buildStopHookDst, 0o755);
+  }
 }
 
 function getHookEventReporterScript(): string {

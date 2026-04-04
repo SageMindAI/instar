@@ -65,6 +65,61 @@ function readLine(prompt: string): Promise<string> {
 }
 
 /**
+ * Generate a Slack app manifest with all required scopes and event subscriptions.
+ * Users can paste this into Slack's "Create from manifest" flow to get a
+ * correctly-configured app in one step.
+ */
+export function generateSlackManifest(agentName: string): Record<string, unknown> {
+  return {
+    display_information: {
+      name: agentName,
+      description: `Instar agent: ${agentName}`,
+    },
+    features: {
+      bot_user: {
+        display_name: agentName,
+        always_online: true,
+      },
+    },
+    oauth_config: {
+      scopes: {
+        bot: [
+          'app_mentions:read',
+          'channels:history',
+          'channels:join',
+          'channels:manage',
+          'channels:read',
+          'chat:write',
+          'files:read',
+          'groups:history',
+          'im:history',
+          'im:read',
+          'im:write',
+          'pins:write',
+          'reactions:read',
+          'reactions:write',
+          'users:read',
+        ],
+      },
+    },
+    settings: {
+      event_subscriptions: {
+        bot_events: [
+          'message.channels',
+          'message.groups',
+          'message.im',
+          'app_mention',
+        ],
+      },
+      interactivity: {
+        is_enabled: false,
+      },
+      socket_mode_enabled: true,
+    },
+  };
+}
+
+/**
  * Add Slack adapter interactively.
  * Tokens are collected via stdin (never as CLI arguments for security).
  */
@@ -75,9 +130,25 @@ export async function addSlack(): Promise<void> {
     process.exit(1);
   }
 
+  // Read agent name from config for manifest generation
+  let agentName = 'instar-agent';
+  try {
+    const existingConfig = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
+    agentName = existingConfig.projectName || existingConfig.identity?.name || 'instar-agent';
+  } catch { /* use default */ }
+
   console.log(pc.green('Add Slack Messaging Adapter'));
   console.log();
-  console.log('You need two tokens from your Slack app:');
+  console.log('Create a Slack app with the correct scopes using this manifest:');
+  console.log(`  ${pc.cyan('https://api.slack.com/apps?new_app=1')} → "From a manifest" → JSON tab`);
+  console.log();
+  console.log(pc.dim(JSON.stringify(generateSlackManifest(agentName), null, 2)));
+  console.log();
+  console.log('After creating the app:');
+  console.log('  1. Install it to your workspace');
+  console.log('  2. Create an app-level token (Basic Information → App-Level Tokens → connections:write)');
+  console.log();
+  console.log('Then enter the two tokens:');
   console.log(`  1. ${pc.cyan('Bot token')} (xoxb-...) — from OAuth & Permissions page`);
   console.log(`  2. ${pc.cyan('App-level token')} (xapp-...) — from Basic Information > App-Level Tokens`);
   console.log();
@@ -110,6 +181,35 @@ export async function addSlack(): Promise<void> {
       process.exit(1);
     }
     console.log(pc.green(`  Workspace: ${authData.team} (${authData.team_id})`));
+
+    // Check OAuth scopes — warn about missing required scopes
+    const REQUIRED_SCOPES = [
+      'app_mentions:read', 'channels:history', 'channels:join', 'channels:manage',
+      'channels:read', 'chat:write', 'files:read', 'groups:history', 'im:history',
+      'im:read', 'im:write', 'pins:write', 'reactions:read', 'reactions:write', 'users:read',
+    ];
+    const scopeHeader = authResponse.headers.get('x-oauth-scopes') ?? '';
+    const grantedScopes = scopeHeader.split(',').map(s => s.trim()).filter(Boolean);
+    const missingScopes = REQUIRED_SCOPES.filter(s => !grantedScopes.includes(s));
+
+    if (missingScopes.length > 0) {
+      console.log();
+      console.log(pc.yellow(`⚠  Bot token is missing ${missingScopes.length} required scope(s):`));
+      for (const scope of missingScopes) {
+        console.log(pc.yellow(`   • ${scope}`));
+      }
+      console.log();
+      console.log('   Add these scopes in your Slack app:');
+      console.log(`   ${pc.cyan('https://api.slack.com/apps')} → Your App → OAuth & Permissions → Scopes`);
+      console.log('   After adding scopes, reinstall the app to your workspace.');
+      console.log();
+      if (missingScopes.includes('files:read')) {
+        console.log(pc.yellow('   ⚠  Without files:read, file/snippet/Post content will not be readable.'));
+      }
+      console.log();
+    } else {
+      console.log(pc.green(`  All ${REQUIRED_SCOPES.length} required scopes present`));
+    }
 
     // Validate app token
     console.log(pc.dim('Validating app-level token...'));

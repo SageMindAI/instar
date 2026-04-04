@@ -71,6 +71,24 @@ export class SocketModeClient {
     }
   }
 
+  /** Force-reconnect: tear down existing connection and establish a new one. */
+  async reconnect(): Promise<void> {
+    this._clearHeartbeat();
+    this.reconnecting = false;
+    this.consecutiveErrors = 0;
+    if (this.ws) {
+      // Temporarily clear started to prevent the close handler from
+      // triggering its own reconnect (we're already handling it).
+      const wasStarted = this.started;
+      this.started = false;
+      try { this.ws.close(1000, 'reconnect'); } catch { /* ok */ }
+      this.ws = null;
+      this.started = wasStarted;
+    }
+    this.started = true;
+    await this._openConnection();
+  }
+
   /** Queue an outbound message for sending (or send immediately if connected). */
   queueOutbound(data: string): void {
     if (this.isConnected && this.ws) {
@@ -131,7 +149,17 @@ export class SocketModeClient {
       this.ws = null;
       this.handlers.onDisconnected(event.reason || 'connection closed');
       if (this.started) {
-        this._backoffReconnect();
+        this._backoffReconnect().catch((err) => {
+          console.error('[slack-socket] Reconnect failed:', (err as Error).message);
+          // Schedule one more attempt after MAX_BACKOFF to avoid permanent death
+          if (this.started) {
+            setTimeout(() => {
+              if (this.started && !this.reconnecting) {
+                this._backoffReconnect().catch(() => {});
+              }
+            }, MAX_BACKOFF_MS);
+          }
+        });
       }
     });
 

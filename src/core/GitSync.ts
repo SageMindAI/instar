@@ -329,19 +329,30 @@ export class GitSyncManager {
           return result;
         }
       } else if (errMsg.includes('rebase-merge') || errMsg.includes('rebase in progress') || errMsg.includes('rebase-apply')) {
-        // Stuck rebase state from a previously interrupted pull — abort and retry
-        console.log('[GitSync] Stuck rebase detected — aborting and retrying pull');
+        // Stuck rebase state from a previously interrupted pull — abort and retry with MERGE (not rebase)
+        console.log('[GitSync] Stuck rebase detected — aborting and retrying pull (merge mode)');
         try {
-          this.gitExec(['rebase', '--abort']);
+          try {
+            this.gitExec(['rebase', '--abort']);
+          } catch (abortErr) {
+            // rebase --abort can fail if .git/rebase-merge/head-name is missing (corrupted state)
+            // Manually clean up the rebase state directories as a fallback
+            console.warn(`[GitSync] rebase --abort failed, cleaning up rebase state manually: ${abortErr}`);
+            const rebaseMerge = path.join(this.projectDir, '.git', 'rebase-merge');
+            const rebaseApply = path.join(this.projectDir, '.git', 'rebase-apply');
+            if (fs.existsSync(rebaseMerge)) fs.rmSync(rebaseMerge, { recursive: true, force: true });
+            if (fs.existsSync(rebaseApply)) fs.rmSync(rebaseApply, { recursive: true, force: true });
+          }
           const beforeHead = this.gitHead();
-          this.gitExec(['pull', '--rebase', '--autostash']);
+          // Use merge (not rebase) to avoid recreating the same stuck rebase
+          this.gitExec(['pull', '--no-rebase', '--autostash']);
           const afterHead = this.gitHead();
           result.pulled = beforeHead !== afterHead;
           if (result.pulled) {
             const log = this.gitExec(['log', '--oneline', `${beforeHead}..${afterHead}`]);
             result.commitsPulled = log.trim().split('\n').filter(l => l.trim()).length;
           }
-          console.log('[GitSync] Auto-resolved stuck rebase — pull succeeded');
+          console.log('[GitSync] Auto-resolved stuck rebase — pull succeeded (merge mode)');
         } catch (retryErr) {
           const retryMsg = retryErr instanceof Error ? retryErr.message : String(retryErr);
           console.error(`[GitSync] Stuck rebase auto-resolve failed: ${retryMsg}`);
@@ -351,6 +362,32 @@ export class GitSyncManager {
             fallback: 'Stuck rebase abort + retry failed',
             reason: `Why: Aborted stuck rebase but pull still failed. ${retryMsg.slice(0, 200)}`,
             impact: 'Git pull blocked. Manual intervention may be needed: cd to project and run git rebase --abort, then git pull.',
+          });
+          return result;
+        }
+      } else if (errMsg.includes('Cannot rebase onto multiple branches')) {
+        // Ambiguous upstream tracking — fall back to explicit origin pull with merge
+        console.log('[GitSync] Ambiguous tracking detected — falling back to explicit origin/main merge pull');
+        try {
+          const branch = this.gitExec(['symbolic-ref', '--short', 'HEAD']).trim() || 'main';
+          const beforeHead = this.gitHead();
+          this.gitExec(['pull', '--no-rebase', '--autostash', 'origin', branch]);
+          const afterHead = this.gitHead();
+          result.pulled = beforeHead !== afterHead;
+          if (result.pulled) {
+            const log = this.gitExec(['log', '--oneline', `${beforeHead}..${afterHead}`]);
+            result.commitsPulled = log.trim().split('\n').filter(l => l.trim()).length;
+          }
+          console.log(`[GitSync] Explicit origin/${branch} merge pull succeeded`);
+        } catch (retryErr) {
+          const retryMsg = retryErr instanceof Error ? retryErr.message : String(retryErr);
+          console.error(`[GitSync] Explicit origin pull failed: ${retryMsg}`);
+          DegradationReporter.getInstance().report({
+            feature: 'GitSync.pull',
+            primary: 'Clean git pull',
+            fallback: 'Explicit origin pull with merge failed',
+            reason: `Why: Cannot rebase onto multiple branches, and explicit merge pull also failed. ${retryMsg.slice(0, 200)}`,
+            impact: 'Git pull blocked. Check git remote configuration: git remote -v',
           });
           return result;
         }

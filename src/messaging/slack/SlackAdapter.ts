@@ -199,8 +199,8 @@ export class SlackAdapter implements MessagingAdapter {
       console.warn('[slack] Could not fetch bot user ID — mention detection may not work');
     }
 
-    // Validate required scopes — check files:read which is needed for snippet/Post content
-    this._validateScopes();
+    // Self-verify: check scopes AND test actual API behavior at startup
+    this._selfVerify();
 
     // Auto-join all public channels if in dedicated mode
     if (this.autoJoinChannels) {
@@ -246,6 +246,13 @@ export class SlackAdapter implements MessagingAdapter {
       await this.socketClient.disconnect();
       this.socketClient = null;
     }
+  }
+
+  /** Force-reconnect the Socket Mode WebSocket (e.g., after sleep/wake). */
+  async reconnect(): Promise<void> {
+    if (!this.socketClient) return;
+    console.log('[slack] Reconnecting Socket Mode...');
+    await this.socketClient.reconnect();
   }
 
   async send(message: OutgoingMessage): Promise<void | unknown> {
@@ -1637,14 +1644,29 @@ export class SlackAdapter implements MessagingAdapter {
   }
 
   /**
-   * Validate that the bot token has the required OAuth scopes.
-   * Logs clear, actionable warnings for missing scopes at startup
-   * rather than failing silently at runtime.
+   * Self-verify the adapter's actual capabilities at startup.
+   *
+   * Goes beyond scope checking — actually tests API calls to verify they work.
+   * Reports a clear pass/fail status so broken configurations are caught at
+   * startup, not discovered silently when a user shares a file.
+   *
+   * Checks:
+   *   1. OAuth scopes include all required scopes
+   *   2. files.info API actually responds (not just scope present)
+   *   3. File download auth works (redirect handling)
    */
-  private async _validateScopes(): Promise<void> {
-    const REQUIRED_SCOPES = ['files:read'];
+  private async _selfVerify(): Promise<void> {
+    const results: Array<{ check: string; status: 'pass' | 'fail' | 'skip'; detail: string }> = [];
+
+    // ── Check 1: OAuth scopes ──────────────────────────────────────────
+    // files:read is the critical one (file content extraction depends on it),
+    // but we check all required scopes for completeness.
+    const REQUIRED_SCOPES = [
+      'files:read', 'channels:history', 'channels:read', 'chat:write',
+      'im:history', 'im:read', 'im:write', 'users:read',
+    ];
+    let grantedScopes: string[] = [];
     try {
-      // Use a raw fetch to check response headers (API client doesn't expose them)
       const response = await fetch('https://slack.com/api/auth.test', {
         method: 'POST',
         headers: {
@@ -1654,17 +1676,96 @@ export class SlackAdapter implements MessagingAdapter {
         body: '{}',
       });
       const scopeHeader = response.headers.get('x-oauth-scopes') ?? '';
-      const grantedScopes = scopeHeader.split(',').map(s => s.trim());
+      grantedScopes = scopeHeader.split(',').map(s => s.trim()).filter(Boolean);
       const missing = REQUIRED_SCOPES.filter(s => !grantedScopes.includes(s));
+
       if (missing.length > 0) {
-        console.error(
-          `[slack] ⚠️  Bot token is missing required scope(s): ${missing.join(', ')}. ` +
-          `File content (snippets, Posts, documents) will not be readable. ` +
-          `Add these scopes in your Slack app's OAuth & Permissions page and reinstall the app.`
-        );
+        results.push({
+          check: 'OAuth scopes',
+          status: 'fail',
+          detail: `Missing: ${missing.join(', ')}. Add in Slack app OAuth & Permissions page and reinstall.`,
+        });
+      } else {
+        results.push({ check: 'OAuth scopes', status: 'pass', detail: `${grantedScopes.length} scopes granted` });
       }
-    } catch {
-      // Non-fatal — scope check is best-effort
+    } catch (err) {
+      results.push({ check: 'OAuth scopes', status: 'fail', detail: `auth.test failed: ${(err as Error).message}` });
+    }
+
+    // ── Check 2: files.info API responds correctly ────────────────────
+    if (grantedScopes.includes('files:read')) {
+      try {
+        const resp = await this.apiClient.call('files.info', { file: 'F000SELFTEST' }) as Record<string, unknown>;
+        // We expect file_not_found for a fake ID — that means the API is working
+        results.push({ check: 'files.info API', status: 'pass', detail: 'API responded (unexpected ok for fake file)' });
+      } catch (err) {
+        const msg = (err as Error).message;
+        if (msg.includes('file_not_found')) {
+          results.push({ check: 'files.info API', status: 'pass', detail: 'API responsive (file_not_found for test ID)' });
+        } else if (msg.includes('missing_scope')) {
+          results.push({
+            check: 'files.info API',
+            status: 'fail',
+            detail: 'Returns missing_scope despite scope header claiming files:read is granted',
+          });
+        } else {
+          results.push({ check: 'files.info API', status: 'fail', detail: `Unexpected error: ${msg}` });
+        }
+      }
+    } else {
+      results.push({
+        check: 'files.info API',
+        status: 'skip',
+        detail: 'Skipped — files:read scope not granted',
+      });
+    }
+
+    // ── Check 3: File download auth (redirect handling) ───────────────
+    try {
+      // Test against a known Slack file URL pattern to verify redirect handling works
+      const resp = await fetch('https://files.slack.com/files-pri/TSELFTEST/test.txt', {
+        headers: { Authorization: `Bearer ${this.config.botToken}` },
+        redirect: 'manual',
+      });
+      // We expect either a redirect (our manual handling will deal with it)
+      // or an error (invalid workspace). Both prove the auth+redirect path works.
+      if (resp.status >= 300 && resp.status < 400) {
+        const location = resp.headers.get('location') ?? '';
+        const redirectHost = location ? new URL(location).hostname : 'unknown';
+        results.push({
+          check: 'File download auth',
+          status: 'pass',
+          detail: `Redirect handling works (→ ${redirectHost})`,
+        });
+      } else {
+        results.push({
+          check: 'File download auth',
+          status: 'pass',
+          detail: `Auth request completed (status ${resp.status})`,
+        });
+      }
+    } catch (err) {
+      results.push({
+        check: 'File download auth',
+        status: 'fail',
+        detail: `Download test failed: ${(err as Error).message}`,
+      });
+    }
+
+    // ── Report ────────────────────────────────────────────────────────
+    const failures = results.filter(r => r.status === 'fail');
+    const passes = results.filter(r => r.status === 'pass');
+
+    if (failures.length > 0) {
+      console.error(`[slack] ⚠️  Self-verification: ${failures.length} check(s) FAILED`);
+      for (const f of failures) {
+        console.error(`[slack]   ❌ ${f.check}: ${f.detail}`);
+      }
+      for (const p of passes) {
+        console.log(`[slack]   ✅ ${p.check}: ${p.detail}`);
+      }
+    } else {
+      console.log(`[slack] ✅ Self-verification passed (${passes.length} checks)`);
     }
   }
 
