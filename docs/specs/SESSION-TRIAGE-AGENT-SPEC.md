@@ -210,7 +210,8 @@ On follow-up (via `--resume`), the session retains full context of its prior inv
 ```
 Tier 0: Heuristic Fast-Path (free, <100ms)
   ├── Session dead (tmux missing or no claude process) → auto-restart
-  ├── Session at prompt (❯ in last 3 lines) + message pending → reinject message
+  ├── Session at prompt (❯ / > / bypass permissions) + message pending → reinject message
+  ├── Session compacted (output contains "Conversation compacted") + prompt visible + unanswered user message → reinject message (Pattern 2b)
   ├── JSONL growing rapidly (>10KB/min) → status update ("working")
   └── All other cases → escalate to Tier 1
 
@@ -274,7 +275,7 @@ Auto-actions ONLY execute if the LLM's classification is confirmed by machine-ve
 |----------|--------------------------|
 | `auto_interrupt` | Process tree shows a child process running >5 min AND session is alive |
 | `auto_restart` | `isClaudeAlive()` returns 'dead' or 'missing' AND tmux session exists but has no claude child |
-| `reinject_message` | Session is alive AND prompt character (❯) detected in last 3 lines |
+| `reinject_message` | Session is alive AND prompt indicator detected in last 5 lines (❯, bypass permissions, or bare `>`) — OR session output contains "Conversation compacted" AND any prompt indicator visible AND last message was from user |
 
 If the deterministic check fails, the action is downgraded to the `suggest_*` variant (user confirmation required).
 
