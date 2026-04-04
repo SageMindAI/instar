@@ -562,7 +562,7 @@ export class TriageOrchestrator extends EventEmitter {
     if (output) {
       const lines = output.split('\n').filter(l => l.trim());
       const tail = lines.slice(-3).join('\n');
-      if ((tail.includes('❯') || tail.includes('bypass permissions')) && evidence.pendingMessage) {
+      if ((tail.includes('❯') || tail.includes('bypass permissions') || /^>\s*$/m.test(tail)) && evidence.pendingMessage) {
         return {
           classification: 'message_lost',
           confidence: 0.95,
@@ -571,6 +571,31 @@ export class TriageOrchestrator extends EventEmitter {
           action: 'reinject_message',
           followUpMinutes: null,
           reasoning: 'Prompt character visible in last 3 lines, message was pending',
+        };
+      }
+    }
+
+    // Pattern 2b: Post-compaction idle — session compacted and is sitting at a prompt
+    // with unanswered user messages. The compaction-recovery hook injects context but
+    // the session still needs a user message to trigger a response.
+    if (output && /Conversation compacted|✱.*compacted/i.test(output)) {
+      const lines = output.split('\n').filter(l => l.trim());
+      const tail = lines.slice(-5).join('\n');
+      // Check for idle prompt indicators after compaction
+      const atPrompt = tail.includes('❯') || tail.includes('bypass permissions') || /^>\s*$/m.test(tail) || tail.trim() === '>';
+      // Check for unanswered user messages in recent history
+      const hasUnanswered = evidence.recentMessages.length > 0 &&
+        evidence.recentMessages[evidence.recentMessages.length - 1]?.fromUser;
+      if (atPrompt && hasUnanswered) {
+        const lastUserMsg = evidence.recentMessages.filter(m => m.fromUser).pop();
+        return {
+          classification: 'message_lost',
+          confidence: 0.95,
+          summary: 'Session compacted and idle at prompt with unanswered user message',
+          userMessage: `${TRIAGE_MESSAGE_PREFIX}Your session just went through a context reset and missed your message. Re-sending it now...`,
+          action: 'reinject_message',
+          followUpMinutes: 2,
+          reasoning: `"Conversation compacted" in output, prompt visible, last message from user: "${lastUserMsg?.text.slice(0, 80) || '?'}"`,
         };
       }
     }

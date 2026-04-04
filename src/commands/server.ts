@@ -3945,6 +3945,32 @@ export async function startServer(options: StartOptions): Promise<void> {
     const hookEventReceiver = new HookEventReceiver({ stateDir: config.stateDir });
     console.log(pc.green('  Hook event receiver enabled'));
 
+    // Wire PreCompact events to trigger proactive triage after compaction.
+    // When a session compacts, it goes idle at a prompt. If there are unanswered
+    // user messages (common with Telegram/Slack), Pattern 2b will reinject them.
+    if (triageOrchestrator && telegram) {
+      const _triageOrch = triageOrchestrator;
+      const _telegram = telegram;
+      hookEventReceiver.on('PreCompact', () => {
+        // Delay to let compaction + recovery hooks finish
+        setTimeout(() => {
+          const topicSessions = _telegram.getAllTopicSessions();
+          for (const [topicId, sessionName] of topicSessions) {
+            if (!sessionManager.isSessionAlive(sessionName)) continue;
+            const history = _telegram.getTopicHistory(topicId, 5);
+            const lastMsg = history[history.length - 1];
+            if (lastMsg?.fromUser) {
+              console.log(`[CompactionResume] PreCompact detected, topic ${topicId} has unanswered message — activating triage`);
+              _triageOrch.activate(topicId, sessionName, 'watchdog', lastMsg.text, Date.now()).catch(err => {
+                console.warn(`[CompactionResume] Triage activation failed for topic ${topicId}:`, err);
+              });
+            }
+          }
+        }, 10_000);
+      });
+      console.log(pc.green('  Compaction auto-resume wired to triage orchestrator'));
+    }
+
     // Subagent Tracker — monitors subagent lifecycle via hook events
     const { SubagentTracker } = await import('../monitoring/SubagentTracker.js');
     const subagentTracker = new SubagentTracker({ stateDir: config.stateDir });
@@ -4360,6 +4386,21 @@ export async function startServer(options: StartOptions): Promise<void> {
           // Re-enable auto-reconnect even on failure so it can self-heal
           tunnel.enableAutoReconnect();
         }
+      }
+
+      // Reconnect Slack after sleep — WebSocket connections die during sleep
+      // and the close-handler reconnect can silently fail if the network isn't
+      // fully up yet. Proactive reconnect after a short delay is more reliable.
+      if (slackAdapter) {
+        // Wait 2s for network to stabilize after wake before reconnecting
+        setTimeout(async () => {
+          try {
+            await slackAdapter!.reconnect();
+            console.log('[SleepWake] Slack reconnected');
+          } catch (err) {
+            console.error('[SleepWake] Slack reconnect failed:', (err as Error).message);
+          }
+        }, 2000);
       }
 
       // Notify via batcher — wake events are informational, not urgent

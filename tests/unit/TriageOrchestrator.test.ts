@@ -121,6 +121,75 @@ describe('TriageOrchestrator', () => {
       }
     });
 
+    // Pattern 2 (extended): Bare > prompt with pending message
+    it('detects bare > prompt with pending message', () => {
+      const evidence = makeEvidence({
+        tmuxOutput: 'some output\n\n> ',
+        pendingMessage: 'What about that feature?',
+      });
+      const result = orchestrator.runHeuristics(evidence);
+      expect(result).not.toBeNull();
+      expect(result!.classification).toBe('message_lost');
+      expect(result!.action).toBe('reinject_message');
+    });
+
+    // Pattern 2b: Post-compaction idle
+    it('detects post-compaction idle with unanswered user message', () => {
+      const evidence = makeEvidence({
+        tmuxOutput: '✱ Conversation compacted (ctrl+o for history)\n\n> /compact\n  Compacted\n\n> ',
+        recentMessages: [
+          { text: 'What counts as a conversation?', fromUser: true, timestamp: '2026-04-04T19:00:00Z' },
+        ],
+      });
+      const result = orchestrator.runHeuristics(evidence);
+      expect(result).not.toBeNull();
+      expect(result!.classification).toBe('message_lost');
+      expect(result!.action).toBe('reinject_message');
+      expect(result!.confidence).toBeGreaterThanOrEqual(0.9);
+      expect(result!.reasoning).toContain('Conversation compacted');
+    });
+
+    it('detects compaction with bypass permissions prompt', () => {
+      const evidence = makeEvidence({
+        tmuxOutput: '✱ Conversation compacted (ctrl+o for history)\n\nbypass permissions on (shift+tab to cycle)\n',
+        recentMessages: [
+          { text: 'Agent response', fromUser: false, timestamp: '2026-04-04T18:50:00Z' },
+          { text: 'Please look into this', fromUser: true, timestamp: '2026-04-04T19:00:00Z' },
+        ],
+      });
+      const result = orchestrator.runHeuristics(evidence);
+      expect(result).not.toBeNull();
+      expect(result!.classification).toBe('message_lost');
+      expect(result!.action).toBe('reinject_message');
+    });
+
+    it('does NOT trigger compaction pattern when last message is from agent', () => {
+      const evidence = makeEvidence({
+        tmuxOutput: '✱ Conversation compacted (ctrl+o for history)\n\n> ',
+        recentMessages: [
+          { text: 'User question', fromUser: true, timestamp: '2026-04-04T18:50:00Z' },
+          { text: 'Agent answered', fromUser: false, timestamp: '2026-04-04T19:00:00Z' },
+        ],
+      });
+      const result = orchestrator.runHeuristics(evidence);
+      // Should not match pattern 2b — last message is from agent (no unanswered)
+      if (result) {
+        expect(result.action).not.toBe('reinject_message');
+      }
+    });
+
+    it('does NOT trigger compaction pattern when no recent messages', () => {
+      const evidence = makeEvidence({
+        tmuxOutput: '✱ Conversation compacted (ctrl+o for history)\n\n> ',
+        recentMessages: [],
+      });
+      const result = orchestrator.runHeuristics(evidence);
+      // Should not match pattern 2b — no messages to reinject
+      if (result) {
+        expect(result.action).not.toBe('reinject_message');
+      }
+    });
+
     // Pattern 3: JSONL growing rapidly
     it('detects JSONL actively being written', () => {
       const evidence = makeEvidence({
