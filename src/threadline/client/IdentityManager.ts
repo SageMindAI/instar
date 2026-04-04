@@ -1,8 +1,14 @@
 /**
  * IdentityManager — Manages Ed25519 identity keys for relay agents.
  *
- * Generates, stores, and loads identity keypairs from disk.
- * Part of Threadline Relay Phase 1.
+ * Delegates to the canonical identity ({stateDir}/identity.json) when available,
+ * falling back to the legacy Threadline identity ({stateDir}/threadline/identity.json).
+ *
+ * This ensures backward compatibility: existing agents keep working with their
+ * legacy identity, while new/migrated agents use the canonical location.
+ *
+ * The IdentityInfo interface is unchanged — consumers don't need to know
+ * which storage backend is in use.
  */
 
 import fs from 'node:fs';
@@ -21,29 +27,36 @@ export interface IdentityInfo {
 
 export class IdentityManager {
   private readonly stateDir: string;
-  private readonly keyFile: string;
+  private readonly legacyKeyFile: string;
+  private readonly canonicalKeyFile: string;
   private identity: IdentityInfo | null = null;
 
   constructor(stateDir: string) {
     this.stateDir = stateDir;
-    this.keyFile = path.join(stateDir, 'threadline', 'identity.json');
+    this.legacyKeyFile = path.join(stateDir, 'threadline', 'identity.json');
+    this.canonicalKeyFile = path.join(stateDir, 'identity.json');
   }
 
   /**
    * Get or create the agent's identity.
-   * Generates a new keypair on first use, loads from disk on subsequent uses.
+   *
+   * Priority:
+   * 1. Cached in-memory identity
+   * 2. Canonical identity ({stateDir}/identity.json)
+   * 3. Legacy identity ({stateDir}/threadline/identity.json)
+   * 4. Generate new (saves to legacy path for backward compat)
    */
   getOrCreate(): IdentityInfo {
     if (this.identity) return this.identity;
 
-    // Try loading from disk
-    const loaded = this.loadFromDisk();
+    // Try canonical first, then legacy
+    const loaded = this.loadFromCanonical() ?? this.loadFromLegacy();
     if (loaded) {
       this.identity = loaded;
       return loaded;
     }
 
-    // Generate new identity
+    // Generate new identity (legacy path for backward compat with standalone tooling)
     const keypair = generateIdentityKeyPair();
     const identity: IdentityInfo = {
       fingerprint: computeFingerprint(keypair.publicKey),
@@ -63,7 +76,7 @@ export class IdentityManager {
    */
   get(): IdentityInfo | null {
     if (this.identity) return this.identity;
-    const loaded = this.loadFromDisk();
+    const loaded = this.loadFromCanonical() ?? this.loadFromLegacy();
     if (loaded) {
       this.identity = loaded;
     }
@@ -71,25 +84,59 @@ export class IdentityManager {
   }
 
   /**
-   * Check if an identity exists.
+   * Check if an identity exists (canonical or legacy).
    */
   exists(): boolean {
-    return this.identity !== null || fs.existsSync(this.keyFile);
+    return this.identity !== null
+      || fs.existsSync(this.canonicalKeyFile)
+      || fs.existsSync(this.legacyKeyFile);
   }
 
   /**
    * Get the directory where keys are stored.
    */
   get keyDir(): string {
-    return path.dirname(this.keyFile);
+    return path.dirname(this.legacyKeyFile);
   }
 
   // ── Private ─────────────────────────────────────────────────────
 
-  private loadFromDisk(): IdentityInfo | null {
+  /**
+   * Load from canonical identity.json (new format).
+   * Only loads unencrypted keys — encrypted keys require the CanonicalIdentityManager
+   * with a passphrase, which is handled at a higher level.
+   */
+  private loadFromCanonical(): IdentityInfo | null {
     try {
-      if (!fs.existsSync(this.keyFile)) return null;
-      const raw = JSON.parse(fs.readFileSync(this.keyFile, 'utf-8'));
+      if (!fs.existsSync(this.canonicalKeyFile)) return null;
+      const raw = JSON.parse(fs.readFileSync(this.canonicalKeyFile, 'utf-8'));
+
+      // Only load if unencrypted — encrypted keys need CanonicalIdentityManager
+      if (raw.privateKeyEncryption && raw.privateKeyEncryption !== 'none') {
+        return null;
+      }
+
+      const privateKey = Buffer.from(raw.privateKey, 'base64');
+      const publicKey = Buffer.from(raw.publicKey, 'base64');
+      return {
+        fingerprint: computeFingerprint(publicKey),
+        publicKey,
+        privateKey,
+        x25519PublicKey: deriveX25519PublicKey(privateKey),
+        createdAt: raw.createdAt,
+      };
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * Load from legacy threadline/identity.json (old format).
+   */
+  private loadFromLegacy(): IdentityInfo | null {
+    try {
+      if (!fs.existsSync(this.legacyKeyFile)) return null;
+      const raw = JSON.parse(fs.readFileSync(this.legacyKeyFile, 'utf-8'));
       const privateKey = Buffer.from(raw.privateKey, 'base64');
       return {
         fingerprint: raw.fingerprint,
@@ -106,7 +153,7 @@ export class IdentityManager {
   }
 
   private saveToDisk(identity: IdentityInfo): void {
-    const dir = path.dirname(this.keyFile);
+    const dir = path.dirname(this.legacyKeyFile);
     fs.mkdirSync(dir, { recursive: true });
 
     const data = JSON.stringify({
@@ -118,8 +165,8 @@ export class IdentityManager {
     }, null, 2);
 
     // Atomic write
-    const tmpPath = `${this.keyFile}.${process.pid}.tmp`;
+    const tmpPath = `${this.legacyKeyFile}.${process.pid}.tmp`;
     fs.writeFileSync(tmpPath, data, { mode: 0o600 });
-    fs.renameSync(tmpPath, this.keyFile);
+    fs.renameSync(tmpPath, this.legacyKeyFile);
   }
 }
