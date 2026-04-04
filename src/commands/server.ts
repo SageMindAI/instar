@@ -1721,25 +1721,9 @@ export async function startServer(options: StartOptions): Promise<void> {
     }
   }
 
-  // Migration: fix autoApply default bug from init.ts (pre-0.9.47).
-  // init.ts wrote `updates.autoApply: false` despite the intended default being true.
-  // One-time fix: rewrite the config file if autoApply is explicitly false.
-  if (config.updates?.autoApply === false) {
-    try {
-      const configPath = path.join(config.projectDir, '.instar', 'config.json');
-      if (fs.existsSync(configPath)) {
-        const raw = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
-        if (raw.updates?.autoApply === false) {
-          raw.updates.autoApply = true;
-          fs.writeFileSync(configPath, JSON.stringify(raw, null, 2) + '\n');
-          config.updates = { ...config.updates, autoApply: true };
-          console.log(`[migration] Fixed updates.autoApply: false → true (bug in init.ts pre-0.9.47)`);
-        }
-      }
-    } catch (err) {
-      console.error(`[migration] Failed to fix autoApply config:`, err);
-    }
-  }
+  // Migration disabled — we manage updates via the daily rebase job,
+  // not via npm auto-updates. The migration was forcing autoApply: true
+  // which overwrites our intentional autoApply: false setting.
 
   const serverSessionName = `${config.projectName}-server`;
 
