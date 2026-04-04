@@ -544,10 +544,74 @@ class RelayConnection {
     this.profile = profile;
   }
 
+  /**
+   * Check if a local listener is running on the given port.
+   * If so, we should route through it instead of connecting directly.
+   */
+  private async isListenerAvailable(): Promise<boolean> {
+    const port = parseInt(process.env.THREADLINE_SEND_PORT || '7711', 10);
+    return new Promise((resolve) => {
+      const http = require('http');
+      const req = http.get(`http://127.0.0.1:${port}/status`, (res: any) => {
+        let data = '';
+        res.on('data', (chunk: string) => { data += chunk; });
+        res.on('end', () => {
+          try {
+            const status = JSON.parse(data);
+            resolve(status.connected === true);
+          } catch { resolve(false); }
+        });
+      });
+      req.on('error', () => resolve(false));
+      req.setTimeout(2000, () => { req.destroy(); resolve(false); });
+    });
+  }
+
+  /**
+   * Send a message via the local listener's HTTP API instead of direct relay.
+   */
+  async sendViaListener(to: string, text: string, threadId?: string): Promise<{ sent: boolean; threadId: string }> {
+    const port = parseInt(process.env.THREADLINE_SEND_PORT || '7711', 10);
+    const http = require('http');
+    const body = JSON.stringify({ to, text, threadId });
+    return new Promise((resolve, reject) => {
+      const req = http.request({
+        hostname: '127.0.0.1', port, path: '/send', method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(body) },
+        timeout: 5000,
+      }, (res: any) => {
+        let data = '';
+        res.on('data', (chunk: string) => { data += chunk; });
+        res.on('end', () => {
+          try { resolve(JSON.parse(data)); }
+          catch { reject(new Error('Invalid response from listener')); }
+        });
+      });
+      req.on('error', reject);
+      req.on('timeout', () => { req.destroy(); reject(new Error('timeout')); });
+      req.write(body);
+      req.end();
+    });
+  }
+
+  // Flag: true when using listener proxy mode (no direct relay connection)
+  private listenerProxyMode = false;
+
   async connect(): Promise<string> {
     if (this.connected && this.ws?.readyState === WebSocket.OPEN) {
       return this.sessionId!;
     }
+
+    // Check if a local listener is already connected — use it as proxy
+    const listenerAvailable = await this.isListenerAvailable();
+    if (listenerAvailable) {
+      this.listenerProxyMode = true;
+      this.connected = true;
+      this.sessionId = 'listener-proxy';
+      process.stderr.write('[threadline-mcp] Using listener proxy mode (no direct relay connection)\n');
+      return this.sessionId;
+    }
+    this.listenerProxyMode = false;
 
     this.shouldReconnect = true;
 
@@ -730,15 +794,24 @@ class RelayConnection {
   }
 
   sendMessage(to: string, text: string, threadId?: string): string {
-    if (!this.connected || !this.ws || this.ws.readyState !== WebSocket.OPEN) {
-      throw new Error('Not connected to relay');
-    }
-
     if (text.length > MAX_MESSAGE_SIZE) {
       throw new Error(`Message too large (${text.length} bytes, max ${MAX_MESSAGE_SIZE})`);
     }
 
     const tid = threadId || `thread-${crypto.randomBytes(4).toString('hex')}`;
+
+    // Listener proxy mode: route through local HTTP API
+    if (this.listenerProxyMode) {
+      this.sendViaListener(to, text, tid).catch((err) => {
+        process.stderr.write(`[threadline-mcp] Listener send failed: ${err.message}\n`);
+      });
+      return tid;
+    }
+
+    if (!this.connected || !this.ws || this.ws.readyState !== WebSocket.OPEN) {
+      throw new Error('Not connected to relay');
+    }
+
     const msgId = crypto.randomUUID();
 
     // Clean envelope — no fake crypto fields
