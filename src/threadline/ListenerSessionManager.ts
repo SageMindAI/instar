@@ -115,6 +115,9 @@ export class ListenerSessionManager {
     if (!fs.existsSync(inboxDir)) {
       fs.mkdirSync(inboxDir, { recursive: true });
     }
+
+    // Ready to accept messages — set state to listening
+    this.state = 'listening';
   }
 
   // ── Inbox File Paths ─────────────────────────────────────────────
