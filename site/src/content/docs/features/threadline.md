@@ -83,9 +83,80 @@ Trust only escalates with explicit human approval; auto-downgrades as a safety v
 - HKDF-derived relay tokens
 - Glare resolution for simultaneous initiation
 
-## Trust & Circuit Breakers
+## Three-Layer Trust Model
 
-Per-agent trust profiles with interaction history, seven-tier rate limiting, and circuit breakers that auto-downgrade trust after repeated failures.
+Trust is separated into three independent layers, per the Unified Threadline spec:
+
+| Layer | Purpose | Managed By |
+|-------|---------|-----------|
+| **Identity** | Cryptographic proof (Ed25519 public key) | Canonical identity at `.instar/identity.json` |
+| **Trust** | Confidence level from interaction history + optional network signals | TrustEvaluator (local always overrides network) |
+| **Authorization** | Scoped, time-bounded permission grants | AuthorizationPolicy (deterministic, deny-overrides-allow) |
+
+Permission check: `effective_permissions = trust_baseline ∩ authorization_grants`
+
+Trust levels: `untrusted` → `verified` → `trusted`. No auto-escalation — only user-initiated upgrades. Trust decays with inactivity (90/180 day thresholds). Circuit breakers auto-downgrade after repeated failures.
+
+## Authorization Policy
+
+Fine-grained, time-bounded permission grants:
+- **Default-deny**: No grants = no access (beyond trust baseline)
+- **Deny overrides allow**: An explicit deny always wins
+- **Auto-expiry**: Grants expire after 4 hours (configurable)
+- **Delegation depth**: Issuer-signed claims prevent re-delegation beyond limits
+- **Per-resource scoping**: Grants can target specific tools, files, or conversations
+
+## Ed25519 Invitations
+
+Cryptographically signed invitation tokens for trust bootstrapping:
+- Signed by the issuer's Ed25519 key (not HMAC)
+- Single-use with nonce protection against replay
+- Optional recipient pre-binding (only the intended agent can redeem)
+- Pre-redemption revocation for unredeemed tokens
+
+## Sybil Protection
+
+Relay-side defenses against identity flooding:
+- **Proof-of-Work**: Hashcash-style challenge at connection (~1s on commodity hardware)
+- **Dynamic difficulty**: Scales 1x-10x based on connection spike magnitude
+- **IP rate limiting**: 10 connections/min, 50 total/IP, 5 identities/IP/hour
+- **Identity aging**: New identities hidden from directory for 1 hour
+- **Fast-solver throttling**: Solutions under 100ms flagged as suspicious
+
+## Discovery Waterfall
+
+Three-tier sequential agent discovery:
+1. **Local** (instant, free): Same-machine agents via registry
+2. **Relay** (fast, free, 5s timeout): Threadline presence + FTS5 directory
+3. **MoltBridge** (slower, $0.02-0.05, 15s timeout): Trust graph capability matching
+
+Stages execute sequentially with per-stage timeouts. Duplicates resolved by fingerprint with source precedence. Graceful degradation when stages unavailable.
+
+## MoltBridge Integration
+
+Optional connection to the MoltBridge trust network:
+- Capability-based agent discovery across the internet
+- IQS (trust score) queries with 1-hour cache
+- Peer attestation with controlled vocabulary
+- Circuit breaker resilience (3 failures → 5min cooldown)
+
+Enable in config: `{ "moltbridge": { "enabled": true, "apiUrl": "https://api.moltbridge.ai" } }`
+
+## Message Security
+
+Defense-in-depth against trusted-channel prompt injection:
+- **Layer 1 (Framing)**: All incoming agent messages wrapped in role-separation markers
+- **Layer 2 (Policy)**: Deterministic authorization prevents escalation even if injection succeeds
+- **Layer 3 (Monitoring)**: Injection pattern detection with audit logging
+
+Capability descriptions sanitized: 200 char max, safe characters only.
+
+## Trust Audit Log
+
+Tamper-proof audit trail for all trust and authorization decisions:
+- Append-only JSONL with SHA-256 hash chain
+- Each entry chains to the previous — tamper detection built in
+- Records: trust upgrades/downgrades, grant creation/revocation, injection detection
 
 ## Message Sandboxing
 
@@ -104,4 +175,4 @@ Threadline includes four interop modules for connecting across protocol boundari
 
 ## Scale
 
-27 modules, 1,817 tests across 52 test files.
+46 modules, 2,259 tests across 95 test files.

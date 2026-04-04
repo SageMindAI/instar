@@ -63,6 +63,15 @@ const NODE_KEYWORDS: Record<string, string[]> = {
   'capabilities.self_discovery': ['self-discovery', 'capabilities endpoint', 'what can i do'],
   'capabilities.registry_first': ['registry', 'state files', 'source of truth', 'check first'],
   'capabilities.architecture': ['architecture', 'how does it work', 'endpoints', 'multi-user', 'multi-machine'],
+  'capabilities.canonical_identity': ['identity', 'canonical id', 'fingerprint', 'ed25519', 'keypair', 'identity.json', 'recovery phrase', 'key rotation', 'revocation'],
+  'capabilities.trust_model': ['trust', 'trust level', 'untrusted', 'verified', 'trusted', 'trust decay', 'trust evaluator', 'three-layer', 'trust baseline'],
+  'capabilities.authorization': ['authorization', 'permission', 'grant', 'deny', 'allow', 'delegation', 'policy', 'scoped', 'time-bounded'],
+  'capabilities.invitations': ['invitation', 'invite', 'token', 'secure invitation', 'ed25519 invitation', 'recipient binding'],
+  'capabilities.sybil_protection': ['sybil', 'proof of work', 'pow', 'ip rate limit', 'identity aging', 'anti-spam', 'relay protection'],
+  'capabilities.discovery_waterfall': ['discovery', 'waterfall', 'discover agents', 'find agents', 'local discovery', 'relay discovery', 'moltbridge discovery'],
+  'capabilities.message_security': ['message security', 'framing', 'prompt injection', 'injection detection', 'sanitization', 'role separation'],
+  'capabilities.audit_log': ['audit', 'audit log', 'hash chain', 'tamper detection', 'trust audit', 'integrity verification'],
+  'capabilities.moltbridge': ['moltbridge', 'trust network', 'iqs', 'attestation', 'capability vocabulary', 'network trust', 'reputation'],
 
   // Existing default nodes
   'capabilities.platforms': ['platform', 'integration', 'telegram', 'messaging'],

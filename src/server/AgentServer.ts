@@ -122,6 +122,7 @@ export class AgentServer {
     soulManager?: import('../core/SoulManager.js').SoulManager;
     featureRegistry?: import('../core/FeatureRegistry.js').FeatureRegistry;
     discoveryEvaluator?: import('../core/DiscoveryEvaluator.js').DiscoveryEvaluator;
+    unifiedTrust?: import('../threadline/UnifiedTrustWiring.js').UnifiedTrustSystem;
     liveConfig?: { set(path: string, value: unknown): void };
   }) {
     this.config = options.config;
@@ -311,6 +312,7 @@ export class AgentServer {
       soulManager: options.soulManager ?? null,
       featureRegistry: options.featureRegistry ?? null,
       discoveryEvaluator: options.discoveryEvaluator ?? null,
+      unifiedTrust: options.unifiedTrust ?? null,
       startTime: this.startTime,
     };
     this.routeContext = routeCtx;

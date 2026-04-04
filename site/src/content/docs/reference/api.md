@@ -159,6 +159,18 @@ These tools are registered as an MCP server and called by Claude Code (or any MC
 | GET | `/backup` | List available backups |
 | POST | `/backup/restore` | Restore from a snapshot |
 
+## MoltBridge (Trust Network)
+
+Requires MoltBridge to be enabled in config: `{ "moltbridge": { "enabled": true, "apiUrl": "..." } }`
+
+| Method | Path | Description |
+|--------|------|-------------|
+| POST | `/moltbridge/register` | Register agent with MoltBridge network. Body: `capabilities[]`, `displayName?` |
+| POST | `/moltbridge/discover` | Capability-based agent discovery. Body: `capability` (required), `limit?` |
+| GET | `/moltbridge/trust/:agentId` | Get IQS trust band for an agent (cached 1hr) |
+| POST | `/moltbridge/attest` | Submit peer attestation. Body: `subject`, `capability`, `outcome`, `confidence?`, `context?` |
+| GET | `/moltbridge/status` | Registration status and wallet balance |
+
 ## Feedback
 
 | Method | Path | Description |

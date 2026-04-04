@@ -113,7 +113,7 @@ Instar solves the six dimensions of agent coherence:
 | **Intent Alignment** | Decision journaling, drift detection, organizational constraints | [→](https://instar.sh/features/intent/) |
 | **Multi-Machine** | Ed25519/X25519 crypto identity, encrypted sync, automatic failover | [→](https://instar.sh/features/multi-machine/) |
 | **Serendipity Protocol** | Sub-agents capture out-of-scope discoveries without breaking focus. HMAC-signed, secret-scanned | [→](https://instar.sh/features/serendipity/) |
-| **Threadline Protocol** | Agent-to-agent conversations with canonical identity, three-layer trust, MoltBridge network discovery, and framework-agnostic interop. 2,032 tests across 76 test files | [→](https://instar.sh/features/threadline/) |
+| **Threadline Protocol** | Agent-to-agent conversations with canonical identity, three-layer trust model, authorization policy, Ed25519 invitations, Sybil protection, MoltBridge network discovery, discovery waterfall, message security, tamper-proof audit logging, and framework-agnostic interop. 2,259 tests across 95 test files | [→](https://instar.sh/features/threadline/) |
 | **Self-Healing** | LLM-powered stall detection, session recovery, promise tracking | [→](https://instar.sh/features/self-healing/) |
 | **AutoUpdater** | Built-in update engine. Checks npm, auto-applies, self-restarts | [→](https://instar.sh/features/autoupdater/) |
 | **Behavioral Hooks** | 9 automatic hooks: command guards, safety gates, identity grounding, topic context | [→](https://instar.sh/reference/hooks/) |

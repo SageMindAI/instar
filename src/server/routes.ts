@@ -74,6 +74,7 @@ import type { QuotaManager } from '../monitoring/QuotaManager.js';
 import type { ThreadlineRouter } from '../threadline/ThreadlineRouter.js';
 import type { HandshakeManager } from '../threadline/HandshakeManager.js';
 import { createThreadlineRoutes } from '../threadline/ThreadlineEndpoints.js';
+import type { UnifiedTrustSystem } from '../threadline/UnifiedTrustWiring.js';
 import { ScopeCoherenceTracker } from '../core/ScopeCoherenceTracker.js';
 import type { ScopeCoherenceState } from '../core/ScopeCoherenceTracker.js';
 import type { HookEventReceiver } from '../monitoring/HookEventReceiver.js';
@@ -152,6 +153,7 @@ export interface RouteContext {
   soulManager: import('../core/SoulManager.js').SoulManager | null;
   featureRegistry: import('../core/FeatureRegistry.js').FeatureRegistry | null;
   discoveryEvaluator: import('../core/DiscoveryEvaluator.js').DiscoveryEvaluator | null;
+  unifiedTrust: UnifiedTrustSystem | null;
   startTime: Date;
 }
 
@@ -8166,6 +8168,19 @@ export function createRoutes(ctx: RouteContext): Router {
       },
     );
     router.use(threadlineRoutes);
+  }
+
+  // ── MoltBridge Integration ──────────────────────────────────────────
+
+  if (ctx.unifiedTrust?.moltbridge) {
+    import('../moltbridge/routes.js').then(({ createMoltBridgeRoutes }) => {
+      router.use(createMoltBridgeRoutes({
+        client: ctx.unifiedTrust!.moltbridge!,
+        identity: ctx.unifiedTrust!.identity,
+      }));
+    }).catch(err => {
+      console.error(`MoltBridge routes failed to mount: ${err instanceof Error ? err.message : err}`);
+    });
   }
 
   // ── Threadline Status (auth-gated) ──────────────────────────────────
