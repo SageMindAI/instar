@@ -5,7 +5,7 @@
 > consistent user experience regardless of which platform an agent communicates through.
 >
 > **Maintained by**: Echo (instar developer agent)
-> **Last updated**: 2026-03-30
+> **Last updated**: 2026-04-04
 
 ---
 
@@ -135,6 +135,7 @@
 | 6.7 | `/restart` command | Kill and respawn session | Yes | Yes (v0.25.0: !restart) | - |
 | 6.8 | `/triage` command | Show triage status | Yes | Yes (v0.25.4: !triage via onGetTriageStatus callback) | - |
 | 6.9 | Session death classification | Classify exit cause (quota, timeout, error) | Yes | Yes (v0.25.4: onClassifySessionDeath callback) | - |
+| 6.10 | Context exhaustion fresh respawn | When session hits context window limit, kill and restart FRESH (no --resume), thread history bootstrapped as context | Yes | Yes (v0.27.1: fresh session spawned with ring buffer history + relay instructions; resume UUID cleared to prevent death loop) | - |
 
 ---
 
@@ -381,3 +382,4 @@
 | 2.13 | 2026-04-03 | v0.26.8: Slack inbound message enrichment — (1) link unfurls and rich previews now extracted from message.attachments[] and inlined into message text (1.1.1 updated); (2) file download reliability: prefers url_private_download, preserves auth header across CDN redirects via manual redirect following (1.1.3 updated); (3) files.info failures now logged instead of silently swallowed |
 | 2.14 | 2026-04-03 | v0.26.11: (1) Slack scope validation at startup — adapter checks for files:read scope on connect, logs actionable warning if missing instead of silently failing at runtime; (2) Post/snippet extraction order corrected — files.info tried first (full content), event preview demoted to fallback (Post previews are truncated by Slack); (3) HTML stripping for Post content via files.info content field (1.1.3 updated) |
 | 2.15 | 2026-04-04 | v0.27.0: Slack reliability hardening — no parity row changes. (1) `_validateScopes()` upgraded to `_selfVerify()`: now checks 8 required OAuth scopes (not just files:read) and performs live API capability tests (files.info call + download auth) at startup to catch misconfigured tokens early; (2) `reconnect()` public method added to SlackAdapter + SocketModeClient for force-reconnect; server wires this to sleep-wake events (2s post-wake delay) so WebSocket connections survive machine sleep; (3) SocketModeClient churn death spiral fix: `_backoffReconnect()` failure now schedules one final retry after MAX_BACKOFF instead of permanently dropping the connection. |
+| 2.16 | 2026-04-04 | v0.27.1: (1) Slack context exhaustion recovery fixed — `respawnSessionFresh` now handles Slack channels (was silently a no-op); fresh session bootstrapped with ring buffer thread history + `slack-reply.sh` instructions; resume UUID cleared to prevent death loop (row 6.10 added); (2) system channel exclusion — `isSystemChannel()` gates dashboard/lifeline channels from session monitoring, message routing, and session registry; (3) PresenceProxy standby cancellation fix — `hasAgentRespondedSince` now checks `slack-messages.jsonl` for Slack topics (was only checking Telegram log); (4) SessionMonitor notification spam fix — persistent `notificationCooldowns` Map survives snapshot cleanup (dead sessions between polls were triggering repeated notifications) |
