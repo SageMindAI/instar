@@ -24,6 +24,12 @@ export interface DiscoveredAgent {
   lastSeen?: string;
   /** Higher = more trustworthy source */
   sourcePrecedence: number;
+  /** Rich profile discovery card (Tier 1) — present when discovered via MoltBridge */
+  profileCard?: {
+    narrativeSummary?: string;
+    profileCompletenessScore?: number;
+    profileUrl?: string;
+  };
 }
 
 export interface DiscoveryOptions {

@@ -132,6 +132,12 @@ export function createUnifiedTrustSystem(
             capabilities: a.capabilities,
             source: 'moltbridge' as const,
             sourcePrecedence: 1,
+            iqsBand: undefined,
+            profileCard: {
+              narrativeSummary: a.agentName ? `${a.agentName} on MoltBridge` : undefined,
+              profileCompletenessScore: undefined,
+              profileUrl: `/agent/profile/${a.agentId}`,
+            },
           }));
         },
       };

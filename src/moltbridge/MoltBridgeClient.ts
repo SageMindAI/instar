@@ -12,6 +12,11 @@
 
 import { MoltBridge, Ed25519Signer } from 'moltbridge';
 import type { CanonicalIdentity } from '../identity/types.js';
+import type {
+  RichProfilePayload,
+  DiscoveryCard,
+  PROFILE_LIMITS,
+} from './types.js';
 
 // ── Types ────────────────────────────────────────────────────────────
 
@@ -255,6 +260,100 @@ export class MoltBridgeClient {
       });
       this.recordSuccess();
       return true;
+    } catch (err) {
+      this.recordFailure();
+      throw err;
+    }
+  }
+
+  // ── Rich Agent Profile Methods ──────────────────────────────────
+
+  /**
+   * Publish or update the agent's rich profile on MoltBridge.
+   * Maps the rich profile payload to MoltBridge's principal profile APIs.
+   */
+  async publishProfile(profile: RichProfilePayload): Promise<Record<string, unknown>> {
+    this.requireSDK();
+    this.checkCircuitBreaker();
+
+    try {
+      // Map rich profile to MoltBridge's principal/agent profile fields
+      const expertise = profile.specializations.map(s => s.domain);
+      const projects = profile.trackRecord.map(t => ({
+        name: t.title,
+        description: t.description,
+        status: 'completed' as const,
+        visibility: 'public' as const,
+      }));
+
+      // Update agent-level profile (capabilities + a2a endpoint)
+      await this.sdk!.updateProfile({
+        capabilities: expertise,
+      });
+
+      // Update principal profile with rich narrative data
+      const result = await this.sdk!.updatePrincipal({
+        bio: profile.narrative,
+        role: profile.roleContext,
+        expertise,
+        lookingFor: [],
+        canOffer: [profile.collaborationStyle, profile.differentiation].filter(Boolean),
+        replace: true,
+      });
+
+      this.recordSuccess();
+      return result;
+    } catch (err: any) {
+      // If principal not onboarded yet, onboard first
+      if (err?.message?.includes('onboard') || err?.status === 404) {
+        try {
+          const expertise = profile.specializations.map(s => s.domain);
+          const result = await this.sdk!.onboardPrincipal({
+            bio: profile.narrative,
+            role: profile.roleContext,
+            expertise,
+            canOffer: [profile.collaborationStyle, profile.differentiation].filter(Boolean),
+          });
+          this.recordSuccess();
+          return result;
+        } catch (onboardErr) {
+          this.recordFailure();
+          throw onboardErr;
+        }
+      }
+      this.recordFailure();
+      throw err;
+    }
+  }
+
+  /**
+   * Get the agent's full profile from MoltBridge.
+   */
+  async getProfile(): Promise<Record<string, unknown>> {
+    this.requireSDK();
+    this.checkCircuitBreaker();
+
+    try {
+      const result = await this.sdk!.getPrincipal();
+      this.recordSuccess();
+      return result;
+    } catch (err) {
+      this.recordFailure();
+      throw err;
+    }
+  }
+
+  /**
+   * Get the public-facing profile summary (for discovery cards).
+   */
+  async getProfileSummary(): Promise<Record<string, unknown>> {
+    this.requireSDK();
+    this.checkCircuitBreaker();
+
+    try {
+      const result = await this.sdk!.getPrincipalVisibility();
+      this.recordSuccess();
+      return result;
     } catch (err) {
       this.recordFailure();
       throw err;

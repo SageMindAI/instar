@@ -2,6 +2,7 @@
  * MoltBridge module — Public API.
  *
  * Wraps the published `moltbridge` SDK for instar integration.
+ * Includes rich agent profile compilation and management.
  */
 
 export {
@@ -18,3 +19,21 @@ export {
   createMoltBridgeRoutes,
   type MoltBridgeRouteDeps,
 } from './routes.js';
+
+export {
+  ProfileCompiler,
+  type ProfileCompilerConfig,
+} from './ProfileCompiler.js';
+
+export type {
+  RichProfilePayload,
+  DiscoveryCard,
+  Specialization,
+  TrackRecordEntry,
+  StructuredSignals,
+  ProfileDraft,
+  ProfileFreshnessState,
+  FieldVisibility,
+} from './types.js';
+
+export { PROFILE_LIMITS } from './types.js';

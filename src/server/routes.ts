@@ -8173,10 +8173,20 @@ export function createRoutes(ctx: RouteContext): Router {
   // ── MoltBridge Integration ──────────────────────────────────────────
 
   if (ctx.unifiedTrust?.moltbridge) {
-    import('../moltbridge/routes.js').then(({ createMoltBridgeRoutes }) => {
+    Promise.all([
+      import('../moltbridge/routes.js'),
+      import('../moltbridge/ProfileCompiler.js'),
+    ]).then(([{ createMoltBridgeRoutes }, { ProfileCompiler }]) => {
+      const profileCompiler = new ProfileCompiler({
+        stateDir: ctx.config.stateDir,
+        projectRoot: path.resolve(ctx.config.stateDir, '..'),
+        capabilities: (ctx.config as any).moltbridge?.capabilities ?? [],
+        jobNames: Object.keys((ctx.config as any).jobs ?? {}),
+      });
       router.use(createMoltBridgeRoutes({
         client: ctx.unifiedTrust!.moltbridge!,
         identity: ctx.unifiedTrust!.identity,
+        profileCompiler,
       }));
     }).catch(err => {
       console.error(`MoltBridge routes failed to mount: ${err instanceof Error ? err.message : err}`);

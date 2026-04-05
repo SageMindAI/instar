@@ -34,6 +34,12 @@ vi.mock('moltbridge', () => {
     neo4j: { connected: true },
   });
 
+  const mockUpdateProfile = vi.fn().mockResolvedValue({ updated: true });
+  const mockUpdatePrincipal = vi.fn().mockResolvedValue({ profile: { bio: 'test' } });
+  const mockOnboardPrincipal = vi.fn().mockResolvedValue({ profile: { bio: 'test' }, enrichment_level: 'basic' });
+  const mockGetPrincipal = vi.fn().mockResolvedValue({ bio: 'Test agent', expertise: ['TypeScript'], enrichment_level: 'basic' });
+  const mockGetPrincipalVisibility = vi.fn().mockResolvedValue({ bio: 'Test agent', expertise: ['TypeScript'] });
+
   return {
     MoltBridge: vi.fn().mockImplementation(() => ({
       verify: mockVerify,
@@ -42,13 +48,22 @@ vi.mock('moltbridge', () => {
       evaluateIqs: mockEvaluateIqs,
       attest: mockAttest,
       health: mockHealth,
+      updateProfile: mockUpdateProfile,
+      updatePrincipal: mockUpdatePrincipal,
+      onboardPrincipal: mockOnboardPrincipal,
+      getPrincipal: mockGetPrincipal,
+      getPrincipalVisibility: mockGetPrincipalVisibility,
     })),
     Ed25519Signer: {
       fromSeed: vi.fn().mockReturnValue({ agentId: 'test', publicKeyB64: 'pubkey' }),
       generate: vi.fn().mockReturnValue({ agentId: 'test', publicKeyB64: 'pubkey' }),
     },
     // Re-export the mock functions so tests can access them
-    _mocks: { mockVerify, mockRegister, mockDiscoverCapability, mockEvaluateIqs, mockAttest, mockHealth },
+    _mocks: {
+      mockVerify, mockRegister, mockDiscoverCapability, mockEvaluateIqs,
+      mockAttest, mockHealth, mockUpdateProfile, mockUpdatePrincipal,
+      mockOnboardPrincipal, mockGetPrincipal, mockGetPrincipalVisibility,
+    },
   };
 });
 
@@ -238,6 +253,79 @@ describe('MoltBridgeClient', () => {
       await client.discover('test');
 
       expect(client.isCircuitBreakerOpen).toBe(false);
+    });
+  });
+
+  describe('rich profile methods', () => {
+    beforeEach(() => {
+      client.initializeWithIdentity(testIdentity);
+    });
+
+    it('publishProfile calls updateProfile and updatePrincipal', async () => {
+      const profile = {
+        narrative: 'Test agent for unit testing',
+        specializations: [{ domain: 'testing', level: 'expert' as const }],
+        trackRecord: [{ title: 'Test Project', description: 'A test', date: '2026-01-01', source: 'first_party' as const }],
+        roleContext: 'Lead tester',
+        collaborationStyle: 'Async, thorough',
+        differentiation: 'Specializes in edge cases',
+        fieldVisibility: { narrative: 'public' as const },
+      };
+
+      const result = await client.publishProfile(profile);
+      expect(_mocks.mockUpdateProfile).toHaveBeenCalledWith({
+        capabilities: ['testing'],
+      });
+      expect(_mocks.mockUpdatePrincipal).toHaveBeenCalledWith(
+        expect.objectContaining({
+          bio: 'Test agent for unit testing',
+          role: 'Lead tester',
+          expertise: ['testing'],
+          replace: true,
+        }),
+      );
+      expect(result).toBeDefined();
+    });
+
+    it('publishProfile falls back to onboardPrincipal on 404', async () => {
+      _mocks.mockUpdatePrincipal.mockRejectedValueOnce(new Error('Must onboard first'));
+      const profile = {
+        narrative: 'New agent',
+        specializations: [],
+        trackRecord: [],
+        roleContext: 'New role',
+        collaborationStyle: '',
+        differentiation: '',
+        fieldVisibility: {},
+      };
+
+      const result = await client.publishProfile(profile);
+      expect(_mocks.mockOnboardPrincipal).toHaveBeenCalledWith(
+        expect.objectContaining({ bio: 'New agent', role: 'New role' }),
+      );
+      expect(result).toBeDefined();
+    });
+
+    it('getProfile returns principal profile', async () => {
+      const result = await client.getProfile();
+      expect(_mocks.mockGetPrincipal).toHaveBeenCalled();
+      expect(result).toHaveProperty('bio');
+    });
+
+    it('getProfileSummary returns visibility profile', async () => {
+      const result = await client.getProfileSummary();
+      expect(_mocks.mockGetPrincipalVisibility).toHaveBeenCalled();
+      expect(result).toHaveProperty('bio');
+    });
+
+    it('publishProfile respects circuit breaker', async () => {
+      // Trip the circuit breaker
+      _mocks.mockUpdateProfile.mockRejectedValue(new Error('fail'));
+      for (let i = 0; i < 3; i++) {
+        try { await client.publishProfile({ narrative: 'test', specializations: [], trackRecord: [], roleContext: '', collaborationStyle: '', differentiation: '', fieldVisibility: {} }); } catch {}
+      }
+      await expect(client.publishProfile({ narrative: 'test', specializations: [], trackRecord: [], roleContext: '', collaborationStyle: '', differentiation: '', fieldVisibility: {} }))
+        .rejects.toThrow('circuit breaker');
     });
   });
 });

@@ -48,6 +48,19 @@ If multiple agents share a name, the agent asks for clarification:
 
 Identity is resolved by Ed25519 public key fingerprint, not by name. Names are human-friendly labels.
 
+## Rich Agent Profiles
+
+When agents register on MoltBridge (the distributed agent registry), they can publish rich profiles that go beyond capability tags. A profile includes:
+
+- **Narrative** -- who the agent is and what makes it unique
+- **Specializations** -- specific domains of expertise with evidence
+- **Track record** -- concrete projects and accomplishments
+- **Role context** -- position within their ecosystem
+
+Profiles are auto-compiled from the agent's AGENT.md, tagged memory, and git history. A human must approve the profile before it's published. When discovering agents via MoltBridge, results include a compact Discovery Card with a narrative summary -- so agents can find the *right* collaborator, not just *any* collaborator.
+
+Think of it like the difference between a business card and a portfolio. A2A Agent Cards (the industry standard) describe what an agent *can* do. MoltBridge profiles describe what an agent *has done*.
+
 ## Cross-Machine Communication
 
 Agents on different machines discover each other through network scanning or manual introduction. Once an agent is known, it stays in the known-agents registry and can be reached by name in future conversations.

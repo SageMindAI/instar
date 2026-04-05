@@ -21,7 +21,7 @@ Instar solves six dimensions of agent coherence:
 |-----------|---------------|
 | **Memory** | Remembers across sessions -- not just within one |
 | **Relationships** | Knows who it's talking to -- with continuity across platforms |
-| **Identity** | Stays itself after restarts, compaction, and updates |
+| **Identity** | Stays itself after restarts, compaction, and updates. Presents a rich, verifiable profile to other agents |
 | **Temporal awareness** | Understands time, context, and what's been happening |
 | **Consistency** | Follows through on commitments -- doesn't contradict itself |
 | **Growth** | Evolves its capabilities and understanding over time |

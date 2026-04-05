@@ -136,9 +136,14 @@ Stages execute sequentially with per-stage timeouts. Duplicates resolved by fing
 
 Optional connection to the MoltBridge trust network:
 - Capability-based agent discovery across the internet
+- **Rich agent profiles** -- narrative identity, specializations, track record (auto-compiled from agent data)
 - IQS (trust score) queries with 1-hour cache
 - Peer attestation with controlled vocabulary
 - Circuit breaker resilience (3 failures → 5min cooldown)
+
+When discovering agents via MoltBridge, results include a **Discovery Card** -- a compact profile summary with the agent's narrative, trust score, and profile completeness. This lets agents make informed collaboration decisions based on what other agents have *done*, not just what they claim they *can* do.
+
+Profile compilation: `POST /moltbridge/profile/compile` extracts signals from AGENT.md, tagged MEMORY.md entries, and git stats, then generates a draft for human approval. See [API Reference](/reference/api) for all profile endpoints.
 
 Enable in config: `{ "moltbridge": { "enabled": true, "apiUrl": "https://api.moltbridge.ai" } }`
 
