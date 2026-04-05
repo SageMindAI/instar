@@ -62,6 +62,8 @@ export class SemanticMemory {
   private vectorSearch: VectorSearch | null = null;
   private _vectorAvailable = false;
   private jsonlPath: string;
+  /** Set after corruption auto-recovery — caller should reimport from JSONL */
+  private _needsRebuild = false;
 
   constructor(config: SemanticMemoryConfig) {
     this.config = config;
@@ -142,6 +144,36 @@ export class SemanticMemory {
     }
 
     this.db = constructor(this.config.dbPath) as Database;
+
+    // Integrity check — auto-recover from corruption (JSONL is source of truth)
+    if (fs.existsSync(this.config.dbPath) && fs.statSync(this.config.dbPath).size > 0) {
+      try {
+        const result = this.db!.pragma('integrity_check') as Array<{ integrity_check: string }>;
+        if (result[0]?.integrity_check !== 'ok') {
+          console.warn(`[SemanticMemory] Database corrupt (${result[0]?.integrity_check}) — deleting and rebuilding`);
+          this.db!.close();
+          this.db = null;
+          fs.unlinkSync(this.config.dbPath);
+          for (const ext of ['-wal', '-shm']) {
+            try { fs.unlinkSync(this.config.dbPath + ext); } catch { /* may not exist */ }
+          }
+          this.db = constructor(this.config.dbPath) as Database;
+          this._needsRebuild = true;
+        }
+      } catch (err) {
+        // If even the integrity check fails, the db is severely corrupted
+        console.warn(`[SemanticMemory] Database unreadable — deleting and rebuilding:`, err);
+        try { this.db?.close(); } catch { /* ignore */ }
+        this.db = null;
+        try { fs.unlinkSync(this.config.dbPath); } catch { /* ignore */ }
+        for (const ext of ['-wal', '-shm']) {
+          try { fs.unlinkSync(this.config.dbPath + ext); } catch { /* may not exist */ }
+        }
+        this.db = constructor(this.config.dbPath) as Database;
+        this._needsRebuild = true;
+      }
+    }
+
     this.db!.pragma('journal_mode = WAL');
     this.db!.pragma('busy_timeout = 5000');
     this.db!.pragma('foreign_keys = ON');
@@ -151,6 +183,17 @@ export class SemanticMemory {
 
     // Initialize vector search if embedding provider is attached
     this.initVectorSearch();
+
+    // Auto-rebuild from JSONL after corruption recovery
+    if (this._needsRebuild) {
+      if (fs.existsSync(this.jsonlPath)) {
+        const result = this.importFromJsonl(this.jsonlPath);
+        console.log(`[SemanticMemory] Auto-rebuilt from JSONL: ${result.entities} entities, ${result.edges} edges reimported`);
+      } else {
+        console.warn('[SemanticMemory] No JSONL log found for rebuild — starting fresh');
+      }
+      this._needsRebuild = false;
+    }
   }
 
   close(): void {
