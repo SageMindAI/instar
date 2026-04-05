@@ -100,4 +100,43 @@ describe('SlackAdapter system channel exclusion', () => {
     expect(registry[NORMAL_CHANNEL]).toBeDefined();
     expect(registry[NORMAL_CHANNEL].sessionName).toBe('test-session');
   });
+
+  it('system channels should not enter the PresenceProxy feed', () => {
+    // Simulates the server.ts wiring: onMessageLogged skips system channels
+    // before calling slackChannelToSyntheticId / presenceProxy.onMessageLogged
+    const { adapter } = createTestAdapter();
+    const proxiedChannels: string[] = [];
+
+    // Simulate the onMessageLogged → PresenceProxy pipeline from server.ts
+    const processLogEntry = (channelId: string) => {
+      if (!channelId) return;
+      if (adapter.isSystemChannel(channelId)) return;
+      proxiedChannels.push(channelId);
+    };
+
+    processLogEntry(DASHBOARD_CHANNEL);
+    processLogEntry(LIFELINE_CHANNEL);
+    processLogEntry(NORMAL_CHANNEL);
+
+    expect(proxiedChannels).toEqual([NORMAL_CHANNEL]);
+    expect(proxiedChannels).not.toContain(DASHBOARD_CHANNEL);
+    expect(proxiedChannels).not.toContain(LIFELINE_CHANNEL);
+  });
+
+  it('monitoring sendToTopic should not route to system channels', () => {
+    // Simulates the sendToTopic guard: system channels are silently skipped
+    const { adapter } = createTestAdapter();
+    const sentTo: string[] = [];
+
+    const sendToTopic = (channelId: string | undefined, text: string) => {
+      if (channelId && adapter.isSystemChannel(channelId)) return;
+      if (channelId) sentTo.push(channelId);
+    };
+
+    sendToTopic(DASHBOARD_CHANNEL, 'session stopped');
+    sendToTopic(LIFELINE_CHANNEL, 'session stopped');
+    sendToTopic(NORMAL_CHANNEL, 'check-in');
+
+    expect(sentTo).toEqual([NORMAL_CHANNEL]);
+  });
 });

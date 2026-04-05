@@ -3428,6 +3428,8 @@ export async function startServer(options: StartOptions): Promise<void> {
           sendToTopic: async (topicId, text) => {
             const slackChId = slackProxyChannelMap.get(topicId);
             if (slackChId && _slackAdapter) {
+              // Never send monitoring messages to system channels (dashboard, lifeline)
+              if (_slackAdapter.isSystemChannel(slackChId)) return;
               await _slackAdapter.sendToChannel(slackChId, text);
               return;
             }
@@ -3507,7 +3509,11 @@ export async function startServer(options: StartOptions): Promise<void> {
           },
           sendToTopic: async (topicId, text) => {
             const slackChId = slackProxyChannelMap.get(topicId);
-            if (slackChId && _slackAdapter) { await _slackAdapter.sendToChannel(slackChId, text); return; }
+            if (slackChId && _slackAdapter) {
+              if (_slackAdapter.isSystemChannel(slackChId)) return;
+              await _slackAdapter.sendToChannel(slackChId, text);
+              return;
+            }
             if (telegram) await telegram.sendToTopic(topicId, text);
           },
           respawnSession: (name, topicId, options) => {
@@ -3796,7 +3802,11 @@ export async function startServer(options: StartOptions): Promise<void> {
           },
           sendToTopic: async (topicId, text) => {
             const slackChId = slackProxyChannelMap.get(topicId);
-            if (slackChId && _slackAdapter) { await _slackAdapter.sendToChannel(slackChId, text); return; }
+            if (slackChId && _slackAdapter) {
+              if (_slackAdapter.isSystemChannel(slackChId)) return;
+              await _slackAdapter.sendToChannel(slackChId, text);
+              return;
+            }
             if (telegram) await telegram.sendToTopic(topicId, text);
           },
           triggerTriage: triageOrchestrator
@@ -4258,6 +4268,8 @@ export async function startServer(options: StartOptions): Promise<void> {
             // Check if this is a Slack synthetic ID (negative = Slack channel)
             const slackChannelId = slackProxyChannelMap.get(topicId);
             if (slackChannelId && _slackAdapter) {
+              // Never send proxy messages to system channels (dashboard, lifeline)
+              if (_slackAdapter.isSystemChannel(slackChannelId)) return;
               // Route directly to Slack channel
               await _slackAdapter.sendToChannel(slackChannelId, text);
               return;
@@ -4393,7 +4405,9 @@ export async function startServer(options: StartOptions): Promise<void> {
             }
 
             // Convert Slack channelId to synthetic numeric ID for PresenceProxy
+            // Skip system channels (dashboard, lifeline) — they don't have interactive sessions
             if (!entry.channelId) return;
+            if (_slackAdapter!.isSystemChannel(String(entry.channelId))) return;
             const syntheticId = slackChannelToSyntheticId(String(entry.channelId));
             presenceProxy!.onMessageLogged({
               messageId: typeof entry.messageId === 'number' ? entry.messageId : parseInt(String(entry.messageId), 10) || 0,
@@ -4477,9 +4491,14 @@ export async function startServer(options: StartOptions): Promise<void> {
               console.log(`[SleepWake] Tunnel restarted: ${tunnelUrl}`);
 
               // Re-broadcast dashboard URL after tunnel restart (quick tunnels get new URL)
-              if (telegram && tunnelUrl) {
+              if (tunnelUrl) {
                 const tunnelType = config.tunnel?.type || 'quick';
-                await telegram.broadcastDashboardUrl(tunnelUrl, tunnelType as 'quick' | 'named').catch(() => {});
+                if (telegram) {
+                  await telegram.broadcastDashboardUrl(tunnelUrl, tunnelType as 'quick' | 'named').catch(() => {});
+                }
+                if (_slackAdapter) {
+                  await _slackAdapter.broadcastDashboardUrl(tunnelUrl).catch(() => {});
+                }
               }
             })(),
             new Promise<void>((_, reject) =>
@@ -5235,9 +5254,14 @@ export async function startServer(options: StartOptions): Promise<void> {
             try {
               const tunnelUrl = await tunnel!.start();
               console.log(pc.green(`[tunnel] Connected: ${tunnelUrl}`));
-              if (telegram && tunnelUrl) {
+              if (tunnelUrl) {
                 const tunnelType = (config.tunnel?.type || 'quick') as 'quick' | 'named';
-                await telegram.broadcastDashboardUrl(tunnelUrl, tunnelType).catch(() => {});
+                if (telegram) {
+                  await telegram.broadcastDashboardUrl(tunnelUrl, tunnelType).catch(() => {});
+                }
+                if (_slackAdapter) {
+                  await _slackAdapter.broadcastDashboardUrl(tunnelUrl).catch(() => {});
+                }
               }
             } catch (retryErr) {
               const msg = retryErr instanceof Error ? retryErr.message : String(retryErr);
@@ -5291,6 +5315,13 @@ export async function startServer(options: StartOptions): Promise<void> {
             }
 
             await telegram.broadcastDashboardUrl(dashUrl, tunnelType as 'quick' | 'named');
+
+            // Also broadcast to Slack dashboard channel if configured
+            if (_slackAdapter) {
+              await _slackAdapter.broadcastDashboardUrl(dashUrl).catch((err: Error) => {
+                console.warn(`[server] Slack dashboard broadcast failed: ${err.message}`);
+              });
+            }
           } else {
             console.log(pc.yellow(`  Dashboard available locally at http://localhost:${config.port}/dashboard (no tunnel configured — not broadcasting to Telegram)`));
           }
