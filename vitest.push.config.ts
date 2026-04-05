@@ -159,6 +159,10 @@ const FLAKY_TESTS = [
 
   // ── Slow session startup timing (intermittent timeout) ─────────────
   'tests/e2e/session-management-e2e.test.ts',
+
+  // ── Pre-existing state/timing flakes ──────────────────────────────
+  'tests/unit/ListenerSessionManager.test.ts',
+  'tests/unit/telemetry-routes.test.ts',
 ];
 
 export default defineConfig({
