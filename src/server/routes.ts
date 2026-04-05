@@ -1491,6 +1491,8 @@ export function createRoutes(ctx: RouteContext): Router {
         endpoints: ctx.topicMemory ? [
           'GET /topic/search?q=...&topic=N&limit=20',
           'GET /topic/context/:topicId?recent=30',
+          'GET /topic/context/:topicId?assembled=true&prompt=...',
+          'GET /session/context/:topicId?prompt=...&job=...',
           'GET /topic/list',
           'GET /topic/stats',
           'POST /topic/summarize { topicId }',
@@ -5879,6 +5881,7 @@ export function createRoutes(ctx: RouteContext): Router {
   /**
    * Get full context for a topic (summary + recent messages).
    * GET /topic/context/:topicId?recent=30
+   * GET /topic/context/:topicId?assembled=true  — use WorkingMemoryAssembler with token budgets
    */
   router.get('/topic/context/:topicId', (req, res) => {
     if (!ctx.topicMemory) {
@@ -5892,9 +5895,72 @@ export function createRoutes(ctx: RouteContext): Router {
       return;
     }
 
+    // Assembled mode: use WorkingMemoryAssembler with token budgets
+    if (req.query.assembled === 'true' && ctx.workingMemory) {
+      const prompt = req.query.prompt as string | undefined;
+      const assembly = ctx.workingMemory.assemble({
+        topicId,
+        prompt: prompt ?? undefined,
+      });
+      res.json({
+        topicId,
+        assembled: true,
+        context: assembly.context,
+        estimatedTokens: assembly.estimatedTokens,
+        sources: assembly.sources,
+        queryTerms: assembly.queryTerms,
+        assembledAt: assembly.assembledAt,
+      });
+      return;
+    }
+
     const recentLimit = Math.min(parseInt(req.query.recent as string, 10) || 30, 100);
     const context = ctx.topicMemory.getTopicContext(topicId, recentLimit);
     res.json(context);
+  });
+
+  /**
+   * Assembled session context — token-budgeted working memory for session start.
+   * Uses WorkingMemoryAssembler to build context within budgets:
+   *   knowledge: 800 tokens, episodes: 400, relationships: 300 (2000 total)
+   *
+   * GET /session/context/:topicId?prompt=...
+   *
+   * Returns a formatted context string ready for session-start hook injection,
+   * plus metadata about what was included and token usage.
+   */
+  router.get('/session/context/:topicId', (req, res) => {
+    if (!ctx.workingMemory) {
+      res.status(503).json({
+        error: 'WorkingMemoryAssembler not initialized',
+        hint: 'Requires SemanticMemory and/or EpisodicMemory to be active',
+      });
+      return;
+    }
+
+    const topicId = parseInt(req.params.topicId, 10);
+    if (isNaN(topicId)) {
+      res.status(400).json({ error: 'Invalid topicId' });
+      return;
+    }
+
+    const prompt = req.query.prompt as string | undefined;
+    const jobSlug = req.query.job as string | undefined;
+
+    const assembly = ctx.workingMemory.assemble({
+      topicId,
+      prompt: prompt ?? undefined,
+      jobSlug: jobSlug ?? undefined,
+    });
+
+    res.json({
+      topicId,
+      context: assembly.context,
+      estimatedTokens: assembly.estimatedTokens,
+      sources: assembly.sources,
+      queryTerms: assembly.queryTerms,
+      assembledAt: assembly.assembledAt,
+    });
   });
 
   /**
