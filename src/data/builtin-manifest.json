@@ -1,8 +1,8 @@
 {
   "$schema": "./builtin-manifest.schema.json",
   "schemaVersion": 1,
-  "generatedAt": "2026-04-03T19:47:59.436Z",
-  "instarVersion": "0.26.9",
+  "generatedAt": "2026-04-05T18:18:40.443Z",
+  "instarVersion": "0.26.10",
   "entryCount": 182,
   "entries": {
     "hook:session-start": {
@@ -11,7 +11,7 @@
       "domain": "identity",
       "sourcePath": "src/core/PostUpdateMigrator.ts",
       "installedPath": ".instar/hooks/instar/session-start.sh",
-      "contentHash": "10e22be02565276d31540ff8db3dccc32be77169245a9cb301030337af06b09d",
+      "contentHash": "b9743eebcca514e8c0aa9657cdd4a4106f80f7955fd3976e25780538ea8105ba",
       "since": "2025-01-01"
     },
     "hook:dangerous-command-guard": {
@@ -20,7 +20,7 @@
       "domain": "safety",
       "sourcePath": "src/core/PostUpdateMigrator.ts",
       "installedPath": ".instar/hooks/instar/dangerous-command-guard.sh",
-      "contentHash": "10e22be02565276d31540ff8db3dccc32be77169245a9cb301030337af06b09d",
+      "contentHash": "b9743eebcca514e8c0aa9657cdd4a4106f80f7955fd3976e25780538ea8105ba",
       "since": "2025-01-01"
     },
     "hook:grounding-before-messaging": {
@@ -29,7 +29,7 @@
       "domain": "safety",
       "sourcePath": "src/core/PostUpdateMigrator.ts",
       "installedPath": ".instar/hooks/instar/grounding-before-messaging.sh",
-      "contentHash": "10e22be02565276d31540ff8db3dccc32be77169245a9cb301030337af06b09d",
+      "contentHash": "b9743eebcca514e8c0aa9657cdd4a4106f80f7955fd3976e25780538ea8105ba",
       "since": "2025-01-01"
     },
     "hook:compaction-recovery": {
@@ -38,7 +38,7 @@
       "domain": "identity",
       "sourcePath": "src/core/PostUpdateMigrator.ts",
       "installedPath": ".instar/hooks/instar/compaction-recovery.sh",
-      "contentHash": "10e22be02565276d31540ff8db3dccc32be77169245a9cb301030337af06b09d",
+      "contentHash": "b9743eebcca514e8c0aa9657cdd4a4106f80f7955fd3976e25780538ea8105ba",
       "since": "2025-01-01"
     },
     "hook:external-operation-gate": {
@@ -47,7 +47,7 @@
       "domain": "safety",
       "sourcePath": "src/core/PostUpdateMigrator.ts",
       "installedPath": ".instar/hooks/instar/external-operation-gate.js",
-      "contentHash": "10e22be02565276d31540ff8db3dccc32be77169245a9cb301030337af06b09d",
+      "contentHash": "b9743eebcca514e8c0aa9657cdd4a4106f80f7955fd3976e25780538ea8105ba",
       "since": "2025-01-01"
     },
     "hook:deferral-detector": {
@@ -56,7 +56,7 @@
       "domain": "safety",
       "sourcePath": "src/core/PostUpdateMigrator.ts",
       "installedPath": ".instar/hooks/instar/deferral-detector.js",
-      "contentHash": "10e22be02565276d31540ff8db3dccc32be77169245a9cb301030337af06b09d",
+      "contentHash": "b9743eebcca514e8c0aa9657cdd4a4106f80f7955fd3976e25780538ea8105ba",
       "since": "2025-01-01"
     },
     "hook:post-action-reflection": {
@@ -65,7 +65,7 @@
       "domain": "evolution",
       "sourcePath": "src/core/PostUpdateMigrator.ts",
       "installedPath": ".instar/hooks/instar/post-action-reflection.js",
-      "contentHash": "10e22be02565276d31540ff8db3dccc32be77169245a9cb301030337af06b09d",
+      "contentHash": "b9743eebcca514e8c0aa9657cdd4a4106f80f7955fd3976e25780538ea8105ba",
       "since": "2025-01-01"
     },
     "hook:external-communication-guard": {
@@ -74,7 +74,7 @@
       "domain": "safety",
       "sourcePath": "src/core/PostUpdateMigrator.ts",
       "installedPath": ".instar/hooks/instar/external-communication-guard.js",
-      "contentHash": "10e22be02565276d31540ff8db3dccc32be77169245a9cb301030337af06b09d",
+      "contentHash": "b9743eebcca514e8c0aa9657cdd4a4106f80f7955fd3976e25780538ea8105ba",
       "since": "2025-01-01"
     },
     "hook:scope-coherence-collector": {
@@ -83,7 +83,7 @@
       "domain": "coherence",
       "sourcePath": "src/core/PostUpdateMigrator.ts",
       "installedPath": ".instar/hooks/instar/scope-coherence-collector.js",
-      "contentHash": "10e22be02565276d31540ff8db3dccc32be77169245a9cb301030337af06b09d",
+      "contentHash": "b9743eebcca514e8c0aa9657cdd4a4106f80f7955fd3976e25780538ea8105ba",
       "since": "2025-01-01"
     },
     "hook:scope-coherence-checkpoint": {
@@ -92,7 +92,7 @@
       "domain": "coherence",
       "sourcePath": "src/core/PostUpdateMigrator.ts",
       "installedPath": ".instar/hooks/instar/scope-coherence-checkpoint.js",
-      "contentHash": "10e22be02565276d31540ff8db3dccc32be77169245a9cb301030337af06b09d",
+      "contentHash": "b9743eebcca514e8c0aa9657cdd4a4106f80f7955fd3976e25780538ea8105ba",
       "since": "2025-01-01"
     },
     "hook:free-text-guard": {
@@ -101,7 +101,7 @@
       "domain": "safety",
       "sourcePath": "src/core/PostUpdateMigrator.ts",
       "installedPath": ".instar/hooks/instar/free-text-guard.sh",
-      "contentHash": "10e22be02565276d31540ff8db3dccc32be77169245a9cb301030337af06b09d",
+      "contentHash": "b9743eebcca514e8c0aa9657cdd4a4106f80f7955fd3976e25780538ea8105ba",
       "since": "2025-01-01"
     },
     "hook:claim-intercept": {
@@ -110,7 +110,7 @@
       "domain": "coherence",
       "sourcePath": "src/core/PostUpdateMigrator.ts",
       "installedPath": ".instar/hooks/instar/claim-intercept.js",
-      "contentHash": "10e22be02565276d31540ff8db3dccc32be77169245a9cb301030337af06b09d",
+      "contentHash": "b9743eebcca514e8c0aa9657cdd4a4106f80f7955fd3976e25780538ea8105ba",
       "since": "2025-01-01"
     },
     "hook:claim-intercept-response": {
@@ -119,7 +119,7 @@
       "domain": "coherence",
       "sourcePath": "src/core/PostUpdateMigrator.ts",
       "installedPath": ".instar/hooks/instar/claim-intercept-response.js",
-      "contentHash": "10e22be02565276d31540ff8db3dccc32be77169245a9cb301030337af06b09d",
+      "contentHash": "b9743eebcca514e8c0aa9657cdd4a4106f80f7955fd3976e25780538ea8105ba",
       "since": "2025-01-01"
     },
     "hook:auto-approve-permissions": {
@@ -128,7 +128,7 @@
       "domain": "safety",
       "sourcePath": "src/core/PostUpdateMigrator.ts",
       "installedPath": ".instar/hooks/instar/auto-approve-permissions.js",
-      "contentHash": "10e22be02565276d31540ff8db3dccc32be77169245a9cb301030337af06b09d",
+      "contentHash": "b9743eebcca514e8c0aa9657cdd4a4106f80f7955fd3976e25780538ea8105ba",
       "since": "2025-01-01"
     },
     "job:health-check": {
@@ -1400,7 +1400,7 @@
       "type": "subsystem",
       "domain": "updates",
       "sourcePath": "src/core/PostUpdateMigrator.ts",
-      "contentHash": "10e22be02565276d31540ff8db3dccc32be77169245a9cb301030337af06b09d",
+      "contentHash": "b9743eebcca514e8c0aa9657cdd4a4106f80f7955fd3976e25780538ea8105ba",
       "since": "2025-01-01"
     },
     "subsystem:scheduler": {

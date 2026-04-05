@@ -202,6 +202,17 @@ export class PostUpdateMigrator {
     } catch (err) {
       result.errors.push(`auto-approve-permissions.js: ${err instanceof Error ? err.message : String(err)}`);
     }
+
+    // Hook event reporter — always overwrite (built-in infrastructure).
+    // Previously only installed-if-missing by migrateHttpHooksToCommandHooks, which left
+    // agents stuck on a broken template (the old template used CommonJS `require('http')`,
+    // which throws in ESM hosts where package.json has "type": "module").
+    try {
+      fs.writeFileSync(path.join(instarHooksDir, 'hook-event-reporter.js'), this.getHookEventReporterScript(), { mode: 0o755 });
+      result.upgraded.push('hooks/instar/hook-event-reporter.js (ESM-compatible http import)');
+    } catch (err) {
+      result.errors.push(`hook-event-reporter.js: ${err instanceof Error ? err.message : String(err)}`);
+    }
   }
 
   /**
@@ -657,22 +668,8 @@ export class PostUpdateMigrator {
       }
     }
 
-    // Install the hook-event-reporter.js script if it doesn't exist
-    const hooksDir = path.join(this.config.stateDir, 'hooks', 'instar');
-    const reporterPath = path.join(hooksDir, 'hook-event-reporter.js');
-    if (!fs.existsSync(reporterPath)) {
-      try {
-        fs.mkdirSync(hooksDir, { recursive: true });
-        // Import the script content inline to avoid circular dependency
-        const script = this.getHookEventReporterScript();
-        fs.writeFileSync(reporterPath, script, { mode: 0o755 });
-        if (!patched) {
-          result.upgraded.push('.instar/hooks/instar/hook-event-reporter.js installed');
-        }
-      } catch (err) {
-        result.errors.push(`hook-event-reporter.js install: ${err instanceof Error ? err.message : String(err)}`);
-      }
-    }
+    // The hook-event-reporter.js script is installed unconditionally by migrateHooks()
+    // (always-overwrite pattern for built-in hooks). No install needed here.
 
     if (patched) {
       result.upgraded.push('.claude/settings.json: replaced HTTP hooks with command hooks (HTTP hooks silently fail in Claude Code <=2.1.78)');
@@ -688,8 +685,11 @@ export class PostUpdateMigrator {
 // Claude Code HTTP hooks (type: "http") silently fail to fire as of v2.1.78.
 // This command hook achieves the same result: POST hook event data to the
 // Instar server, which populates claudeSessionId for session resumption.
-
-const http = require('http');
+//
+// NOTE: Uses \`await import('node:http')\` instead of \`require('http')\` so this
+// script works regardless of the host package.json's module type. A plain
+// \`require\` throws in ESM scope (when the host has "type": "module"); a plain
+// \`import\` is a syntax error in CJS scope. Dynamic import works in both.
 
 const serverUrl = process.env.INSTAR_SERVER_URL || 'http://localhost:4042';
 const authToken = process.env.INSTAR_AUTH_TOKEN || '';
@@ -701,8 +701,9 @@ if (!authToken || !instarSid) {
 
 let data = '';
 process.stdin.on('data', chunk => data += chunk);
-process.stdin.on('end', () => {
+process.stdin.on('end', async () => {
   try {
+    const { request } = await import('node:http');
     const input = JSON.parse(data);
     const payload = JSON.stringify({
       event: input.hook_event || (input.tool_name ? 'PostToolUse' : 'Unknown'),
@@ -711,7 +712,7 @@ process.stdin.on('end', () => {
     });
 
     const url = new URL(serverUrl + '/hooks/events?instar_sid=' + instarSid);
-    const req = http.request({
+    const req = request({
       hostname: url.hostname,
       port: url.port,
       path: url.pathname + url.search,
