@@ -2,7 +2,7 @@
  * EmbeddingProvider — Shared local embedding service using Transformers.js (ONNX).
  *
  * Loads all-MiniLM-L6-v2 (384-dim) once and provides embeddings to any memory
- * system (SemanticMemory, MemoryIndex, TopicMemory). Also handles loading the
+ * system (SemanticMemory, TopicMemory). Also handles loading the
  * sqlite-vec extension into better-sqlite3 connections.
  *
  * Design decisions:

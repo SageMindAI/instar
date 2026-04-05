@@ -10,34 +10,34 @@
 import path from 'node:path';
 import pc from 'picocolors';
 import { loadConfig } from '../core/Config.js';
-import { MemoryIndex } from '../memory/MemoryIndex.js';
-import type { MemorySearchConfig } from '../core/types.js';
+import { SemanticMemory } from '../memory/SemanticMemory.js';
 
 interface MemoryOptions {
   dir?: string;
   limit?: number;
 }
 
-async function getMemoryIndex(dir?: string): Promise<{ index: MemoryIndex; cleanup: () => void }> {
+async function getSemanticMemory(dir?: string): Promise<{ memory: SemanticMemory; cleanup: () => void }> {
   const config = loadConfig(dir);
-  const memoryConfig: Partial<MemorySearchConfig> = (config as any).memory || {};
-  const index = new MemoryIndex(config.stateDir, { ...memoryConfig, enabled: true });
-  await index.open();
-  return { index, cleanup: () => index.close() };
+  const memory = new SemanticMemory({
+    dbPath: path.join(config.stateDir, 'semantic.db'),
+    decayHalfLifeDays: 30,
+    lessonDecayHalfLifeDays: 90,
+    staleThreshold: 0.2,
+  });
+  await memory.open();
+  return { memory, cleanup: () => memory.close() };
 }
 
 export async function memorySearch(query: string, opts: MemoryOptions): Promise<void> {
   let cleanup: () => void = () => {};
 
   try {
-    const { index, cleanup: c } = await getMemoryIndex(opts.dir);
+    const { memory, cleanup: c } = await getSemanticMemory(opts.dir);
     cleanup = c;
 
-    // Auto-sync before search
-    index.sync();
-
     const limit = opts.limit || 10;
-    const results = index.search(query, { limit });
+    const results = memory.search(query, { limit });
 
     if (results.length === 0) {
       console.log(pc.dim(`No results for "${query}".`));
@@ -49,11 +49,12 @@ export async function memorySearch(query: string, opts: MemoryOptions): Promise<
 
     for (const result of results) {
       const score = result.score.toFixed(3);
-      console.log(`  ${pc.cyan(result.source)}  ${pc.dim(`score: ${score}`)}`);
+      const confidence = Math.round(result.confidence * 100);
+      console.log(`  ${pc.cyan(result.name)} ${pc.dim(`(${result.type})`)}  ${pc.dim(`score: ${score}  confidence: ${confidence}%`)}`);
 
       // Show a snippet (first 200 chars)
-      const snippet = result.text.slice(0, 200).replace(/\n/g, ' ');
-      console.log(`  ${pc.dim(snippet)}${result.text.length > 200 ? '...' : ''}`);
+      const snippet = result.content.slice(0, 200).replace(/\n/g, ' ');
+      console.log(`  ${pc.dim(snippet)}${result.content.length > 200 ? '...' : ''}`);
       console.log();
     }
   } catch (err) {
@@ -73,15 +74,14 @@ export async function memoryReindex(opts: MemoryOptions): Promise<void> {
   let cleanup: () => void = () => {};
 
   try {
-    const { index, cleanup: c } = await getMemoryIndex(opts.dir);
+    const { memory, cleanup: c } = await getSemanticMemory(opts.dir);
     cleanup = c;
 
-    console.log(pc.dim('Rebuilding memory index...'));
-    const result = index.reindex();
-    console.log(pc.green(`Reindexed ${result.added} files.`));
+    console.log(pc.dim('Rebuilding semantic memory from JSONL...'));
+    const result = memory.rebuild();
+    console.log(pc.green(`Rebuilt: ${result.entities} entities, ${result.edges} edges.`));
 
-    const stats = index.stats();
-    console.log(`  Chunks: ${stats.totalChunks}`);
+    const stats = memory.stats();
     console.log(`  DB size: ${formatBytes(stats.dbSizeBytes)}`);
   } catch (err) {
     if (err instanceof Error && err.message.includes('better-sqlite3')) {
@@ -100,19 +100,26 @@ export async function memoryStatus(opts: MemoryOptions): Promise<void> {
   let cleanup: () => void = () => {};
 
   try {
-    const { index, cleanup: c } = await getMemoryIndex(opts.dir);
+    const { memory, cleanup: c } = await getSemanticMemory(opts.dir);
     cleanup = c;
 
-    const stats = index.stats();
+    const stats = memory.stats();
 
-    console.log(pc.bold('\n  Memory Search\n'));
-    console.log(`  Status:    ${pc.green('enabled')}`);
-    console.log(`  Files:     ${stats.totalFiles}`);
-    console.log(`  Chunks:    ${stats.totalChunks}`);
-    console.log(`  DB size:   ${formatBytes(stats.dbSizeBytes)}`);
-    console.log(`  Stale:     ${stats.staleFiles > 0 ? pc.yellow(String(stats.staleFiles)) : pc.dim('0')}`);
-    console.log(`  Last sync: ${stats.lastIndexedAt ? pc.dim(stats.lastIndexedAt) : pc.dim('never')}`);
-    console.log(`  Vector:    ${stats.vectorSearchAvailable ? pc.green('available') : pc.dim('not available')}`);
+    console.log(pc.bold('\n  Semantic Memory\n'));
+    console.log(`  Status:     ${pc.green('enabled')}`);
+    console.log(`  Entities:   ${stats.totalEntities}`);
+    console.log(`  Edges:      ${stats.totalEdges}`);
+    console.log(`  Avg conf:   ${stats.avgConfidence}`);
+    console.log(`  Stale:      ${stats.staleCount > 0 ? pc.yellow(String(stats.staleCount)) : pc.dim('0')}`);
+    console.log(`  DB size:    ${formatBytes(stats.dbSizeBytes)}`);
+    console.log(`  Vector:     ${stats.vectorSearchAvailable ? pc.green(`available (${stats.embeddingCount} embeddings)`) : pc.dim('not available')}`);
+
+    // Show type breakdown
+    const types = Object.entries(stats.entityCountsByType).sort((a, b) => b[1] - a[1]);
+    if (types.length > 0) {
+      console.log(`  Types:      ${types.map(([t, c]) => `${t}: ${c}`).join(', ')}`);
+    }
+
     console.log();
   } catch (err) {
     if (err instanceof Error && err.message.includes('better-sqlite3')) {

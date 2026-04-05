@@ -15,7 +15,7 @@
  *   - Formatted context generation for session injection
  *   - Graceful degradation: works FTS5-only when vectors unavailable
  *
- * Uses the same better-sqlite3 pattern as MemoryIndex and TopicMemory.
+ * Uses the same better-sqlite3 pattern as TopicMemory.
  */
 
 import fs from 'node:fs';
