@@ -638,7 +638,8 @@ export class PostUpdateMigrator {
    * Replace HTTP hooks with command hooks that use hook-event-reporter.js.
    * Claude Code HTTP hooks (type: "http") silently fail to fire as of v2.1.78.
    * This migration converts them to command hooks which reliably fire.
-   * Also installs the hook-event-reporter.js script if missing.
+   * The hook-event-reporter.js script itself is installed by migrateHooks()
+   * (always-overwrite pattern for built-in hooks).
    */
   private migrateHttpHooksToCommandHooks(
     hooks: Record<string, unknown[]>,
