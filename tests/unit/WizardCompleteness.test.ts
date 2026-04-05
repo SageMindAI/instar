@@ -22,7 +22,7 @@ import path from 'node:path';
 const skillPath = path.join(
   // Navigate from tests/unit/ to project root
   path.dirname(path.dirname(__dirname)),
-  '.claude', 'skills', 'setup-wizard', 'skill.md'
+  '.claude', 'skills', 'setup-wizard', 'SKILL.md'
 );
 
 let skillContent: string;

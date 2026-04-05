@@ -2535,7 +2535,7 @@ function installAutonomousSkill(skillsDir: string): void {
       { src: 'hooks/hooks.json', dst: path.join(hooksDir, 'hooks.json') },
       { src: 'hooks/autonomous-stop-hook.sh', dst: path.join(hooksDir, 'autonomous-stop-hook.sh') },
       { src: 'scripts/setup-autonomous.sh', dst: path.join(scriptsDir, 'setup-autonomous.sh') },
-      { src: 'skill.md', dst: path.join(autonomousDir, 'skill.md') },
+      { src: 'SKILL.md', dst: path.join(autonomousDir, 'SKILL.md') },
     ];
 
     for (const { src, dst } of filesToCopy) {

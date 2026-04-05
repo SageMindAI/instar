@@ -77,7 +77,7 @@ describe('Package completeness', () => {
     // paths exist in the packed output.
     const runtimePathPatterns = [
       // findInstarRoot() + path.join for specific files
-      // e.g., path.join(findInstarRoot(), '.claude', 'skills', 'setup-wizard', 'skill.md')
+      // e.g., path.join(findInstarRoot(), '.claude', 'skills', 'setup-wizard', 'SKILL.md')
       /path\.join\((?:findInstarRoot\(\)|instarRoot),\s*([^)]+)\)/g,
       // import.meta.url resolution walking up to package root, then joining
       // e.g., path.join(moduleDir, 'upgrades', `${version}.md`)
@@ -170,7 +170,7 @@ describe('Package completeness', () => {
   it('critical runtime files are present in packed output', () => {
     const criticalFiles = [
       // Setup wizard — without this, users get manual Telegram setup
-      { path: '.claude/skills/setup-wizard/skill.md', purpose: 'Conversational setup wizard with Playwright automation' },
+      { path: '.claude/skills/setup-wizard/SKILL.md', purpose: 'Conversational setup wizard with Playwright automation' },
       // Dashboard — without this, /dashboard returns 404
       { path: 'dashboard/index.html', purpose: 'Agent dashboard UI' },
       // Package metadata — without this, version detection fails

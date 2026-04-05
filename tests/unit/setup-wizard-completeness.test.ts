@@ -24,13 +24,13 @@ import { describe, it, expect } from 'vitest';
 import fs from 'node:fs';
 import path from 'node:path';
 
-const skillPath = path.join(process.cwd(), '.claude/skills/setup-wizard/skill.md');
+const skillPath = path.join(process.cwd(), '.claude/skills/setup-wizard/SKILL.md');
 
 // Only run if the skill file exists (it should in all normal builds)
 const skillExists = fs.existsSync(skillPath);
 
 describe('Setup Wizard Completeness', () => {
-  it('setup-wizard skill.md exists', () => {
+  it('setup-wizard SKILL.md exists', () => {
     expect(skillExists).toBe(true);
   });
 

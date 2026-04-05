@@ -343,7 +343,7 @@
       "id": "skill:autonomous",
       "type": "skill",
       "domain": "skills",
-      "sourcePath": ".claude/skills/autonomous/skill.md",
+      "sourcePath": ".claude/skills/autonomous/SKILL.md",
       "contentHash": "9bc7dc9eddd4e345ed6564eff850898b66358ce309119c3047e6af275cf9070d",
       "since": "2025-01-01"
     },
@@ -351,7 +351,7 @@
       "id": "skill:secret-setup",
       "type": "skill",
       "domain": "skills",
-      "sourcePath": ".claude/skills/secret-setup/skill.md",
+      "sourcePath": ".claude/skills/secret-setup/SKILL.md",
       "contentHash": "0f4365713d96c98576d19c818701abe96329f3652ed0d8d76ec4e4a1b46dac56",
       "since": "2025-01-01"
     },
@@ -359,7 +359,7 @@
       "id": "skill:setup-wizard",
       "type": "skill",
       "domain": "skills",
-      "sourcePath": ".claude/skills/setup-wizard/skill.md",
+      "sourcePath": ".claude/skills/setup-wizard/SKILL.md",
       "contentHash": "813fd9164514fd11d1bdc67f4dbee02a74679b3ca46bf1b39893c62deb2e58cb",
       "since": "2025-01-01"
     },

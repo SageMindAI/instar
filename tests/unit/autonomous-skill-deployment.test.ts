@@ -39,8 +39,8 @@ describe('Autonomous skill deployment', () => {
   });
 
   describe('autonomous skill directory structure', () => {
-    it('installs skill.md', () => {
-      const skillFile = path.join(projectDir, '.claude', 'skills', 'autonomous', 'skill.md');
+    it('installs SKILL.md', () => {
+      const skillFile = path.join(projectDir, '.claude', 'skills', 'autonomous', 'SKILL.md');
       expect(fs.existsSync(skillFile)).toBe(true);
 
       const content = fs.readFileSync(skillFile, 'utf-8');

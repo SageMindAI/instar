@@ -22,8 +22,8 @@ import path from 'node:path';
 const SKILL_DIR = path.join(process.cwd(), '.claude', 'skills', 'autonomous');
 
 describe('Autonomous state files use .instar/ not .claude/', () => {
-  describe('skill.md', () => {
-    const content = fs.readFileSync(path.join(SKILL_DIR, 'skill.md'), 'utf-8');
+  describe('SKILL.md', () => {
+    const content = fs.readFileSync(path.join(SKILL_DIR, 'SKILL.md'), 'utf-8');
 
     it('references .instar/autonomous-state.local.md', () => {
       expect(content).toContain('.instar/autonomous-state.local.md');

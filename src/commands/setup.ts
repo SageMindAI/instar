@@ -83,7 +83,7 @@ export async function runSetup(): Promise<void> {
   }
 
   // Check that the setup-wizard skill exists
-  const skillPath = path.join(findInstarRoot(), '.claude', 'skills', 'setup-wizard', 'skill.md');
+  const skillPath = path.join(findInstarRoot(), '.claude', 'skills', 'setup-wizard', 'SKILL.md');
   if (!fs.existsSync(skillPath)) {
     console.log();
     console.log(pc.red('  Setup wizard skill not found.'));
