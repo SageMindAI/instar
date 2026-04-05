@@ -116,6 +116,8 @@ export class TopicMemory {
   private db: Database | null = null;
   private dbPath: string;
   private stateDir: string;
+  /** Set after corruption auto-recovery — caller should reimport from JSONL */
+  private _needsRebuild = false;
 
   constructor(stateDir: string) {
     this.stateDir = stateDir;
@@ -142,11 +144,52 @@ export class TopicMemory {
 
     this.db = new BetterSqlite3(this.dbPath);
 
+    // Integrity check — auto-recover from corruption (JSONL is source of truth)
+    if (fs.existsSync(this.dbPath) && fs.statSync(this.dbPath).size > 0) {
+      try {
+        const result = this.db.pragma('integrity_check') as Array<{ integrity_check: string }>;
+        if (result[0]?.integrity_check !== 'ok') {
+          console.warn(`[TopicMemory] Database corrupt (${result[0]?.integrity_check}) — deleting and rebuilding`);
+          this.db.close();
+          this.db = null;
+          fs.unlinkSync(this.dbPath);
+          for (const ext of ['-wal', '-shm']) {
+            try { fs.unlinkSync(this.dbPath + ext); } catch { /* may not exist */ }
+          }
+          this.db = new BetterSqlite3(this.dbPath);
+          this._needsRebuild = true;
+        }
+      } catch (err) {
+        // If even the integrity check fails, the db is severely corrupted
+        console.warn(`[TopicMemory] Database unreadable — deleting and rebuilding:`, err);
+        try { this.db?.close(); } catch { /* ignore */ }
+        this.db = null;
+        try { fs.unlinkSync(this.dbPath); } catch { /* ignore */ }
+        for (const ext of ['-wal', '-shm']) {
+          try { fs.unlinkSync(this.dbPath + ext); } catch { /* may not exist */ }
+        }
+        this.db = new BetterSqlite3(this.dbPath);
+        this._needsRebuild = true;
+      }
+    }
+
     // WAL mode for concurrent reads during writes
     this.db.pragma('journal_mode = WAL');
     this.db.pragma('busy_timeout = 5000');
 
     this.createSchema();
+
+    // Auto-rebuild from JSONL after corruption recovery
+    if (this._needsRebuild) {
+      const jsonlPath = path.join(this.stateDir, 'telegram-messages.jsonl');
+      if (fs.existsSync(jsonlPath)) {
+        const imported = this.importFromJsonl(jsonlPath);
+        console.log(`[TopicMemory] Auto-rebuilt from JSONL: ${imported} messages reimported`);
+      } else {
+        console.warn('[TopicMemory] No JSONL log found for rebuild — starting fresh');
+      }
+      this._needsRebuild = false;
+    }
   }
 
   /**

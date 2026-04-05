@@ -1,15 +1,17 @@
 /**
  * MoltBridge module — Public API.
+ *
+ * Wraps the published `moltbridge` SDK for instar integration.
  */
 
 export {
   MoltBridgeClient,
-  CAPABILITY_VOCABULARY,
   type MoltBridgeConfig,
   type MoltBridgeAgent,
   type DiscoveryResult,
   type AttestationPayload,
   type RegistrationResult,
+  type IQSBand,
 } from './MoltBridgeClient.js';
 
 export {

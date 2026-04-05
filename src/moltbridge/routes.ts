@@ -1,12 +1,12 @@
 /**
  * MoltBridge HTTP routes — Server endpoints for MoltBridge integration.
  *
- * Spec Section 3.8:
+ * These routes proxy through the MoltBridgeClient (which wraps the real SDK):
  * - POST /moltbridge/register — Register agent with MoltBridge
- * - POST /moltbridge/discover — Capability/broker discovery
+ * - POST /moltbridge/discover — Capability-based discovery
  * - GET /moltbridge/trust/:agentId — Get IQS band (cached)
  * - POST /moltbridge/attest — Submit peer attestation
- * - GET /moltbridge/status — Registration + balance
+ * - GET /moltbridge/status — Health + registration check
  */
 
 import { Router, type Request, type Response } from 'express';
@@ -31,9 +31,12 @@ export function createMoltBridgeRoutes(deps: MoltBridgeRouteDeps): Router {
         return;
       }
 
+      if (!client.initialized) {
+        client.initializeWithIdentity(id);
+      }
+
       const result = await client.register(
-        id.canonicalId,
-        id.publicKey,
+        id,
         req.body.capabilities ?? [],
         req.body.displayName,
       );
@@ -77,58 +80,64 @@ export function createMoltBridgeRoutes(deps: MoltBridgeRouteDeps): Router {
   // POST /moltbridge/attest
   router.post('/moltbridge/attest', async (req: Request, res: Response) => {
     try {
-      const { subject, capability, outcome, confidence, context } = req.body;
-      if (!subject || !capability || !outcome) {
-        res.status(400).json({ error: 'subject, capability, and outcome are required' });
+      const { targetAgentId, attestationType, capabilityTag, confidence } = req.body;
+      if (!targetAgentId || !attestationType) {
+        res.status(400).json({ error: 'targetAgentId and attestationType are required' });
         return;
       }
 
-      const id = identity.get();
-      if (!id) {
-        res.status(500).json({ error: 'No canonical identity available' });
+      if (!['CAPABILITY', 'IDENTITY', 'INTERACTION'].includes(attestationType)) {
+        res.status(400).json({
+          error: { code: 'INVALID_ATTESTATION_TYPE', message: 'attestationType must be CAPABILITY, IDENTITY, or INTERACTION' },
+        });
         return;
       }
 
       await client.submitAttestation({
-        attestor: id.displayFingerprint,
-        subject,
-        capability,
-        outcome,
+        targetAgentId,
+        attestationType,
+        capabilityTag,
         confidence: confidence ?? 0.8,
-        context: context ?? 'direct-interaction',
       });
       res.json({ submitted: true });
     } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      if (message.includes('Invalid capability')) {
-        res.status(400).json({ error: { code: 'INVALID_CAPABILITY_TAG', message } });
-      } else {
-        res.status(502).json({
-          error: { code: 'MOLTBRIDGE_ATTESTATION_FAILED', message },
-        });
-      }
+      res.status(502).json({
+        error: { code: 'MOLTBRIDGE_ATTESTATION_FAILED', message: String(err) },
+      });
     }
   });
 
   // GET /moltbridge/status
-  router.get('/moltbridge/status', async (req: Request, res: Response) => {
+  router.get('/moltbridge/status', async (_req: Request, res: Response) => {
     try {
-      const id = identity.get();
-      if (!id) {
-        res.json({ registered: false, reason: 'No canonical identity' });
-        return;
-      }
-
       if (!client.enabled) {
-        res.json({ registered: false, reason: 'MoltBridge disabled in config' });
+        res.json({ enabled: false, healthy: false, reason: 'MoltBridge disabled in config' });
         return;
       }
 
-      const status = await client.getStatus(id.canonicalId);
-      res.json(status);
+      if (!client.initialized) {
+        const id = identity.get();
+        if (!id) {
+          res.json({ enabled: true, healthy: false, reason: 'No canonical identity' });
+          return;
+        }
+        client.initializeWithIdentity(id);
+      }
+
+      const health = await client.health();
+      res.json({
+        enabled: true,
+        healthy: health.status === 'healthy',
+        serverStatus: health.status,
+        neo4j: health.neo4j,
+        circuitBreakerOpen: client.isCircuitBreakerOpen,
+      });
     } catch (err) {
-      res.status(502).json({
-        error: { code: 'MOLTBRIDGE_STATUS_FAILED', message: String(err) },
+      res.json({
+        enabled: true,
+        healthy: false,
+        reason: String(err),
+        circuitBreakerOpen: client.isCircuitBreakerOpen,
       });
     }
   });

@@ -524,6 +524,38 @@ describe('PresenceProxy E2E', () => {
       const tier1Msg = deps.sentMessages.find(m => m.metadata?.tier === 1);
       expect(tier1Msg).toBeDefined(); // Should have proceeded with tier 1
     });
+
+    it('summarizes completed session instead of saying stopped', { timeout: 30000 }, async () => {
+      // Session is alive for tier 1 but dies before tier 3.
+      // Should get a "Session finished" summary, not "appears to have stopped."
+      deps.llmResponses = ['Running CI checks.', 'The session completed its CI checks and exited normally.'];
+      let tier1Fired = false;
+      const config = createMockConfig(tmpDir, deps);
+      const originalIsAlive = config.isSessionAlive;
+      config.isSessionAlive = (name: string) => {
+        if (tier1Fired) return false; // Die after tier 1
+        return originalIsAlive(name);
+      };
+
+      proxy = new PresenceProxy(config);
+      proxy.start();
+
+      proxy.onMessageLogged(makeUserMessage(100, 'test'));
+
+      // Wait for tier 1 to fire
+      await waitFor(() => deps.sentMessages.length >= 1, { timeoutMs: 5000 });
+      tier1Fired = true; // Now the session "dies"
+
+      // Wait for tier 3 (fast-tracked since dead)
+      await waitFor(() => deps.sentMessages.length >= 2, { timeoutMs: 25000 });
+
+      const stoppedMsg = deps.sentMessages.find(m => m.text.includes('stopped'));
+      expect(stoppedMsg).toBeUndefined(); // Should NOT say "stopped"
+
+      const finishedMsg = deps.sentMessages.find(m => m.text.includes('Session finished'));
+      expect(finishedMsg).toBeDefined(); // Should say "finished" with a summary
+      expect(finishedMsg!.text).toContain('new message');
+    });
   });
 
   // ── State Persistence ─────────────────────────────────────────────

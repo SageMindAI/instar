@@ -1,6 +1,6 @@
 {
   "name": "instar",
-  "version": "0.27.0",
+  "version": "0.27.1",
   "description": "Persistent autonomy infrastructure for AI agents",
   "type": "module",
   "main": "dist/index.js",
@@ -94,6 +94,7 @@
     "croner": "^8.0.0",
     "express": "^4.18.0",
     "marked": "^17.0.5",
+    "moltbridge": "^0.1.6",
     "picocolors": "^1.0.0",
     "proper-lockfile": "^4.1.2",
     "ws": "^8.19.0",
@@ -113,6 +114,6 @@
     "husky": "^9.1.7",
     "supertest": "^7.2.2",
     "typescript": "^5.9.3",
-    "vitest": "^2.0.0"
+    "vitest": "^2.1.9"
   }
 }

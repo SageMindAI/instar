@@ -1,34 +1,37 @@
 /**
- * MoltBridgeClient — Client for the MoltBridge trust network.
+ * MoltBridgeClient — Wraps the published MoltBridge SDK for instar integration.
  *
- * Wraps the MoltBridge API for:
- * - Agent registration using canonical identity
- * - Capability-based discovery
- * - Trust score (IQS) queries with caching
- * - Peer attestation submission
+ * Uses the real `moltbridge` npm package with proper Ed25519 auth,
+ * proof-of-AI verification, and correct endpoint paths.
  *
- * Includes circuit breaker for resilience when MoltBridge is unavailable.
+ * Adds:
+ * - Circuit breaker for resilience
+ * - IQS band caching (1-hour TTL)
+ * - Identity bridging (instar Ed25519 key → MoltBridge SDK signer)
  */
 
-import crypto from 'node:crypto';
+import { MoltBridge, Ed25519Signer } from 'moltbridge';
+import type { CanonicalIdentity } from '../identity/types.js';
 
 // ── Types ────────────────────────────────────────────────────────────
 
 export interface MoltBridgeConfig {
   enabled: boolean;
   apiUrl: string;                // e.g. "https://api.moltbridge.ai"
-  autoRegister: boolean;         // default false
-  enrichmentMode: 'manual' | 'cached-only' | 'auto';
+  autoRegister?: boolean;        // default false
+  enrichmentMode?: 'manual' | 'cached-only' | 'auto';
+  /** Agent name for registration (defaults to 'instar-agent') */
+  agentName?: string;
+  /** Platform identifier for registration (defaults to 'instar') */
+  platform?: string;
 }
 
 export interface MoltBridgeAgent {
   agentId: string;
-  canonicalId: string;
-  displayName?: string;
+  agentName: string;
   capabilities: string[];
-  iqsBand: 'high' | 'medium' | 'low';
-  iqsScore?: number;             // exact score (only visible to agent itself)
-  lastSeen?: string;
+  trustScore: number;
+  matchScore?: number;
 }
 
 export interface DiscoveryResult {
@@ -39,40 +42,18 @@ export interface DiscoveryResult {
 }
 
 export interface AttestationPayload {
-  attestor: string;              // fingerprint
-  subject: string;               // fingerprint
-  capability: string;            // from controlled vocabulary
-  outcome: 'success' | 'partial' | 'failure';
-  confidence: number;            // 0.0-1.0
-  context: 'direct-interaction' | 'observed' | 'delegated';
+  targetAgentId: string;
+  attestationType: 'CAPABILITY' | 'IDENTITY' | 'INTERACTION';
+  capabilityTag?: string;
+  confidence: number;
 }
 
 export interface RegistrationResult {
-  agentId: string;
-  registered: boolean;
-  needsCrossVerification: boolean;
-  needsDeposit: boolean;
+  agent: Record<string, unknown>;
+  consentsGranted: string[];
 }
 
-/** Controlled vocabulary for capability tags (spec Section 3.13.1) */
-export const CAPABILITY_VOCABULARY = new Set([
-  // Communication
-  'messaging', 'email', 'voice', 'translation', 'summarization',
-  // Development
-  'code-generation', 'code-review', 'debugging', 'testing', 'deployment',
-  // Data
-  'data-analysis', 'data-collection', 'data-transformation', 'visualization',
-  // Research
-  'web-research', 'document-analysis', 'fact-checking', 'literature-review',
-  // Content
-  'writing', 'editing', 'design', 'image-generation', 'video',
-  // Operations
-  'scheduling', 'monitoring', 'alerting', 'automation', 'workflow',
-  // Domain
-  'legal', 'financial', 'medical', 'scientific', 'engineering',
-  // Meta
-  'coordination', 'delegation', 'brokering', 'teaching',
-]);
+export type IQSBand = 'high' | 'medium' | 'low' | 'unknown';
 
 // ── Circuit Breaker ──────────────────────────────────────────────────
 
@@ -90,11 +71,13 @@ const CB_RESET_MS = 5 * 60 * 1000; // 5 minutes
 
 export class MoltBridgeClient {
   private config: MoltBridgeConfig;
+  private sdk: MoltBridge | null = null;
   private circuitBreaker: CircuitBreakerState = {
     failures: 0, lastFailure: 0, open: false, openedAt: 0,
   };
-  private iqsCache: Map<string, { band: MoltBridgeAgent['iqsBand']; cachedAt: number }> = new Map();
+  private iqsCache: Map<string, { band: IQSBand; cachedAt: number }> = new Map();
   private readonly IQS_CACHE_TTL_MS = 60 * 60 * 1000; // 1 hour
+  private verificationToken: string | null = null;
 
   constructor(config: MoltBridgeConfig) {
     this.config = config;
@@ -105,29 +88,87 @@ export class MoltBridgeClient {
   }
 
   get enrichmentMode(): string {
-    return this.config.enrichmentMode;
+    return this.config.enrichmentMode ?? 'manual';
   }
 
   /**
-   * Register an agent with MoltBridge.
+   * Initialize the SDK with an instar identity.
+   * Must be called before any API operations.
    */
-  async register(
-    canonicalId: string,
-    publicKey: Buffer,
-    capabilities: string[],
-    displayName?: string,
-  ): Promise<RegistrationResult> {
+  initializeWithIdentity(identity: CanonicalIdentity): void {
+    const seedHex = identity.privateKey.toString('hex');
+    this.sdk = new MoltBridge({
+      agentId: identity.canonicalId,
+      signingKey: seedHex,
+      baseUrl: this.config.apiUrl,
+      timeout: 30_000,
+      maxRetries: 3,
+    });
+  }
+
+  /**
+   * Check if the SDK has been initialized with an identity.
+   */
+  get initialized(): boolean {
+    return this.sdk !== null;
+  }
+
+  /**
+   * Verify with MoltBridge (proof-of-AI challenge).
+   * Required before registration.
+   */
+  async verify(): Promise<{ verified: boolean; token: string }> {
+    this.requireSDK();
     this.checkCircuitBreaker();
 
     try {
-      const response = await this.apiCall('POST', '/v1/agents/register', {
-        canonicalId,
-        publicKey: publicKey.toString('base64'),
-        capabilities,
-        displayName,
-      });
+      const result = await this.sdk!.verify();
       this.recordSuccess();
-      return response as RegistrationResult;
+      this.verificationToken = result.token;
+      return result;
+    } catch (err) {
+      this.recordFailure();
+      throw err;
+    }
+  }
+
+  /**
+   * Register this agent with MoltBridge.
+   * Automatically runs verification if no token is cached.
+   */
+  async register(
+    identity: CanonicalIdentity,
+    capabilities: string[] = [],
+    displayName?: string,
+  ): Promise<RegistrationResult> {
+    this.requireSDK();
+    this.checkCircuitBreaker();
+
+    try {
+      // Run verification if we don't have a token
+      if (!this.verificationToken) {
+        const verification = await this.sdk!.verify();
+        this.verificationToken = verification.token;
+      }
+
+      const response = await this.sdk!.register({
+        agentId: identity.canonicalId,
+        name: displayName ?? this.config.agentName ?? 'instar-agent',
+        platform: this.config.platform ?? 'instar',
+        pubkey: identity.publicKey.toString('base64url'),
+        capabilities,
+        verificationToken: this.verificationToken,
+        omniscienceAcknowledged: true,
+        article22Consent: true,
+      });
+
+      this.recordSuccess();
+      this.verificationToken = null; // consumed
+
+      return {
+        agent: (response as any).agent ?? response,
+        consentsGranted: (response as any).consents_granted ?? [],
+      };
     } catch (err) {
       this.recordFailure();
       throw err;
@@ -141,19 +182,26 @@ export class MoltBridgeClient {
     capability: string,
     limit = 10,
   ): Promise<DiscoveryResult> {
+    this.requireSDK();
     this.checkCircuitBreaker();
 
     const startTime = Date.now();
     try {
-      const response = await this.apiCall('POST', '/v1/discover', {
-        capability,
-        limit,
+      const response = await this.sdk!.discoverCapability({
+        needs: [capability],
+        maxResults: limit,
       });
       this.recordSuccess();
 
-      const agents = (response as any).agents ?? [];
+      const results = (response as any).results ?? [];
       return {
-        agents,
+        agents: results.map((r: any) => ({
+          agentId: r.agent_id,
+          agentName: r.agent_name,
+          capabilities: r.matched_capabilities ?? [],
+          trustScore: r.trust_score ?? 0,
+          matchScore: r.match_score,
+        })),
         source: 'moltbridge',
         queryTimeMs: Date.now() - startTime,
         cached: false,
@@ -166,22 +214,24 @@ export class MoltBridgeClient {
 
   /**
    * Get IQS band for an agent (cached).
+   * Returns null on error (graceful degradation).
    */
-  async getIQSBand(agentCanonicalId: string): Promise<MoltBridgeAgent['iqsBand'] | null> {
+  async getIQSBand(targetId: string): Promise<IQSBand | null> {
     // Check cache first
-    const cached = this.iqsCache.get(agentCanonicalId);
+    const cached = this.iqsCache.get(targetId);
     if (cached && Date.now() - cached.cachedAt < this.IQS_CACHE_TTL_MS) {
       return cached.band;
     }
 
+    this.requireSDK();
     this.checkCircuitBreaker();
 
     try {
-      const response = await this.apiCall('GET', `/v1/trust/${agentCanonicalId}`);
+      const response = await this.sdk!.evaluateIqs({ targetId });
       this.recordSuccess();
 
-      const band = (response as any).iqsBand ?? 'unknown';
-      this.iqsCache.set(agentCanonicalId, { band, cachedAt: Date.now() });
+      const band = ((response as any).band ?? 'unknown') as IQSBand;
+      this.iqsCache.set(targetId, { band, cachedAt: Date.now() });
       return band;
     } catch (err) {
       this.recordFailure();
@@ -193,20 +243,16 @@ export class MoltBridgeClient {
    * Submit a peer attestation.
    */
   async submitAttestation(attestation: AttestationPayload): Promise<boolean> {
-    // Validate capability tag
-    if (!CAPABILITY_VOCABULARY.has(attestation.capability)) {
-      throw new Error(`Invalid capability tag: "${attestation.capability}". Must be from controlled vocabulary.`);
-    }
-
-    // Validate confidence range
-    if (attestation.confidence < 0 || attestation.confidence > 1) {
-      throw new Error('Confidence must be between 0.0 and 1.0');
-    }
-
+    this.requireSDK();
     this.checkCircuitBreaker();
 
     try {
-      await this.apiCall('POST', '/v1/attestations', attestation);
+      await this.sdk!.attest({
+        targetAgentId: attestation.targetAgentId,
+        attestationType: attestation.attestationType,
+        capabilityTag: attestation.capabilityTag,
+        confidence: attestation.confidence,
+      });
       this.recordSuccess();
       return true;
     } catch (err) {
@@ -216,21 +262,15 @@ export class MoltBridgeClient {
   }
 
   /**
-   * Check registration status and wallet balance.
+   * Check server health (unauthenticated).
    */
-  async getStatus(canonicalId: string): Promise<{
-    registered: boolean;
-    walletBalance?: string;
-    iqsBand?: string;
-  }> {
-    this.checkCircuitBreaker();
+  async health(): Promise<{ status: string; neo4j: { connected: boolean } }> {
+    this.requireSDK();
 
     try {
-      const response = await this.apiCall('GET', `/v1/agents/${canonicalId}/status`);
-      this.recordSuccess();
-      return response as any;
+      const result = await this.sdk!.health();
+      return result as any;
     } catch (err) {
-      this.recordFailure();
       throw err;
     }
   }
@@ -250,6 +290,12 @@ export class MoltBridgeClient {
 
   // ── Private ─────────────────────────────────────────────────────
 
+  private requireSDK(): void {
+    if (!this.sdk) {
+      throw new Error('MoltBridgeClient not initialized — call initializeWithIdentity() first');
+    }
+  }
+
   private checkCircuitBreaker(): void {
     if (this.isCircuitBreakerOpen) {
       throw new Error('MoltBridge circuit breaker is open — service temporarily unavailable');
@@ -267,21 +313,5 @@ export class MoltBridgeClient {
       this.circuitBreaker.open = true;
       this.circuitBreaker.openedAt = Date.now();
     }
-  }
-
-  private async apiCall(method: string, path: string, body?: any): Promise<unknown> {
-    const url = `${this.config.apiUrl}${path}`;
-    const options: RequestInit = {
-      method,
-      headers: { 'Content-Type': 'application/json' },
-      ...(body && { body: JSON.stringify(body) }),
-    };
-
-    const response = await fetch(url, options);
-    if (!response.ok) {
-      const errorBody = await response.text().catch(() => '');
-      throw new Error(`MoltBridge API error: ${response.status} ${response.statusText} — ${errorBody}`);
-    }
-    return response.json();
   }
 }

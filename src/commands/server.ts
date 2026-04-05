@@ -3220,7 +3220,8 @@ export async function startServer(options: StartOptions): Promise<void> {
       sessionManager.on('beforeSessionKill', (session: import('../core/types.js').Session) => {
         try {
           // Save Telegram topic resume UUID (if Telegram is configured)
-          if (telegram) {
+          // Skip for context exhaustion kills — re-saving would cause a death loop
+          if (telegram && !contextExhaustionKills.has(session.tmuxSession)) {
             const topicId = telegram!.getTopicForSession(session.tmuxSession);
             if (topicId) {
               const uuid = _topicResumeMap!.findUuidForSession(session.tmuxSession, session.claudeSessionId ?? undefined);
@@ -3232,7 +3233,9 @@ export async function startServer(options: StartOptions): Promise<void> {
           }
 
           // Save Slack channel resume UUID (if Slack is configured)
-          if (_slackAdapter) {
+          // Skip if the session is being killed for context exhaustion — saving the UUID
+          // would cause a death loop where the next respawn loads the same bloated conversation.
+          if (_slackAdapter && !contextExhaustionKills.has(session.tmuxSession)) {
             const channelId = _slackAdapter.getChannelForSession(session.tmuxSession);
             if (channelId) {
               const uuid = _topicResumeMap!.findUuidForSession(session.tmuxSession, session.claudeSessionId ?? undefined);
@@ -3241,6 +3244,8 @@ export async function startServer(options: StartOptions): Promise<void> {
                 console.log(`[beforeSessionKill] Saved Slack resume UUID ${uuid} for channel ${channelId} (session: ${session.name})`);
               }
             }
+          } else if (contextExhaustionKills.has(session.tmuxSession)) {
+            console.log(`[beforeSessionKill] Skipping Slack resume UUID save for ${session.name} — context exhaustion recovery`);
           }
         } catch (err) {
           console.error(`[beforeSessionKill] Failed to save resume UUID:`, err);
@@ -3592,6 +3597,9 @@ export async function startServer(options: StartOptions): Promise<void> {
     // SessionRecovery — fast mechanical recovery (JSONL analysis, no LLM)
     // Platform-aware: works with Telegram topics AND Slack channels
     let sessionRecovery: SessionRecovery | undefined;
+    // Track sessions being killed for context exhaustion — prevents beforeSessionKill
+    // from re-saving resume UUIDs (which would cause an infinite death loop)
+    const contextExhaustionKills = new Set<string>();
     if (telegram || _slackAdapter) {
       sessionRecovery = new SessionRecovery(
         { enabled: true, projectDir: config.projectDir },
@@ -3647,9 +3655,26 @@ export async function startServer(options: StartOptions): Promise<void> {
             }
 
             // Check if this is a Slack channel (synthetic negative topic IDs)
-            const slackChId = slackProxyChannelMap.get(topicId);
+            let slackChId = slackProxyChannelMap.get(topicId);
+
+            // Fallback: reverse-lookup from adapter channel registry if map doesn't have it
+            if (!slackChId && _slackAdapter && topicId < 0) {
+              const registry = _slackAdapter.getChannelRegistry();
+              for (const channelId of Object.keys(registry)) {
+                if (slackChannelToSyntheticId(channelId) === topicId) {
+                  slackChId = channelId;
+                  break;
+                }
+              }
+              if (slackChId) {
+                console.log(`[respawnSessionFresh] Resolved slackChId=${slackChId} via reverse lookup (map miss for topicId=${topicId})`);
+              }
+            }
+
+            console.log(`[respawnSessionFresh] topicId=${topicId} slackChId=${slackChId || 'none'} slackAdapter=${!!_slackAdapter} session=${_sessionName} mapSize=${slackProxyChannelMap.size}`);
+
             if (slackChId && _slackAdapter) {
-              // Kill the existing session
+              // Kill existing session (already flagged in contextExhaustionKills via event listener)
               const session = sessionManager.listRunningSessions().find(s => s.tmuxSession === _sessionName);
               if (session) sessionManager.killSession(session.id);
 
@@ -3703,12 +3728,24 @@ export async function startServer(options: StartOptions): Promise<void> {
 
             if (telegram) {
               const targetSession = telegram.getSessionForTopic(topicId);
-              if (!targetSession) return;
+              if (!targetSession) {
+                console.warn(`[respawnSessionFresh] No Telegram or Slack session found for topicId=${topicId} — recovery has no target`);
+                return;
+              }
               await respawnSessionForTopic(sessionManager, telegram, targetSession, topicId, undefined, topicMemory, undefined, recoveryPrompt, { silent: true });
+            } else if (!slackChId) {
+              console.warn(`[respawnSessionFresh] No platform handler for topicId=${topicId} — recovery is a no-op`);
             }
           },
         },
       );
+      // Track context exhaustion kills to prevent beforeSessionKill from re-saving
+      // resume UUIDs (which would cause an infinite death loop)
+      sessionRecovery.on('recovery:context_exhaustion', ({ sessionName }: { sessionName: string }) => {
+        contextExhaustionKills.add(sessionName);
+        // Clean up after 60 seconds — by then the kill and respawn are done
+        setTimeout(() => contextExhaustionKills.delete(sessionName), 60_000);
+      });
       console.log(pc.green('  Session Recovery enabled (mechanical fast-path)'));
     }
 
@@ -3728,9 +3765,11 @@ export async function startServer(options: StartOptions): Promise<void> {
               }
             }
             // Slack channel sessions (using synthetic IDs)
+            // Exclude system channels (dashboard, lifeline) — they don't have interactive sessions
             if (_slackAdapter) {
               const registry = _slackAdapter.getChannelRegistry();
               for (const [channelId, entry] of Object.entries(registry)) {
+                if (_slackAdapter.isSystemChannel(channelId)) continue;
                 const syntheticId = slackChannelToSyntheticId(channelId);
                 sessions.set(syntheticId, entry.sessionName);
               }
@@ -4163,37 +4202,47 @@ export async function startServer(options: StartOptions): Promise<void> {
         const { execSync: shellExecSync } = await import('child_process');
 
         const messagesLogPath = path.join(config.stateDir, 'telegram-messages.jsonl');
+        const slackMessagesLogPath = path.join(config.stateDir, 'slack-messages.jsonl');
+
+        // Shared helper: check a messages log file for agent responses after a timestamp
+        const checkLogForAgentResponse = (logPath: string, topicId: number, sinceIso: string): boolean => {
+          try {
+            const content = fs.readFileSync(logPath, 'utf-8');
+            const lines = content.trim().split('\n').slice(-50);
+            for (const line of lines) {
+              try {
+                const msg = JSON.parse(line);
+                // Slack logs use channelId (string); Telegram logs use topicId (number).
+                // For Slack synthetic IDs (negative), match against channelId via the map.
+                const matchesTopic = msg.topicId === topicId
+                  || (topicId < 0 && msg.channelId && slackChannelToSyntheticId(String(msg.channelId)) === topicId);
+                if (matchesTopic && !msg.fromUser && msg.timestamp > sinceIso) {
+                  const t = (msg.text || '').trim();
+                  const isSystem = t === '✓ Delivered' || t.startsWith('✓ Delivered')
+                    || t.startsWith('🔄 Session restarting') || t === 'Session respawned.'
+                    || t === 'Session terminated.' || t.startsWith('Send a new message to start')
+                    || t.startsWith('🔭');
+                  if (!isSystem) return true;
+                }
+              } catch { /* skip malformed lines */ }
+            }
+            return false;
+          } catch {
+            return false;
+          }
+        };
 
         presenceProxy = new PresenceProxy({
           stateDir: config.stateDir,
           intelligence: sharedIntelligence,
           agentName: config.projectName ?? 'the agent',
           hasAgentRespondedSince: (topicId, sinceMs) => {
-            // Read last ~50 lines of the messages log and check for agent responses
-            try {
-              const content = fs.readFileSync(messagesLogPath, 'utf-8');
-              const lines = content.trim().split('\n').slice(-50);
-              const sinceIso = new Date(sinceMs).toISOString();
-              for (const line of lines) {
-                try {
-                  const msg = JSON.parse(line);
-                  if (msg.topicId === topicId && !msg.fromUser && msg.timestamp > sinceIso) {
-                    // Skip proxy messages and system messages (delivery confirmations, session lifecycle)
-                    const t = (msg.text || '').trim();
-                    const isSystem = t === '✓ Delivered' || t.startsWith('✓ Delivered')
-                      || t.startsWith('🔄 Session restarting') || t === 'Session respawned.'
-                      || t === 'Session terminated.' || t.startsWith('Send a new message to start')
-                      || t.startsWith('🔭');
-                    if (!isSystem) {
-                      return true;
-                    }
-                  }
-                } catch { /* skip malformed lines */ }
-              }
-              return false;
-            } catch {
-              return false;
-            }
+            const sinceIso = new Date(sinceMs).toISOString();
+            // Check Telegram log
+            if (checkLogForAgentResponse(messagesLogPath, topicId, sinceIso)) return true;
+            // Also check Slack log (for Slack synthetic IDs or cross-platform responses)
+            if (checkLogForAgentResponse(slackMessagesLogPath, topicId, sinceIso)) return true;
+            return false;
           },
           captureSessionOutput: (name, lines) => sessionManager.captureOutput(name, lines),
           getSessionForTopic: (topicId) => {
@@ -4927,7 +4976,7 @@ export async function startServer(options: StartOptions): Promise<void> {
         try {
           unifiedTrust = createUnifiedTrustSystem(threadline.trustManager, {
             stateDir: config.stateDir,
-            moltbridge: (config as any).moltbridge,
+            moltbridge: config.moltbridge,
           });
           console.log(`Unified trust system initialized (identity: ${unifiedTrust.identity.get()?.displayFingerprint ?? 'none'})`);
         } catch (err) {

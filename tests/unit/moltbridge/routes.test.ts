@@ -8,6 +8,19 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
+// Mock the moltbridge SDK
+vi.mock('moltbridge', () => ({
+  MoltBridge: vi.fn().mockImplementation(() => ({
+    verify: vi.fn().mockResolvedValue({ verified: true, token: 'test-token' }),
+    register: vi.fn().mockResolvedValue({ agent: { id: 'test' }, consents_granted: [] }),
+    discoverCapability: vi.fn().mockResolvedValue({ results: [] }),
+    evaluateIqs: vi.fn().mockResolvedValue({ band: 'medium' }),
+    attest: vi.fn().mockResolvedValue({ attestation: {} }),
+    health: vi.fn().mockResolvedValue({ status: 'healthy', neo4j: { connected: true } }),
+  })),
+  Ed25519Signer: { fromSeed: vi.fn(), generate: vi.fn() },
+}));
+
 describe('MoltBridge Routes', () => {
   let app: express.Express;
   let tmpDir: string;
@@ -25,6 +38,10 @@ describe('MoltBridge Routes', () => {
       autoRegister: false,
       enrichmentMode: 'manual',
     });
+
+    // Initialize client with the created identity
+    const id = identity.get();
+    if (id) client.initializeWithIdentity(id);
 
     app = express();
     app.use(express.json());
@@ -49,8 +66,15 @@ describe('MoltBridge Routes', () => {
 
       const res = await request(disabledApp).get('/moltbridge/status');
       expect(res.status).toBe(200);
-      expect(res.body.registered).toBe(false);
+      expect(res.body.enabled).toBe(false);
       expect(res.body.reason).toContain('disabled');
+    });
+
+    it('returns health status when enabled', async () => {
+      const res = await request(app).get('/moltbridge/status');
+      expect(res.status).toBe(200);
+      expect(res.body.enabled).toBe(true);
+      expect(res.body.healthy).toBe(true);
     });
   });
 
@@ -62,40 +86,67 @@ describe('MoltBridge Routes', () => {
       expect(res.status).toBe(400);
       expect(res.body.error).toContain('capability');
     });
+
+    it('returns results on valid capability', async () => {
+      const res = await request(app)
+        .post('/moltbridge/discover')
+        .send({ capability: 'code-review', limit: 5 });
+      expect(res.status).toBe(200);
+      expect(res.body.source).toBe('moltbridge');
+      expect(Array.isArray(res.body.agents)).toBe(true);
+    });
   });
 
   describe('POST /moltbridge/attest', () => {
     it('returns 400 without required fields', async () => {
       const res = await request(app)
         .post('/moltbridge/attest')
-        .send({ subject: 'abc' });
+        .send({ capabilityTag: 'code-review' });
       expect(res.status).toBe(400);
     });
 
-    it('returns 400 for invalid capability tag', async () => {
-      // Mock fetch to not be called (validation happens before API)
-      vi.stubGlobal('fetch', vi.fn());
-
+    it('returns 400 for invalid attestation type', async () => {
       const res = await request(app)
         .post('/moltbridge/attest')
         .send({
-          subject: 'abc',
-          capability: 'invalid-tag',
-          outcome: 'success',
+          targetAgentId: 'abc',
+          attestationType: 'INVALID',
+          confidence: 0.9,
         });
       expect(res.status).toBe(400);
-      expect(res.body.error.code).toBe('INVALID_CAPABILITY_TAG');
+      expect(res.body.error.code).toBe('INVALID_ATTESTATION_TYPE');
+    });
+
+    it('accepts valid attestation', async () => {
+      const res = await request(app)
+        .post('/moltbridge/attest')
+        .send({
+          targetAgentId: 'abc',
+          attestationType: 'CAPABILITY',
+          capabilityTag: 'code-review',
+          confidence: 0.9,
+        });
+      expect(res.status).toBe(200);
+      expect(res.body.submitted).toBe(true);
     });
   });
 
   describe('GET /moltbridge/trust/:agentId', () => {
-    it('returns 502 when MoltBridge is unreachable', async () => {
-      vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('ECONNREFUSED')));
-
+    it('returns IQS band for agent', async () => {
       const res = await request(app).get('/moltbridge/trust/some-agent-id');
-      // getIQSBand returns null on error (graceful degradation), not 502
       expect(res.status).toBe(200);
-      expect(res.body.iqsBand).toBe('unknown');
+      expect(res.body.agentId).toBe('some-agent-id');
+      expect(['high', 'medium', 'low', 'unknown']).toContain(res.body.iqsBand);
+    });
+  });
+
+  describe('POST /moltbridge/register', () => {
+    it('registers agent with capabilities', async () => {
+      const res = await request(app)
+        .post('/moltbridge/register')
+        .send({ capabilities: ['code-review'], displayName: 'Test Agent' });
+      expect(res.status).toBe(200);
+      expect(res.body.agent).toBeDefined();
     });
   });
 });

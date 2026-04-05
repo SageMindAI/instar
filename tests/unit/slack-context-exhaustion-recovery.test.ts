@@ -66,4 +66,45 @@ describe('Slack context exhaustion recovery wiring', () => {
     const respawnBlock = source.slice(respawnSessionStart, respawnSessionStart + 1000);
     expect(respawnBlock).toContain('slackProxyChannelMap.get(topicId)');
   });
+
+  // Death loop prevention: beforeSessionKill must NOT re-save resume UUIDs
+  // during context exhaustion recovery, otherwise the next respawn loads
+  // the same bloated conversation and dies immediately (infinite loop).
+  it('beforeSessionKill skips Slack resume UUID save during context exhaustion', () => {
+    const beforeKillBlock = source.slice(
+      source.indexOf('beforeSessionKill'),
+      source.indexOf('beforeSessionKill') + 3000,
+    );
+    expect(beforeKillBlock).toContain('contextExhaustionKills');
+    // Must check the set BEFORE saving the resume UUID
+    const checkIdx = beforeKillBlock.indexOf('contextExhaustionKills.has');
+    const saveIdx = beforeKillBlock.indexOf('saveChannelResume');
+    expect(checkIdx).toBeGreaterThan(-1);
+    expect(saveIdx).toBeGreaterThan(-1);
+    expect(checkIdx).toBeLessThan(saveIdx);
+  });
+
+  it('beforeSessionKill skips Telegram resume UUID save during context exhaustion', () => {
+    const beforeKillBlock = source.slice(
+      source.indexOf('beforeSessionKill'),
+      source.indexOf('beforeSessionKill') + 3000,
+    );
+    // Telegram path should also check contextExhaustionKills
+    const telegramSection = beforeKillBlock.slice(0, beforeKillBlock.indexOf('Save Slack'));
+    expect(telegramSection).toContain('contextExhaustionKills');
+  });
+
+  it('context exhaustion event populates the kill tracking set', () => {
+    // SessionRecovery's recovery:context_exhaustion event must be listened for
+    expect(source).toContain("recovery:context_exhaustion");
+    expect(source).toContain('contextExhaustionKills.add');
+  });
+
+  it('respawnSessionFresh has reverse-lookup fallback for slackProxyChannelMap miss', () => {
+    const fnStart = source.indexOf('respawnSessionFresh:');
+    const block = source.slice(fnStart, fnStart + 5000);
+    // Must have a fallback that resolves channel ID from registry when map misses
+    expect(block).toContain('reverse lookup');
+    expect(block).toContain('getChannelRegistry');
+  });
 });

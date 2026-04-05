@@ -1455,6 +1455,15 @@ export interface InstarConfig {
   dashboard?: DashboardConfig;
   /** HMAC signing key for context file integrity verification (auto-generated, 32-byte hex) */
   contextSigningKey?: string;
+  /** MoltBridge integration — trust network for agent discovery and credibility */
+  moltbridge?: {
+    enabled: boolean;
+    apiUrl: string;
+    autoRegister?: boolean;
+    enrichmentMode?: 'manual' | 'cached-only' | 'auto';
+    agentName?: string;
+    platform?: string;
+  };
 }
 
 // ── Dashboard ───────────────────────────────────────────────────────

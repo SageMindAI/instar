@@ -1,9 +1,22 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { createUnifiedTrustSystem, type UnifiedTrustSystem } from '../../../src/threadline/UnifiedTrustWiring.js';
 import { AgentTrustManager } from '../../../src/threadline/AgentTrustManager.js';
+
+// Mock the moltbridge SDK (imported transitively by MoltBridgeClient)
+vi.mock('moltbridge', () => ({
+  MoltBridge: vi.fn().mockImplementation(() => ({
+    verify: vi.fn().mockResolvedValue({ verified: true, token: 'test' }),
+    register: vi.fn().mockResolvedValue({ agent: {} }),
+    discoverCapability: vi.fn().mockResolvedValue({ results: [] }),
+    evaluateIqs: vi.fn().mockResolvedValue({ band: 'medium' }),
+    attest: vi.fn().mockResolvedValue({}),
+    health: vi.fn().mockResolvedValue({ status: 'healthy', neo4j: { connected: true } }),
+  })),
+  Ed25519Signer: { fromSeed: vi.fn(), generate: vi.fn() },
+}));
 
 describe('UnifiedTrustWiring', () => {
   let tmpDir: string;
@@ -52,6 +65,7 @@ describe('UnifiedTrustWiring', () => {
       });
       expect(system2.moltbridge).not.toBeNull();
       expect(system2.moltbridge!.enabled).toBe(true);
+      expect(system2.moltbridge!.initialized).toBe(true);
       system2.shutdown();
     });
   });

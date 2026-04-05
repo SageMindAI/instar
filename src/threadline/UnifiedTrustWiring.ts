@@ -114,6 +114,29 @@ export function createUnifiedTrustSystem(
   let moltbridge: MoltBridgeClient | null = null;
   if (config.moltbridge?.enabled) {
     moltbridge = new MoltBridgeClient(config.moltbridge);
+
+    // Initialize SDK with identity keys for Ed25519 auth signing
+    const id = identity.get();
+    if (id) {
+      moltbridge.initializeWithIdentity(id);
+
+      // Register MoltBridge as discovery stage 3
+      const moltbridgeAdapter: DiscoveryAdapter = {
+        source: 'moltbridge',
+        isAvailable: () => moltbridge !== null && moltbridge.initialized && !moltbridge.isCircuitBreakerOpen,
+        search: async (query: string, limit: number) => {
+          const result = await moltbridge!.discover(query, limit);
+          return result.agents.map(a => ({
+            fingerprint: a.agentId,
+            displayName: a.agentName,
+            capabilities: a.capabilities,
+            source: 'moltbridge' as const,
+            sourcePrecedence: 1,
+          }));
+        },
+      };
+      discoveryWaterfall.registerAdapter(moltbridgeAdapter);
+    }
   }
 
   // Wire trust change callback to audit log

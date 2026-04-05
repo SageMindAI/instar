@@ -405,6 +405,10 @@ export class SlackAdapter implements MessagingAdapter {
 
   /** Register a channel → session binding. Persisted to disk. */
   registerChannelSession(channelId: string, sessionName: string, channelName?: string): void {
+    if (this.isSystemChannel(channelId)) {
+      console.warn(`[slack] Refusing to register session for system channel ${channelId}`);
+      return;
+    }
     this.channelToSession.set(channelId, {
       sessionName,
       channelName,
@@ -430,6 +434,11 @@ export class SlackAdapter implements MessagingAdapter {
   unregisterChannel(channelId: string): void {
     this.channelToSession.delete(channelId);
     this._saveChannelRegistry();
+  }
+
+  /** Check if a channel is a system channel (dashboard, lifeline) that should not have interactive sessions. */
+  isSystemChannel(channelId: string): boolean {
+    return channelId === this.config.dashboardChannelId || channelId === this.config.lifelineChannelId;
   }
 
   /** Get all channel → session mappings. */
@@ -761,6 +770,10 @@ export class SlackAdapter implements MessagingAdapter {
     if (ts) {
       this.seenMessageTs.add(ts);
     }
+
+    // System channels (dashboard, lifeline) are for agent-to-user notifications only.
+    // Never spawn sessions or process user messages from these channels.
+    if (this.isSystemChannel(channelId)) return;
 
     // Bot messages: store in ring buffer for context but don't process as user input
     // This ensures spawned sessions see the full conversation (both sides).

@@ -879,6 +879,36 @@ export class PresenceProxy {
     let summary: string;
 
     if (!alive) {
+      // Session is dead — but was it working recently? If tier 1 captured output,
+      // it was alive then and likely completed its work before exiting. Use the
+      // last known snapshot for a summary instead of a generic "stopped" alarm.
+      if (state.tier1Snapshot) {
+        // Session was active at tier 1 but died before tier 3 — likely completed normally.
+        // Use LLM to summarize what it did.
+        try {
+          const completionSummary = await this.callLlm(
+            `A Claude Code session was working on a task and has now exited. Based on the last terminal output, summarize what the session accomplished in 1-2 sentences. If it looks like it completed its work, say so. If it looks like it crashed or failed, note that.\n\nTerminal output:\n${state.tier1Snapshot.slice(-2000)}`,
+            { model: this.config.tier1Model ?? 'fast', maxTokens: 200 },
+            'low',
+            this.config.llmTimeoutMs?.t1 ?? 15_000,
+          );
+          state.llmCallCount++;
+          state.lastLlmCallAt = Date.now();
+          const guard = guardProxyOutput(completionSummary);
+          const safeSummary = guard.safe ? completionSummary : 'The session completed and exited.';
+          const msg = `${this.prefix} Session finished — ${safeSummary}\n\nSend a new message to start a fresh session.`;
+          state.tier3FiredAt = Date.now();
+          state.tier3Assessment = 'dead';
+          state.tier3Summary = safeSummary;
+          await this.sendProxyMessage(topicId, msg, 3);
+          this.persistState(topicId, state);
+          state.conversationHistory.push({ role: 'proxy', text: msg, timestamp: Date.now() });
+          this.config.releaseTriageMutex?.(state.sessionName, 'presence-proxy');
+          return;
+        } catch {
+          // LLM failed — fall through to default dead handling
+        }
+      }
       assessment = 'dead';
       summary = 'Session is not running.';
     } else if (hasLongRunning) {

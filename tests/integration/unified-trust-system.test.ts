@@ -7,7 +7,20 @@
  * trust audit log, MoltBridge client, and unified wiring.
  */
 
-import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import { describe, it, expect, vi, beforeAll, afterAll } from 'vitest';
+
+// Mock the moltbridge SDK (imported transitively by MoltBridgeClient)
+vi.mock('moltbridge', () => ({
+  MoltBridge: vi.fn().mockImplementation(() => ({
+    verify: vi.fn().mockResolvedValue({ verified: true, token: 'test' }),
+    register: vi.fn().mockResolvedValue({ agent: {} }),
+    discoverCapability: vi.fn().mockResolvedValue({ results: [] }),
+    evaluateIqs: vi.fn().mockResolvedValue({ band: 'medium' }),
+    attest: vi.fn().mockResolvedValue({}),
+    health: vi.fn().mockResolvedValue({ status: 'healthy', neo4j: { connected: true } }),
+  })),
+  Ed25519Signer: { fromSeed: vi.fn(), generate: vi.fn() },
+}));
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -43,7 +56,7 @@ import { frameIncomingMessage, isFramed, sanitizeCapabilityDescription, detectPo
 import { TrustAuditLog } from '../../src/threadline/TrustAuditLog.js';
 
 // MoltBridge
-import { MoltBridgeClient, CAPABILITY_VOCABULARY } from '../../src/moltbridge/MoltBridgeClient.js';
+import { MoltBridgeClient } from '../../src/moltbridge/MoltBridgeClient.js';
 
 // Unified Wiring
 import { createUnifiedTrustSystem } from '../../src/threadline/UnifiedTrustWiring.js';
@@ -523,27 +536,32 @@ describe('8. Trust Audit Log', () => {
 // ══════════════════════════════════════════════════════════════════════
 
 describe('9. MoltBridge Client', () => {
-  it('rejects invalid capability tags', async () => {
+  it('requires initialization before API calls', async () => {
     const client = new MoltBridgeClient({ enabled: true, apiUrl: 'https://test', autoRegister: false, enrichmentMode: 'manual' });
-    await expect(client.submitAttestation({
-      attestor: 'a', subject: 'b', capability: 'invalid-tag',
-      outcome: 'success', confidence: 0.9, context: 'direct-interaction',
-    })).rejects.toThrow('Invalid capability');
+    await expect(client.discover('test')).rejects.toThrow('not initialized');
   });
 
-  it('rejects confidence out of range', async () => {
+  it('initializes with identity and allows API calls', async () => {
     const client = new MoltBridgeClient({ enabled: true, apiUrl: 'https://test', autoRegister: false, enrichmentMode: 'manual' });
-    await expect(client.submitAttestation({
-      attestor: 'a', subject: 'b', capability: 'code-review',
-      outcome: 'success', confidence: 1.5, context: 'direct-interaction',
-    })).rejects.toThrow('Confidence');
-  });
+    const crypto = require('node:crypto');
+    const { publicKey, privateKey } = crypto.generateKeyPairSync('ed25519');
+    const pub = publicKey.export({ type: 'spki', format: 'der' }).subarray(-32);
+    const priv = privateKey.export({ type: 'pkcs8', format: 'der' }).subarray(-32);
+    const identity = {
+      version: 1,
+      publicKey: Buffer.from(pub),
+      privateKey: Buffer.from(priv),
+      x25519PublicKey: Buffer.alloc(32),
+      canonicalId: 'a'.repeat(64),
+      displayFingerprint: 'a'.repeat(16),
+      createdAt: '2026-01-01T00:00:00Z',
+    };
+    client.initializeWithIdentity(identity);
+    expect(client.initialized).toBe(true);
 
-  it('vocabulary contains expected tags', () => {
-    expect(CAPABILITY_VOCABULARY.has('code-generation')).toBe(true);
-    expect(CAPABILITY_VOCABULARY.has('web-research')).toBe(true);
-    expect(CAPABILITY_VOCABULARY.has('coordination')).toBe(true);
-    expect(CAPABILITY_VOCABULARY.has('nonexistent')).toBe(false);
+    // Should not throw — SDK is mocked
+    const result = await client.discover('code-review');
+    expect(result.source).toBe('moltbridge');
   });
 
   it('circuit breaker starts closed', () => {
