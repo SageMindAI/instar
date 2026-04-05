@@ -876,93 +876,73 @@ export function createRoutes(ctx: RouteContext): Router {
     }
   });
 
-  // ── Memory Search (DEPRECATED — use /semantic/* routes instead) ─
+  // ── Memory Search (redirects to /semantic/* — MemoryIndex removed) ─
 
-  router.get('/memory/search', async (req, res) => {
+  router.get('/memory/search', (req, res) => {
     res.setHeader('Deprecation', 'true');
     res.setHeader('Sunset', '2026-06-01');
     res.setHeader('Link', '</semantic/search>; rel="successor-version"');
-    try {
-      const { MemoryIndex } = await import('../memory/MemoryIndex.js');
-      const memoryConfig = (ctx.config as any).memory || {};
-      const index = new MemoryIndex(ctx.config.stateDir, { ...memoryConfig, enabled: true });
-      await index.open();
-      try {
-        index.sync();
-        const query = String(req.query.q || '');
-        const limit = parseInt(req.query.limit as string, 10) || 10;
-        const source = req.query.source as string | undefined;
-        const startMs = Date.now();
-        const results = index.search(query, { limit, source });
-        res.json({
-          query,
-          results,
-          totalResults: results.length,
-          searchTimeMs: Date.now() - startMs,
-        });
-      } finally {
-        index.close();
-      }
-    } catch (err) {
-      res.status(500).json({ error: err instanceof Error ? err.message : 'Search failed' });
+
+    if (!ctx.semanticMemory) {
+      res.status(503).json({ error: 'SemanticMemory not initialized. Use /semantic/search instead.' });
+      return;
     }
+
+    const query = String(req.query.q || '');
+    const limit = parseInt(req.query.limit as string, 10) || 10;
+    const startMs = Date.now();
+    const results = ctx.semanticMemory.search(query, { limit });
+    res.json({
+      query,
+      results,
+      totalResults: results.length,
+      searchTimeMs: Date.now() - startMs,
+      _notice: 'This endpoint is deprecated. Use GET /semantic/search instead.',
+    });
   });
 
-  router.get('/memory/stats', async (_req, res) => {
+  router.get('/memory/stats', (_req, res) => {
     res.setHeader('Deprecation', 'true');
     res.setHeader('Sunset', '2026-06-01');
     res.setHeader('Link', '</semantic/stats>; rel="successor-version"');
-    try {
-      const { MemoryIndex } = await import('../memory/MemoryIndex.js');
-      const memoryConfig = (ctx.config as any).memory || {};
-      const index = new MemoryIndex(ctx.config.stateDir, { ...memoryConfig, enabled: true });
-      await index.open();
-      try {
-        res.json(index.stats());
-      } finally {
-        index.close();
-      }
-    } catch (err) {
-      res.status(500).json({ error: err instanceof Error ? err.message : 'Failed to get stats' });
+
+    if (!ctx.semanticMemory) {
+      res.status(503).json({ error: 'SemanticMemory not initialized. Use /semantic/stats instead.' });
+      return;
     }
+
+    res.json({
+      ...ctx.semanticMemory.stats(),
+      _notice: 'This endpoint is deprecated. Use GET /semantic/stats instead.',
+    });
   });
 
-  router.post('/memory/reindex', async (_req, res) => {
+  router.post('/memory/reindex', (_req, res) => {
     res.setHeader('Deprecation', 'true');
     res.setHeader('Sunset', '2026-06-01');
-    try {
-      const { MemoryIndex } = await import('../memory/MemoryIndex.js');
-      const memoryConfig = (ctx.config as any).memory || {};
-      const index = new MemoryIndex(ctx.config.stateDir, { ...memoryConfig, enabled: true });
-      await index.open();
-      try {
-        const result = index.reindex();
-        res.json({ reindexed: true, ...result });
-      } finally {
-        index.close();
-      }
-    } catch (err) {
-      res.status(500).json({ error: err instanceof Error ? err.message : 'Reindex failed' });
+
+    if (!ctx.semanticMemory) {
+      res.status(503).json({ error: 'SemanticMemory not initialized. Use POST /semantic/rebuild instead.' });
+      return;
     }
+
+    const result = ctx.semanticMemory.rebuild();
+    res.json({
+      reindexed: true,
+      ...result,
+      _notice: 'This endpoint is deprecated. MemoryIndex has been removed; this now rebuilds SemanticMemory from JSONL.',
+    });
   });
 
-  router.post('/memory/sync', async (_req, res) => {
+  router.post('/memory/sync', (_req, res) => {
     res.setHeader('Deprecation', 'true');
     res.setHeader('Sunset', '2026-06-01');
-    try {
-      const { MemoryIndex } = await import('../memory/MemoryIndex.js');
-      const memoryConfig = (ctx.config as any).memory || {};
-      const index = new MemoryIndex(ctx.config.stateDir, { ...memoryConfig, enabled: true });
-      await index.open();
-      try {
-        const result = index.sync();
-        res.json({ synced: true, ...result });
-      } finally {
-        index.close();
-      }
-    } catch (err) {
-      res.status(500).json({ error: err instanceof Error ? err.message : 'Sync failed' });
-    }
+    // MemoryIndex sync is no longer needed — SemanticMemory writes are immediate
+    res.json({
+      synced: true,
+      added: 0, updated: 0, removed: 0,
+      _notice: 'This endpoint is deprecated. SemanticMemory does not require sync — writes are immediate.',
+    });
   });
 
 

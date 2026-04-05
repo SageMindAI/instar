@@ -4,8 +4,8 @@
  * Manages a vec0 virtual table alongside any existing better-sqlite3 database.
  * Provides embedding upsert, delete, KNN search, and batch migration.
  *
- * Designed to be used by SemanticMemory (entity_embeddings) and potentially
- * MemoryIndex (chunk_embeddings) — the table name is configurable.
+ * Designed to be used by SemanticMemory (entity_embeddings) — the table name
+ * is configurable for future consumers.
  *
  * Requires EmbeddingProvider to have loaded the sqlite-vec extension into the
  * database connection before use.

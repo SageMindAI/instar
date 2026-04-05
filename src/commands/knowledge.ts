@@ -8,6 +8,7 @@
  *   instar knowledge remove SOURCE_ID                   Remove a source
  */
 
+import path from 'node:path';
 import pc from 'picocolors';
 import { loadConfig } from '../core/Config.js';
 import { KnowledgeManager } from '../knowledge/KnowledgeManager.js';
@@ -85,15 +86,18 @@ export async function knowledgeList(opts: KnowledgeOptions): Promise<void> {
 export async function knowledgeSearch(query: string, opts: KnowledgeOptions): Promise<void> {
   try {
     const config = loadConfig(opts.dir);
-    const { MemoryIndex } = await import('../memory/MemoryIndex.js');
-    const memoryConfig = (config as any).memory || {};
-    const index = new MemoryIndex(config.stateDir, { ...memoryConfig, enabled: true });
-    await index.open();
+    const { SemanticMemory } = await import('../memory/SemanticMemory.js');
+    const memory = new SemanticMemory({
+      dbPath: path.join(config.stateDir, 'semantic.db'),
+      decayHalfLifeDays: 30,
+      lessonDecayHalfLifeDays: 90,
+      staleThreshold: 0.2,
+    });
+    await memory.open();
 
     try {
-      index.sync();
       const limit = opts.limit || 10;
-      const results = index.search(query, { limit, source: 'knowledge/' });
+      const results = memory.search(query, { limit });
 
       if (results.length === 0) {
         console.log(pc.dim(`\n  No knowledge results for "${query}".`));
@@ -105,13 +109,14 @@ export async function knowledgeSearch(query: string, opts: KnowledgeOptions): Pr
 
       for (const result of results) {
         const score = result.score.toFixed(3);
-        console.log(`  ${pc.cyan(result.source)}  ${pc.dim(`score: ${score}`)}`);
-        const snippet = result.text.slice(0, 200).replace(/\n/g, ' ');
-        console.log(`  ${pc.dim(snippet)}${result.text.length > 200 ? '...' : ''}`);
+        const confidence = Math.round(result.confidence * 100);
+        console.log(`  ${pc.cyan(result.name)} ${pc.dim(`(${result.type})`)}  ${pc.dim(`score: ${score}  confidence: ${confidence}%`)}`);
+        const snippet = result.content.slice(0, 200).replace(/\n/g, ' ');
+        console.log(`  ${pc.dim(snippet)}${result.content.length > 200 ? '...' : ''}`);
         console.log();
       }
     } finally {
-      index.close();
+      memory.close();
     }
   } catch (err) {
     if (err instanceof Error && err.message.includes('better-sqlite3')) {

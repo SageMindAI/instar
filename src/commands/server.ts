@@ -3144,7 +3144,7 @@ export async function startServer(options: StartOptions): Promise<void> {
       DegradationReporter.getInstance().report({
         feature: 'SemanticMemory',
         primary: 'SQLite-backed knowledge graph with FTS5 + vector hybrid search',
-        fallback: 'Legacy memory systems (MEMORY.md, CanonicalState, MemoryIndex)',
+        fallback: 'Legacy memory systems (MEMORY.md, CanonicalState)',
         reason: `SemanticMemory init failed: ${reason}`,
         impact: 'Knowledge graph unavailable. Migration, semantic search, and entity-relationship queries disabled.',
       });

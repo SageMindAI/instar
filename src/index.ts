@@ -256,7 +256,6 @@ export type {
 } from './core/SyncOrchestrator.js';
 
 // Memory
-export { MemoryIndex } from './memory/MemoryIndex.js';
 export { SemanticMemory } from './memory/SemanticMemory.js';
 export { MemoryExporter } from './memory/MemoryExporter.js';
 export type { MemoryExporterConfig, ExportResult, WriteResult } from './memory/MemoryExporter.js';
@@ -581,7 +580,6 @@ export type {
   MemorySearchConfig,
   MemorySource,
   MemorySearchResult,
-  MemoryIndexStats,
   CommonBlocker,
   CapabilityRegistry,
 } from './core/types.js';
