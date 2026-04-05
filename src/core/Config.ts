@@ -11,7 +11,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { mergeConfigWithSecrets } from './SecretMigrator.js';
 import os from 'node:os';
-import type { InstarConfig, SessionManagerConfig, JobSchedulerConfig, FeedbackConfig, AgentType } from './types.js';
+import type { InstarConfig, SessionManagerConfig, JobSchedulerConfig, FeedbackConfig, AgentType, SemanticMemoryConfig } from './types.js';
 
 const DEFAULT_PORT = 4040;
 const DEFAULT_MAX_SESSIONS = 10;
@@ -351,6 +351,7 @@ export function loadConfig(projectDir?: string): InstarConfig {
       ? 'standalone'
       : (fileConfig as Record<string, unknown>).agentType as AgentType | undefined || 'project-bound',
     contextSigningKey,
+    memory: (fileConfig as Record<string, unknown>).memory as Partial<InstarConfig['memory']> || undefined,
   };
 }
 
@@ -371,4 +372,22 @@ export function ensureStateDir(stateDir: string): void {
   for (const dir of dirs) {
     fs.mkdirSync(dir, { recursive: true });
   }
+}
+
+/**
+ * Build a SemanticMemoryConfig from an InstarConfig.
+ *
+ * Reads user overrides from config.memory (loaded from .instar/config.json "memory" key)
+ * and falls back to sensible defaults. This centralizes the values that were previously
+ * hardcoded across commands/knowledge.ts, commands/memory.ts, commands/semantic.ts,
+ * and commands/server.ts.
+ */
+export function getSemanticMemoryConfig(config: InstarConfig): SemanticMemoryConfig {
+  const mem = config.memory || {};
+  return {
+    dbPath: mem.dbPath || path.join(config.stateDir, 'semantic.db'),
+    decayHalfLifeDays: mem.decayHalfLifeDays ?? 30,
+    lessonDecayHalfLifeDays: mem.lessonDecayHalfLifeDays ?? 90,
+    staleThreshold: mem.staleThreshold ?? 0.2,
+  };
 }

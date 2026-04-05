@@ -7,9 +7,8 @@
  *   instar memory status           Show index statistics
  */
 
-import path from 'node:path';
 import pc from 'picocolors';
-import { loadConfig } from '../core/Config.js';
+import { loadConfig, getSemanticMemoryConfig } from '../core/Config.js';
 import { SemanticMemory } from '../memory/SemanticMemory.js';
 
 interface MemoryOptions {
@@ -19,12 +18,7 @@ interface MemoryOptions {
 
 async function getSemanticMemory(dir?: string): Promise<{ memory: SemanticMemory; cleanup: () => void }> {
   const config = loadConfig(dir);
-  const memory = new SemanticMemory({
-    dbPath: path.join(config.stateDir, 'semantic.db'),
-    decayHalfLifeDays: 30,
-    lessonDecayHalfLifeDays: 90,
-    staleThreshold: 0.2,
-  });
+  const memory = new SemanticMemory(getSemanticMemoryConfig(config));
   await memory.open();
   return { memory, cleanup: () => memory.close() };
 }
@@ -147,12 +141,7 @@ export async function memoryExport(opts: ExportOptions): Promise<void> {
     const { SemanticMemory } = await import('../memory/SemanticMemory.js');
     const { MemoryExporter } = await import('../memory/MemoryExporter.js');
 
-    const semanticMemory = new SemanticMemory({
-      dbPath: path.join(config.stateDir, 'semantic.db'),
-      decayHalfLifeDays: 30,
-      lessonDecayHalfLifeDays: 90,
-      staleThreshold: 0.2,
-    });
+    const semanticMemory = new SemanticMemory(getSemanticMemoryConfig(config));
     await semanticMemory.open();
 
     try {

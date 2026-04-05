@@ -3200,12 +3200,8 @@ export async function startServer(options: StartOptions): Promise<void> {
     // Uses the same better-sqlite3 as TopicMemory; shares the rebuild path.
     let semanticMemory: SemanticMemory | undefined;
     try {
-      semanticMemory = new SemanticMemory({
-        dbPath: path.join(config.stateDir, 'semantic.db'),
-        decayHalfLifeDays: 30,
-        lessonDecayHalfLifeDays: 90,
-        staleThreshold: 0.2,
-      });
+      const { getSemanticMemoryConfig } = await import('../core/Config.js');
+      semanticMemory = new SemanticMemory(getSemanticMemoryConfig(config));
       await semanticMemory.open();
       const smStats = semanticMemory.stats();
       console.log(pc.green(`  SemanticMemory: ${smStats.totalEntities} entities, ${smStats.totalEdges} edges`));

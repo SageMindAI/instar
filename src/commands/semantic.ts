@@ -11,10 +11,9 @@
  */
 
 import pc from 'picocolors';
-import { loadConfig } from '../core/Config.js';
+import { loadConfig, getSemanticMemoryConfig } from '../core/Config.js';
 import { SemanticMemory } from '../memory/SemanticMemory.js';
-import type { SemanticMemoryConfig, EntityType } from '../core/types.js';
-import path from 'node:path';
+import type { EntityType } from '../core/types.js';
 
 interface SemanticOptions {
   dir?: string;
@@ -23,13 +22,7 @@ interface SemanticOptions {
 
 async function getSemanticMemory(dir?: string): Promise<{ memory: SemanticMemory; cleanup: () => void }> {
   const config = loadConfig(dir);
-  const semConfig: SemanticMemoryConfig = {
-    dbPath: path.join(config.stateDir, 'semantic.db'),
-    decayHalfLifeDays: 30,
-    lessonDecayHalfLifeDays: 90,
-    staleThreshold: 0.2,
-  };
-  const memory = new SemanticMemory(semConfig);
+  const memory = new SemanticMemory(getSemanticMemoryConfig(config));
   await memory.open();
   return { memory, cleanup: () => memory.close() };
 }

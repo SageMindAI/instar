@@ -8,9 +8,8 @@
  *   instar knowledge remove SOURCE_ID                   Remove a source
  */
 
-import path from 'node:path';
 import pc from 'picocolors';
-import { loadConfig } from '../core/Config.js';
+import { loadConfig, getSemanticMemoryConfig } from '../core/Config.js';
 import { KnowledgeManager } from '../knowledge/KnowledgeManager.js';
 
 interface KnowledgeOptions {
@@ -87,12 +86,7 @@ export async function knowledgeSearch(query: string, opts: KnowledgeOptions): Pr
   try {
     const config = loadConfig(opts.dir);
     const { SemanticMemory } = await import('../memory/SemanticMemory.js');
-    const memory = new SemanticMemory({
-      dbPath: path.join(config.stateDir, 'semantic.db'),
-      decayHalfLifeDays: 30,
-      lessonDecayHalfLifeDays: 90,
-      staleThreshold: 0.2,
-    });
+    const memory = new SemanticMemory(getSemanticMemoryConfig(config));
     await memory.open();
 
     try {

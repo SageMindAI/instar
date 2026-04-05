@@ -1099,8 +1099,24 @@ export function createRoutes(ctx: RouteContext): Router {
 
     const query = String(req.query.q || '');
     const limit = parseInt(req.query.limit as string, 10) || 10;
+    const source = req.query.source as string | undefined;
     const startMs = Date.now();
-    const results = ctx.semanticMemory.search(query, { limit });
+    let semanticResults = ctx.semanticMemory.search(query, { limit });
+
+    // Preserve old `source` query param — filter results by source prefix
+    if (source) {
+      semanticResults = semanticResults.filter(r => r.source?.startsWith(source));
+    }
+
+    // Map SemanticMemory ScoredEntity → old MemorySearchResult shape for backwards compat
+    const results = semanticResults.map(r => ({
+      text: r.content,
+      source: r.source || r.name,
+      score: r.score,
+      highlight: r.content.slice(0, 300),
+      sourceModifiedAt: r.lastVerified || r.createdAt,
+    }));
+
     res.json({
       query,
       results,
