@@ -2576,7 +2576,7 @@ function installAutonomousSkill(skillsDir: string): void {
       { src: 'hooks/hooks.json', dst: path.join(hooksDir, 'hooks.json') },
       { src: 'hooks/autonomous-stop-hook.sh', dst: path.join(hooksDir, 'autonomous-stop-hook.sh') },
       { src: 'scripts/setup-autonomous.sh', dst: path.join(scriptsDir, 'setup-autonomous.sh') },
-      { src: 'skill.md', dst: path.join(autonomousDir, 'skill.md') },
+      { src: 'SKILL.md', dst: path.join(autonomousDir, 'SKILL.md') },
     ];
 
     for (const { src, dst } of filesToCopy) {
@@ -3639,8 +3639,11 @@ function getHookEventReporterScript(): string {
 // Instar server, which populates claudeSessionId for session resumption.
 //
 // Runs async (fire-and-forget) to avoid slowing down tool execution.
-
-const http = require('http');
+//
+// NOTE: Uses \`await import('node:http')\` instead of \`require('http')\` so this
+// script works regardless of the host package.json's module type. A plain
+// \`require\` throws in ESM scope (when the host has "type": "module"); a plain
+// \`import\` is a syntax error in CJS scope. Dynamic import works in both.
 
 const serverUrl = process.env.INSTAR_SERVER_URL || 'http://localhost:4042';
 const authToken = process.env.INSTAR_AUTH_TOKEN || '';
@@ -3653,8 +3656,9 @@ if (!authToken || !instarSid) {
 
 let data = '';
 process.stdin.on('data', chunk => data += chunk);
-process.stdin.on('end', () => {
+process.stdin.on('end', async () => {
   try {
+    const { request } = await import('node:http');
     const input = JSON.parse(data);
     const payload = JSON.stringify({
       event: input.hook_event || (input.tool_name ? 'PostToolUse' : 'Unknown'),
@@ -3663,7 +3667,7 @@ process.stdin.on('end', () => {
     });
 
     const url = new URL(serverUrl + '/hooks/events?instar_sid=' + instarSid);
-    const req = http.request({
+    const req = request({
       hostname: url.hostname,
       port: url.port,
       path: url.pathname + url.search,

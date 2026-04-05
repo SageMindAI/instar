@@ -7,6 +7,7 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
@@ -145,6 +146,52 @@ describe('Hook installation for external operation safety', () => {
     const json = JSON.stringify(settings);
     expect(json).not.toContain('"type":"http"');
     expect(json).not.toContain('"type": "http"');
+  });
+
+  // Regression: the script must run cleanly when the host package.json has
+  // `"type": "module"` (ESM). The previous template used `require('http')` which
+  // throws `ReferenceError: require is not defined in ES module scope` in that
+  // context — and the instar repo itself has `"type": "module"`, so its own
+  // Stop hook crashed. The fix is to load `http` via dynamic import.
+  //
+  // Earlier tests only checked the file existed and was +x; they never executed
+  // it, which is why the bug shipped. This test actually runs it.
+  it('hook-event-reporter.js runs cleanly in an ESM host', () => {
+    const scriptSrc = path.join(projectDir, '.instar', 'hooks', 'instar', 'hook-event-reporter.js');
+    expect(fs.existsSync(scriptSrc)).toBe(true);
+
+    // Copy script into an isolated ESM host to isolate the module-type test
+    // from whatever package.json the test project happens to create.
+    const esmHost = fs.mkdtempSync(path.join(os.tmpdir(), 'instar-esm-host-'));
+    try {
+      fs.writeFileSync(path.join(esmHost, 'package.json'), JSON.stringify({ type: 'module' }));
+      const scriptDst = path.join(esmHost, 'hook-event-reporter.js');
+      fs.copyFileSync(scriptSrc, scriptDst);
+
+      // Run with auth envs set so the script takes the full code path
+      // (otherwise it early-exits before reaching the `http` import).
+      const result = spawnSync(process.execPath, [scriptDst], {
+        cwd: esmHost,
+        env: {
+          ...process.env,
+          INSTAR_AUTH_TOKEN: 'test-token',
+          INSTAR_SESSION_ID: 'test-sid',
+          INSTAR_SERVER_URL: 'http://127.0.0.1:1', // unreachable; script is fire-and-forget
+        },
+        input: JSON.stringify({ hook_event: 'Stop', session_id: 's', tool_name: '' }),
+        timeout: 5000,
+        encoding: 'utf-8',
+      });
+
+      // The specific bug we're guarding against: CJS `require` in ESM scope
+      expect(result.stderr).not.toContain('require is not defined');
+      expect(result.stderr).not.toContain('ReferenceError');
+
+      // Script must exit cleanly (it ignores network failures by design)
+      expect(result.status).toBe(0);
+    } finally {
+      fs.rmSync(esmHost, { recursive: true, force: true });
+    }
   });
 
   it('event reporter hooks exist for all required events', () => {
