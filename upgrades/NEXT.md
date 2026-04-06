@@ -1,6 +1,6 @@
 # Upgrade Guide — vNEXT
 
-<!-- bump: patch -->
+<!-- bump: minor -->
 <!-- Valid values: patch, minor, major -->
 <!-- patch = bug fixes, refactors, test additions, doc updates -->
 <!-- minor = new features, new APIs, new capabilities (backwards-compatible) -->
@@ -8,35 +8,47 @@
 
 ## What Changed
 
-**Fix: `/build` skill now properly installs for all agents.** Three bugs prevented the build skill from working:
+**Persistent Listener Daemon** — A standalone process that maintains a permanent WebSocket connection to the Threadline relay, independent of the agent server. Four phases shipped together:
 
-1. **Missing from npm package**: The bundled `.claude/skills/build/SKILL.md` was not in the `files` array of `package.json`, so the full 269-line skill definition never shipped. Agents got a minimal 8-line fallback instead.
+1. **Listener Daemon (Phase 1)**: Standalone Node.js daemon maintains relay WebSocket connection. Survives server restarts. Writes HMAC-signed entries to an inbox file. Signals the server via Unix domain socket for instant pickup. Managed via launchd on macOS with auto-restart on crash.
 
-2. **Broken path resolution**: `installBuildSkill()` and `installHooks()` used `__dirname` to locate bundled files, but `__dirname` is undefined in ESM modules (`"type": "module"`). The bundled copy always silently failed, falling back to the inline version.
+2. **Pipe-Mode Sessions (Phase 2)**: Lightweight sessions for simple threadline queries. Uses a Haiku-class LLM classifier to distinguish "task" messages (which need full interactive sessions) from "query" messages (which can be answered and auto-exit). Injection-hardened prompt template with XML data tags. Read-only tool access with path grant-list.
 
-3. **Filename casing mismatch**: The build skill was created as `skill.md` (lowercase) while all other built-in skills use `SKILL.md` (uppercase). Now consistent.
+3. **Fast Failover (Phase 3)**: Failover time drops from 15 minutes to under 30 seconds. The daemon subscribes to relay presence changes and signals the server immediately when a peer agent disconnects.
 
-### What agents get after this update:
+4. **Cross-Machine Session Sync (Phase 4)**: When failover occurs, active conversation threads can migrate between machines. ThreadResumeMap entries carry machine origin metadata so the new machine can resume sessions with the correct Claude session UUID.
 
-- **Full `/build` skill** (269 lines) with worktree isolation, 6-phase pipeline, quality gates, and stop-hook enforcement — installed via `migrateBuiltinSkills()` during auto-update
-- **`build-state.py`** state manager in `playbook-scripts/` — already shipped (was in `files` array)
-- **`build-stop-hook.sh`** stop hook in `.instar/hooks/instar/` — installed by `installHooks()` during init/update
+### New CLI commands:
 
-### Path resolution fix:
+Nine new commands under the listener subcommand for daemon lifecycle management, health checking, launchd integration, and data cleanup.
 
-Both `installBuildSkill()` and the build stop hook installer now use `import.meta.url` instead of `__dirname`, matching the pattern used elsewhere in init.ts (e.g., `installAutonomousSkill`).
+### New API endpoints:
+
+Three new authenticated endpoints for daemon health, metrics, and restart signaling.
+
+### Server-daemon coordination:
+
+The server detects whether a listener daemon is running on boot. If so, it defers relay connection to the daemon (no displacement conflicts). Three-tier detection: config setting, PID file, recent health file.
 
 ## What to Tell Your User
 
-- **`/build` now works**: "Your agent now has a fully functional `/build` skill. When you describe a multi-file feature or say 'build something', your agent will offer to use a structured pipeline — planning first, testing at every step, independent verification, and worktree isolation so nothing conflicts with your other work. It was supposed to be available earlier, but a packaging bug prevented it from installing properly. That's fixed now."
+- **Always-on relay connection**: "Your agent now has a dedicated process that keeps the Threadline relay connection alive at all times, even when the server restarts. You will never miss a message from another agent because of a restart or update."
+
+- **Faster cross-machine failover**: "If you run your agent on two machines, failover from one to the other now happens in under 30 seconds instead of 15 minutes. The relay detects when a machine goes offline and notifies the standby immediately."
+
+- **Lightweight responses**: "Simple questions from other agents now get answered faster through pipe-mode sessions that start, respond, and clean up automatically. Complex tasks still get full interactive sessions."
+
+- **Easy setup**: "Run the listener doctor command to check prerequisites, then start the listener to activate it. For auto-start on login, use the listener install command to set up launchd."
 
 ## Summary of New Capabilities
 
 | Capability | How to Use |
 |-----------|-----------|
-| `/build` skill (full version) | Say `/build` or describe a substantial task — agent suggests it proactively |
-| Build state tracking | `python3 playbook-scripts/build-state.py status` |
-| Worktree isolation | Automatic during `/build` — all work in `.instar/worktrees/` |
-| Build history | Completed builds archived in `.instar/state/build/history/` |
-| Resume after crash | `python3 playbook-scripts/build-state.py resume` |
-| Stop-hook enforcement | Automatic — prevents exit during active builds |
+| Listener daemon | Start with the listener start command, check with listener status |
+| Health monitoring | Listener doctor for pre-flight, listener status for runtime |
+| Auto-start on login | Listener install creates a launchd plist (macOS) |
+| Pipe-mode sessions | Automatic for simple queries from trusted agents (IQS 70 or above) |
+| Fast failover | Automatic when daemon subscribes to relay presence changes |
+| Cross-machine resume | Automatic during failover via ThreadResumeMap migration |
+| Data cleanup | Listener purge removes all listener data (GDPR compliance) |
+| Daemon log viewing | Listener logs shows daemon output with filtering options |
