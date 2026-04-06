@@ -61,6 +61,7 @@ export class ServerSupervisor extends EventEmitter {
   private maxRetriesExhaustedAt = 0;
   private consecutiveFailures = 0; // Hysteresis: require 2 consecutive failures before marking unhealthy
   private readonly unhealthyThreshold = 2;
+  private readonly processAliveThreshold = 6; // When process is alive but unresponsive (e.g., high CPU load), require 6 failures (~60s) before restarting
   private stateDir: string | null;
 
   // Planned restart / maintenance wait — suppress alerts during expected downtime
@@ -687,12 +688,26 @@ export class ServerSupervisor extends EventEmitter {
         } else {
           this.consecutiveFailures++;
           if (this.consecutiveFailures >= this.unhealthyThreshold) {
-            // During wake transitions, don't kill a server that's still alive — it's
-            // likely just slow to respond while the system recovers (disk I/O, network
-            // reconfig, SQLite WAL replay). Only act if the server process is actually dead.
-            if (Date.now() < this.wakeTransitionUntil && this.isServerSessionAlive()) {
-              console.log(`[Supervisor] Health check failed during wake transition but server session is alive — waiting (${Math.round((this.wakeTransitionUntil - Date.now()) / 1000)}s remaining)`);
-              this.consecutiveFailures = 0; // Reset so we don't immediately re-trigger
+            const processAlive = this.isServerSessionAlive();
+            if (processAlive) {
+              // Server process exists but isn't responding to health checks.
+              // Under high CPU load (or during wake transitions), this is normal —
+              // the event loop is stalled, not the process dead. Use a much higher
+              // threshold to avoid killing a server that would recover on its own.
+              const effectiveThreshold = Date.now() < this.wakeTransitionUntil
+                ? this.unhealthyThreshold  // During wake transition: already lenient via counter reset
+                : this.processAliveThreshold;
+              if (this.consecutiveFailures < effectiveThreshold) {
+                if (this.consecutiveFailures === this.unhealthyThreshold) {
+                  console.log(`[Supervisor] Health check failed but server process is alive — waiting for ${effectiveThreshold} consecutive failures before restart (${this.consecutiveFailures}/${effectiveThreshold})`);
+                }
+              } else {
+                console.log(`[Supervisor] Server process alive but unresponsive for ${this.consecutiveFailures} checks (~${this.consecutiveFailures * 10}s) — restarting`);
+                this.handleUnhealthy();
+              }
+              if (Date.now() < this.wakeTransitionUntil) {
+                this.consecutiveFailures = 0; // Reset during wake transition as before
+              }
             } else {
               this.handleUnhealthy();
             }
@@ -701,9 +716,22 @@ export class ServerSupervisor extends EventEmitter {
       } catch {
         this.consecutiveFailures++;
         if (this.consecutiveFailures >= this.unhealthyThreshold) {
-          if (Date.now() < this.wakeTransitionUntil && this.isServerSessionAlive()) {
-            console.log(`[Supervisor] Health check failed during wake transition but server session is alive — waiting (${Math.round((this.wakeTransitionUntil - Date.now()) / 1000)}s remaining)`);
-            this.consecutiveFailures = 0;
+          const processAlive = this.isServerSessionAlive();
+          if (processAlive) {
+            const effectiveThreshold = Date.now() < this.wakeTransitionUntil
+              ? this.unhealthyThreshold
+              : this.processAliveThreshold;
+            if (this.consecutiveFailures < effectiveThreshold) {
+              if (this.consecutiveFailures === this.unhealthyThreshold) {
+                console.log(`[Supervisor] Health check failed but server process is alive — waiting for ${effectiveThreshold} consecutive failures before restart (${this.consecutiveFailures}/${effectiveThreshold})`);
+              }
+            } else {
+              console.log(`[Supervisor] Server process alive but unresponsive for ${this.consecutiveFailures} checks (~${this.consecutiveFailures * 10}s) — restarting`);
+              this.handleUnhealthy();
+            }
+            if (Date.now() < this.wakeTransitionUntil) {
+              this.consecutiveFailures = 0;
+            }
           } else {
             this.handleUnhealthy();
           }
@@ -731,7 +759,10 @@ export class ServerSupervisor extends EventEmitter {
   private async checkHealth(): Promise<boolean> {
     try {
       const controller = new AbortController();
-      const timer = setTimeout(() => controller.abort(), 5000);
+      // Use 8s timeout — 5s is too aggressive under high CPU load where even localhost
+      // HTTP can be delayed by event loop stalls. The health check interval is 10s so
+      // 8s still leaves a gap between checks.
+      const timer = setTimeout(() => controller.abort(), 8000);
       try {
         const response = await fetch(`http://127.0.0.1:${this.port}/health`, {
           signal: controller.signal,
