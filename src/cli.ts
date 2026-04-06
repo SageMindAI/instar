@@ -1163,6 +1163,99 @@ function rejectIfInsideSession(action: string): boolean {
   return false;
 }
 
+// ── Listener Daemon ──────────────────────────────────────────────────
+
+const listenerCmd = program
+  .command('listener')
+  .description('Manage the standalone listener daemon');
+
+listenerCmd
+  .command('start')
+  .description('Start the listener daemon')
+  .option('--foreground', 'Run in foreground')
+  .option('-d, --dir <path>', 'Project directory')
+  .action(async (opts) => {
+    const { startListener } = await import('./commands/listener.js');
+    return startListener(opts);
+  });
+
+listenerCmd
+  .command('stop')
+  .description('Stop the listener daemon')
+  .option('-d, --dir <path>', 'Project directory')
+  .action(async (opts) => {
+    const { stopListener } = await import('./commands/listener.js');
+    return stopListener(opts);
+  });
+
+listenerCmd
+  .command('status')
+  .description('Show daemon state + connection info')
+  .option('-d, --dir <path>', 'Project directory')
+  .action(async (opts) => {
+    const { listenerStatus } = await import('./commands/listener.js');
+    return listenerStatus(opts);
+  });
+
+listenerCmd
+  .command('logs')
+  .description('Tail daemon log file')
+  .option('-n, --lines <n>', 'Number of lines', '50')
+  .option('-f, --follow', 'Follow log output')
+  .option('-d, --dir <path>', 'Project directory')
+  .action(async (opts) => {
+    const { listenerLogs } = await import('./commands/listener.js');
+    return listenerLogs({ ...opts, lines: parseInt(opts.lines, 10) });
+  });
+
+listenerCmd
+  .command('restart')
+  .description('Graceful restart (drain → reconnect)')
+  .option('-d, --dir <path>', 'Project directory')
+  .action(async (opts) => {
+    const { restartListener } = await import('./commands/listener.js');
+    return restartListener(opts);
+  });
+
+listenerCmd
+  .command('doctor')
+  .description('Pre-flight check for listener daemon')
+  .option('-d, --dir <path>', 'Project directory')
+  .action(async (opts) => {
+    const { listenerDoctor } = await import('./commands/listener.js');
+    return listenerDoctor(opts);
+  });
+
+listenerCmd
+  .command('install')
+  .description('Install launchd plist / systemd unit for auto-start')
+  .option('-d, --dir <path>', 'Project directory')
+  .action(async (opts) => {
+    const { installListener } = await import('./commands/listener.js');
+    return installListener(opts);
+  });
+
+listenerCmd
+  .command('uninstall')
+  .description('Remove launchd plist / systemd unit')
+  .option('-d, --dir <path>', 'Project directory')
+  .action(async (opts) => {
+    const { uninstallListener } = await import('./commands/listener.js');
+    return uninstallListener(opts);
+  });
+
+listenerCmd
+  .command('purge')
+  .description('Delete all listener data (GDPR right-to-erasure)')
+  .option('-d, --dir <path>', 'Project directory')
+  .option('--force', 'Confirm deletion')
+  .action(async (opts) => {
+    const { purgeListener } = await import('./commands/listener.js');
+    return purgeListener(opts);
+  });
+
+// ── Server ──────────────────────────────────────────────────────────
+
 const serverCmd = program
   .command('server')
   .description('Manage the persistent agent server');

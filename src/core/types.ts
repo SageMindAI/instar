@@ -1497,6 +1497,37 @@ export interface FileViewerConfig {
 
 // ── Threadline Relay ────────────────────────────────────────────────
 
+export interface ThreadlineListenerConfig {
+  /** Whether the listener daemon is enabled */
+  enabled?: boolean;
+  /** Relay URL override for the daemon */
+  relayUrl?: string;
+  /** Pipe-mode session config */
+  pipeMode?: {
+    enabled?: boolean;
+    model?: string;
+    timeoutMs?: number;
+    warningMs?: number;
+    maxConcurrent?: number;
+    allowedTools?: string[];
+    allowedPaths?: string[];
+    minIqsBand?: number;
+  };
+  /** Failover config */
+  failover?: {
+    mode?: 'relay-presence' | 'heartbeat';
+    fallback?: string;
+    cooldownMs?: number;
+    max24h?: number;
+  };
+  /** Inbox retention in days */
+  inboxRetentionDays?: number;
+  /** Whether to publish availability to MoltBridge */
+  publishAvailability?: boolean;
+  /** Offline queue TTL in ms */
+  offlineQueueTtlMs?: number;
+}
+
 export interface ThreadlineConfig {
   /** Whether cloud relay is enabled (default: false, opt-in) */
   relayEnabled: boolean;
@@ -1514,6 +1545,8 @@ export interface ThreadlineConfig {
   ackRateLimit?: number;
   /** First-contact policy: 'supervised' (hold for approval) or 'auto' (respond immediately) */
   firstContactPolicy?: 'supervised' | 'auto';
+  /** Listener daemon configuration */
+  listener?: ThreadlineListenerConfig;
 }
 
 // ── Input Guard ─────────────────────────────────────────────────────

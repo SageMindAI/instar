@@ -49,6 +49,12 @@ export interface ThreadResumeEntry {
   pinned: boolean;
   /** Total messages in thread */
   messageCount: number;
+  /** Machine that owns this thread (for cross-machine sync) */
+  machineOrigin?: string;
+  /** If migrated to another machine, which one */
+  migratedTo?: string;
+  /** Spawn mode: interactive (default) or pipe */
+  spawnMode?: 'interactive' | 'pipe';
 }
 
 /** Serialized map format */
@@ -144,6 +150,45 @@ export class ThreadResumeMap {
     entry.savedAt = new Date().toISOString();
 
     this.persist(map);
+  }
+
+  /**
+   * Mark entries from a specific machine as migrated (Phase 4: cross-machine sync).
+   * Called during failover when this machine takes over from another.
+   * The migrated entries can be used to resume threads with --resume UUID.
+   */
+  migrateFrom(sourceMachine: string, targetMachine: string): { migrated: number; skipped: number } {
+    const map = this.load();
+    let migrated = 0;
+    let skipped = 0;
+
+    for (const [threadId, entry] of Object.entries(map)) {
+      if (entry.machineOrigin === sourceMachine && entry.state === 'active') {
+        entry.migratedTo = targetMachine;
+        entry.state = 'idle'; // Demote to idle — will be resumed on next message
+        entry.savedAt = new Date().toISOString();
+        migrated++;
+      } else if (entry.machineOrigin === sourceMachine) {
+        skipped++;
+      }
+    }
+
+    if (migrated > 0) this.persist(map);
+    return { migrated, skipped };
+  }
+
+  /**
+   * Get entries that were migrated to this machine (for resume capability).
+   */
+  getMigratedEntries(targetMachine: string): Array<{ threadId: string; entry: ThreadResumeEntry }> {
+    const map = this.load();
+    const results: Array<{ threadId: string; entry: ThreadResumeEntry }> = [];
+    for (const [threadId, entry] of Object.entries(map)) {
+      if (entry.migratedTo === targetMachine) {
+        results.push({ threadId, entry });
+      }
+    }
+    return results;
   }
 
   /**

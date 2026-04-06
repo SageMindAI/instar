@@ -8170,6 +8170,101 @@ export function createRoutes(ctx: RouteContext): Router {
     router.use(threadlineRoutes);
   }
 
+  // ── Listener Daemon Health/Metrics ────────────────────────────────
+
+  router.get('/listener/health', (req, res) => {
+    // Auth required (tunnel exposes these endpoints)
+    if (ctx.config.authToken) {
+      const header = req.headers.authorization;
+      if (!header?.startsWith('Bearer ') || header.slice(7) !== ctx.config.authToken) {
+        return res.status(401).json({ error: 'Unauthorized' });
+      }
+    }
+
+    const healthPath = path.join(ctx.config.stateDir, 'listener-health.json');
+    if (!fs.existsSync(healthPath)) {
+      return res.json({
+        status: 'not-running',
+        message: 'No listener daemon health file found. Start with: instar listener start',
+      });
+    }
+
+    try {
+      const health = JSON.parse(fs.readFileSync(healthPath, 'utf-8'));
+      // Add snapshotAge
+      const healthMtime = fs.statSync(healthPath).mtimeMs;
+      health.snapshotAge = Math.floor((Date.now() - healthMtime) / 1000);
+      return res.json(health);
+    } catch {
+      return res.status(500).json({ error: 'Failed to read health file' });
+    }
+  });
+
+  router.get('/listener/metrics', (req, res) => {
+    if (ctx.config.authToken) {
+      const header = req.headers.authorization;
+      if (!header?.startsWith('Bearer ') || header.slice(7) !== ctx.config.authToken) {
+        return res.status(401).json({ error: 'Unauthorized' });
+      }
+    }
+
+    const healthPath = path.join(ctx.config.stateDir, 'listener-health.json');
+    let daemon: Record<string, unknown> = { state: 'not-running' };
+    if (fs.existsSync(healthPath)) {
+      try {
+        daemon = JSON.parse(fs.readFileSync(healthPath, 'utf-8'));
+        const healthMtime = fs.statSync(healthPath).mtimeMs;
+        daemon.snapshotAge = Math.floor((Date.now() - healthMtime) / 1000);
+      } catch {
+        // Use default
+      }
+    }
+
+    // Check if daemon socket is connected
+    const socketPath = path.join(ctx.config.stateDir, 'listener.sock');
+    const socketConnected = fs.existsSync(socketPath);
+
+    // Inbox stats
+    const inboxPath = path.join(ctx.config.stateDir, 'threadline', 'inbox.jsonl.active');
+    let inboxSizeBytes = 0;
+    if (fs.existsSync(inboxPath)) {
+      try {
+        inboxSizeBytes = fs.statSync(inboxPath).size;
+      } catch {
+        // Ignore
+      }
+    }
+
+    return res.json({
+      daemon,
+      socket: { connected: socketConnected, path: socketPath },
+      inbox: { sizeBytes: inboxSizeBytes, path: inboxPath },
+    });
+  });
+
+  router.post('/listener/restart', (req, res) => {
+    if (ctx.config.authToken) {
+      const header = req.headers.authorization;
+      if (!header?.startsWith('Bearer ') || header.slice(7) !== ctx.config.authToken) {
+        return res.status(401).json({ error: 'Unauthorized' });
+      }
+    }
+
+    // Signal daemon via PID file
+    const pidPath = path.join(ctx.config.stateDir, 'listener-daemon.pid');
+    if (!fs.existsSync(pidPath)) {
+      return res.status(404).json({ error: 'No listener daemon PID file found' });
+    }
+
+    try {
+      const pid = parseInt(fs.readFileSync(pidPath, 'utf-8').trim(), 10);
+      process.kill(pid, 'SIGTERM');
+      return res.json({ status: 'restart-signal-sent', pid });
+    } catch (err) {
+      return res.status(500).json({ error: `Failed to signal daemon: ${err}` });
+    }
+  });
+
   // ── MoltBridge Integration ──────────────────────────────────────────
 
   if (ctx.unifiedTrust?.moltbridge) {

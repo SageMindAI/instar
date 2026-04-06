@@ -120,21 +120,86 @@ export async function bootstrapThreadline(
   const relayEnabled = config.relayEnabled === true
     || process.env.THREADLINE_RELAY_ENABLED === 'true';
 
+  // Check if the standalone listener daemon should handle the relay connection.
+  // Three checks, in order:
+  //   1. Config says listener.enabled = true → always defer to daemon
+  //   2. Daemon PID file exists and process alive → defer
+  //   3. Health file shows recent activity (last 5 min) → defer (daemon may be restarting)
+  // This prevents the displacement race where the server briefly connects its own
+  // relay client during restart, displacing the daemon.
+  let daemonHandlingRelay = false;
+  if (relayEnabled) {
+    // Check 1: Config-level opt-in — if the user configured a daemon, always defer
+    const listenerConfigPath = path.join(config.stateDir, 'config.json');
+    let listenerConfigEnabled = false;
+    try {
+      if (fs.existsSync(listenerConfigPath)) {
+        const rawConfig = JSON.parse(fs.readFileSync(listenerConfigPath, 'utf-8'));
+        listenerConfigEnabled = rawConfig?.threadline?.listener?.enabled === true;
+      }
+    } catch { /* ignore parse errors */ }
+
+    // Check 2: Daemon PID file exists and process alive
+    const daemonPidPath = path.join(config.stateDir, 'listener-daemon.pid');
+    let daemonAlive = false;
+    if (fs.existsSync(daemonPidPath)) {
+      try {
+        const pid = parseInt(fs.readFileSync(daemonPidPath, 'utf-8').trim(), 10);
+        process.kill(pid, 0); // Check if process is alive (doesn't actually kill)
+        daemonAlive = true;
+      } catch {
+        // PID file exists but process is dead — clean up stale PID
+        try { fs.unlinkSync(daemonPidPath); } catch { /* ignore */ }
+      }
+    }
+
+    // Check 3: Health file shows recent activity (daemon may be restarting)
+    let recentHealth = false;
+    const healthPath = path.join(config.stateDir, 'listener-health.json');
+    if (fs.existsSync(healthPath)) {
+      try {
+        const healthMtime = fs.statSync(healthPath).mtimeMs;
+        const fiveMinAgo = Date.now() - 5 * 60 * 1000;
+        if (healthMtime > fiveMinAgo) {
+          const health = JSON.parse(fs.readFileSync(healthPath, 'utf-8'));
+          // Only count as recent if the daemon was previously connected (not just 'stopped')
+          if (health.state === 'connected' || health.state === 'authenticating' || health.state === 'connecting') {
+            recentHealth = true;
+          }
+        }
+      } catch { /* ignore */ }
+    }
+
+    if (daemonAlive) {
+      daemonHandlingRelay = true;
+      const pid = parseInt(fs.readFileSync(daemonPidPath, 'utf-8').trim(), 10);
+      console.log(`Threadline: listener daemon running (pid: ${pid}) — server will NOT connect to relay (daemon handles it)`);
+    } else if (listenerConfigEnabled) {
+      daemonHandlingRelay = true;
+      console.log(`Threadline: listener daemon configured (threadline.listener.enabled=true) — server will NOT connect to relay (start daemon with: instar listener start)`);
+    } else if (recentHealth) {
+      daemonHandlingRelay = true;
+      console.log(`Threadline: listener daemon was recently active — server will NOT connect to relay (daemon may be restarting)`);
+    }
+  }
+
   let relayClient: ThreadlineClient | undefined;
   let inboundGate: InboundMessageGate | undefined;
   let trustManager: AgentTrustManager | undefined;
+
+  // Always create trust manager when relay is enabled — needed for processing
+  // inbox entries even when the daemon handles the relay connection.
+  if (relayEnabled) {
+    trustManager = new AgentTrustManager({ stateDir: config.stateDir });
+  }
 
   if (relayEnabled) {
     const relayUrl = config.relayUrl
       ?? process.env.THREADLINE_RELAY_URL
       ?? 'wss://threadline-relay.fly.dev/v1/connect';
 
-    console.log(`Threadline: connecting to relay at ${relayUrl} (disable with THREADLINE_RELAY_ENABLED=false)`);
-
-    // Create trust manager for relay interactions
-    trustManager = new AgentTrustManager({ stateDir: config.stateDir });
-
-    // Create relay client
+    // Always create relay client for outbound messages.
+    // When daemon handles inbound, we still need the client for sending.
     relayClient = new ThreadlineClient({
       name: config.agentName,
       relayUrl,
@@ -147,9 +212,14 @@ export async function bootstrapThreadline(
     // Create inbound message gate (imports ThreadlineRouter lazily if needed)
     // For now, router is not available at bootstrap time — it's created in server.ts
     // The gate will be wired to the router after server setup
-    inboundGate = new InboundMessageGate(trustManager, null, {
+    inboundGate = new InboundMessageGate(trustManager!, null, {
       maxPayloadBytes: 64 * 1024,
     });
+
+    // Only wire inbound message handling and connect if daemon is NOT handling relay.
+    // When daemon handles inbound, the server only uses the relay client for outbound sends.
+    if (!daemonHandlingRelay) {
+    console.log(`Threadline: connecting to relay at ${relayUrl} (disable with THREADLINE_RELAY_ENABLED=false)`);
 
     // Route inbound relay messages through the gate
     relayClient.on('message', async (msg: ReceivedMessage) => {
@@ -227,6 +297,14 @@ export async function bootstrapThreadline(
       console.error(`Threadline: relay connection failed — ${err instanceof Error ? err.message : err}`);
       console.log('Threadline: agent will operate in local-only mode');
       relayClient = undefined;
+    }
+    } else {
+      // Daemon handles the relay connection (both inbound and outbound).
+      // The server's relay client is NOT connected — outbound messages are
+      // sent by the daemon via a file-based outbox or via sessions using
+      // the threadline_send MCP tool (which connects its own stdio subprocess).
+      // The relay client object exists but is not connected.
+      console.log(`Threadline: daemon handles relay — server relay client not connected (outbound via MCP tools)`);
     }
   }
 

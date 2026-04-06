@@ -4906,6 +4906,63 @@ export async function startServer(options: StartOptions): Promise<void> {
       ? new ListenerSessionManager(config.stateDir, config.authToken ?? '', config.threadline as Partial<import('../threadline/ListenerSessionManager.js').ListenerConfig>)
       : null;
 
+    // Wake Socket Server — receives signals from the standalone listener daemon (Phase 1)
+    let wakeSocketServer: import('../threadline/WakeSocketServer.js').WakeSocketServer | undefined;
+    try {
+      const { WakeSocketServer } = await import('../threadline/WakeSocketServer.js');
+      wakeSocketServer = new WakeSocketServer(config.stateDir);
+      wakeSocketServer.on('wake', () => {
+        // Daemon wrote a new inbox entry — read and process it
+        const inboxPath = path.join(config.stateDir, 'threadline', 'inbox.jsonl.active');
+        if (fs.existsSync(inboxPath)) {
+          console.log('[wake-socket] Received wake signal from listener daemon');
+        }
+      });
+
+      // Phase 3: Fast failover via relay presence detection
+      wakeSocketServer.on('failover-trigger', () => {
+        console.log('[wake-socket] Received FAILOVER_TRIGGER from listener daemon');
+        // Read trigger details
+        const triggerPath = path.join(config.stateDir, 'failover-trigger.json');
+        if (fs.existsSync(triggerPath)) {
+          try {
+            const trigger = JSON.parse(fs.readFileSync(triggerPath, 'utf-8'));
+            console.log(`[wake-socket] Peer agent ${trigger.agentId?.slice(0, 8)}... disconnected from relay`);
+            // The MultiMachineCoordinator can use this to speed up failover
+            // For now, log the event. Full failover integration requires
+            // evaluating whether this agent is a standby for the disconnected peer.
+          } catch { /* ignore parse errors */ }
+        }
+      });
+
+      wakeSocketServer.start();
+      console.log(pc.dim(`  Wake socket: listening at ${path.join(config.stateDir, 'listener.sock')}`));
+    } catch (err) {
+      console.log(pc.dim(`  Wake socket: not started (${err instanceof Error ? err.message : err})`));
+    }
+
+    // Pipe Session Spawner — lightweight claude -p sessions for simple queries (Phase 2)
+    let pipeSpawner: import('../threadline/PipeSessionSpawner.js').PipeSessionSpawner | undefined;
+    if (config.threadline?.relayEnabled) {
+      try {
+        const { PipeSessionSpawner } = await import('../threadline/PipeSessionSpawner.js');
+        const pipeConfig = config.threadline?.listener?.pipeMode;
+        pipeSpawner = new PipeSessionSpawner({
+          stateDir: config.stateDir,
+          model: pipeConfig?.model ?? 'sonnet',
+          timeoutMs: pipeConfig?.timeoutMs ?? 600_000,
+          warningMs: pipeConfig?.warningMs ?? 480_000,
+          maxConcurrent: pipeConfig?.maxConcurrent ?? 5,
+          allowedTools: pipeConfig?.allowedTools ?? ['threadline_send', 'Read', 'Glob', 'Grep'],
+          allowedPaths: pipeConfig?.allowedPaths ?? ['src/', 'docs/', 'specs/'],
+          minIqsBand: pipeConfig?.minIqsBand ?? 70,
+        });
+        console.log(pc.dim(`  Pipe sessions: enabled (model: ${pipeConfig?.model ?? 'sonnet'}, max: ${pipeConfig?.maxConcurrent ?? 5})`));
+      } catch (err) {
+        console.log(pc.dim(`  Pipe sessions: not available (${err instanceof Error ? err.message : err})`));
+      }
+    }
+
     console.log(pc.green(`  Inter-agent messaging: enabled (token: ${agentToken.slice(0, 8)}...)${dropSummary}`));
 
     // ── System Reviewer: self-monitoring feature health ──────────────
@@ -5067,7 +5124,39 @@ export async function startServer(options: StartOptions): Promise<void> {
             } catch (ackErr) { console.error(`[relay] Auto-ack failed: ${ackErr instanceof Error ? ackErr.message : ackErr}`); }
           }
 
-          // Phase 2: Route to warm listener if available and appropriate
+          // Phase 2a: Pipe-mode session for simple queries (lightweight, auto-exit)
+          if (pipeSpawner && msg.threadId && !threadResumeMap.get(msg.threadId)) {
+            const pipeCheck = pipeSpawner.shouldUsePipeMode({
+              threadId: msg.threadId,
+              messageText: textContent,
+              fromFingerprint: senderFingerprint,
+              fromName: senderName,
+              trustLevel,
+            });
+            if (pipeCheck.eligible) {
+              try {
+                const { classifyIntent, summarizeThreadHistory } = await import('../threadline/PipeSessionSpawner.js');
+                const intent = await classifyIntent(textContent);
+                if (intent === 'pipe') {
+                  const result = await pipeSpawner.spawn({
+                    threadId: msg.threadId,
+                    messageText: textContent,
+                    fromFingerprint: senderFingerprint,
+                    fromName: senderName,
+                    trustLevel,
+                  });
+                  if (result.spawned) {
+                    console.log(`[relay] Pipe session spawned for ${senderName} (thread: ${msg.threadId.slice(0, 8)})`);
+                    return;
+                  }
+                }
+              } catch (err) {
+                console.error(`[relay] Pipe session error (falling through to interactive): ${err instanceof Error ? err.message : err}`);
+              }
+            }
+          }
+
+          // Phase 2b: Route to warm listener if available and appropriate
           if (listenerManager && listenerManager.shouldUseListener(trustLevel, textContent.length)) {
             listenerManager.writeToInbox({ from: senderFingerprint, senderName, trustLevel, threadId: msg.threadId ?? getSyntheticThreadId(senderFingerprint), text: textContent });
             console.log(`[relay] Routed to listener inbox from ${senderName} (trust: ${trustLevel})`);
@@ -5480,6 +5569,8 @@ export async function startServer(options: StartOptions): Promise<void> {
       sessionMonitor?.stop();
       if (tunnel) await tunnel.stop();
       if (threadlineShutdown) await threadlineShutdown();
+      wakeSocketServer?.stop();
+      pipeSpawner?.killAll();
       stopHeartbeat?.();
       unregisterAgent(config.projectDir);
       scheduler?.stop();
