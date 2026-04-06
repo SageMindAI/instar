@@ -1085,7 +1085,7 @@ export function createRoutes(ctx: RouteContext): Router {
     }
   });
 
-  // ── Memory Search (redirects to /semantic/* — MemoryIndex removed) ─
+  // ── Memory Search (deprecated — delegates to SemanticMemory) ────────
 
   router.get('/memory/search', (req, res) => {
     res.setHeader('Deprecation', 'true');
@@ -1113,7 +1113,7 @@ export function createRoutes(ctx: RouteContext): Router {
       text: r.content,
       source: r.source || r.name,
       score: r.score,
-      highlight: r.content.slice(0, 300),
+      highlight: `<b>${query}</b> — ${r.content.slice(0, 200)}`,
       sourceModifiedAt: r.lastVerified || r.createdAt,
     }));
 
@@ -1136,8 +1136,15 @@ export function createRoutes(ctx: RouteContext): Router {
       return;
     }
 
+    const stats = ctx.semanticMemory.stats();
+    // Map SemanticMemoryStats → old MemoryIndexStats shape for backwards compat
     res.json({
-      ...ctx.semanticMemory.stats(),
+      totalFiles: stats.totalEntities,
+      totalChunks: stats.totalEntities,
+      dbSizeBytes: stats.dbSizeBytes,
+      lastIndexedAt: new Date().toISOString(),
+      staleFiles: stats.staleCount,
+      vectorSearchAvailable: stats.vectorSearchAvailable ?? false,
       _notice: 'This endpoint is deprecated. Use GET /semantic/stats instead.',
     });
   });
@@ -1155,14 +1162,14 @@ export function createRoutes(ctx: RouteContext): Router {
     res.json({
       reindexed: true,
       ...result,
-      _notice: 'This endpoint is deprecated. MemoryIndex has been removed; this now rebuilds SemanticMemory from JSONL.',
+      _notice: 'This endpoint is deprecated. Use POST /semantic/rebuild instead.',
     });
   });
 
   router.post('/memory/sync', (_req, res) => {
     res.setHeader('Deprecation', 'true');
     res.setHeader('Sunset', '2026-06-01');
-    // MemoryIndex sync is no longer needed — SemanticMemory writes are immediate
+    // Sync is no longer needed — SemanticMemory writes are immediate
     res.json({
       synced: true,
       added: 0, updated: 0, removed: 0,

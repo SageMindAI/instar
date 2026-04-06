@@ -47,7 +47,7 @@ export async function knowledgeIngest(content: string, opts: KnowledgeOptions): 
     console.log(pc.dim(`  File: ${result.filePath}`));
     console.log(pc.dim(`  Words: ${result.wordCount}`));
     console.log();
-    console.log(pc.dim('  Run `instar memory sync` to update the search index.'));
+    console.log(pc.dim('  Knowledge base updated. Search results will reflect changes immediately.'));
   } catch (err) {
     console.error(pc.red(`Failed to ingest: ${err instanceof Error ? err.message : String(err)}`));
     process.exit(1);
@@ -91,7 +91,9 @@ export async function knowledgeSearch(query: string, opts: KnowledgeOptions): Pr
 
     try {
       const limit = opts.limit || 10;
-      const results = memory.search(query, { limit });
+      const allResults = memory.search(query, { limit: limit * 3 });
+      // Filter to knowledge-base entries only (source starts with 'knowledge/')
+      const results = allResults.filter(r => r.source?.startsWith('knowledge/')).slice(0, limit);
 
       if (results.length === 0) {
         console.log(pc.dim(`\n  No knowledge results for "${query}".`));
@@ -136,7 +138,7 @@ export async function knowledgeRemove(sourceId: string, opts: KnowledgeOptions):
     const removed = km.remove(sourceId);
     if (removed) {
       console.log(pc.green(`\n  Removed: ${source.title} (${sourceId})`));
-      console.log(pc.dim('  Run `instar memory sync` to update the search index.\n'));
+      console.log(pc.dim('  Knowledge base updated. Search results will reflect changes immediately.\n'));
     }
   } catch (err) {
     console.error(pc.red(`Failed to remove: ${err instanceof Error ? err.message : String(err)}`));
