@@ -563,7 +563,7 @@ Agents SHOULD accept messages from any agent with the same major version.
 | **Denial of service** | Multi-tier rate limiting with burst protection (Section 7.7); global spawn concurrency limit (Section 7.8); broadcast suppression |
 | **Privilege escalation** | ALL trust levels are user-granted explicitly — no auto-escalation (Section 7.4.1); safety-only auto-downgrade on failures (never auto-upgrade) |
 | **Data exfiltration** | Outbound message content reviewed by ExternalOperationGate at supervised+ levels |
-| **Malicious agent registration** | All agents start at `untrusted`; local agents require cryptographic verification; registry file permissions `0600` |
+| **Malicious agent registration** | Local agents start at `untrusted` and require cryptographic verification before trust is granted; relay agents start at `verified` (they've already authenticated with the relay via per-pair tokens); registry file permissions `0600` |
 | **Trust gaming** | No auto-escalation eliminates gaming vector; user sees interaction stats before granting trust (Section 7.4.1) |
 | **Same-machine compromise** | No implicit trust for same-machine agents; Ed25519 verification required; per-agent token files with `0600` permissions |
 
