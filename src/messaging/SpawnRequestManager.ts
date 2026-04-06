@@ -53,7 +53,7 @@ export interface SpawnRequestManagerConfig {
 
 // ── Constants ───────────────────────────────────────────────────
 
-const DEFAULT_COOLDOWN_MS = 5 * 60_000;
+const DEFAULT_COOLDOWN_MS = 30_000; // 30 seconds (reduced from 5 min to allow multi-message agents)
 const DEFAULT_MAX_RETRIES = 3;
 const DEFAULT_MAX_RETRY_WINDOW_MS = 30 * 60_000;
 
@@ -84,6 +84,15 @@ export class SpawnRequestManager {
     firstAttemptAt: number;
   }>();
 
+  /** Queue messages that arrive during cooldown, keyed by agent */
+  private readonly pendingMessages = new Map<string, { context: string; threadId?: string; receivedAt: number }[]>();
+
+  /** Max queued messages per agent before oldest are dropped */
+  private static readonly MAX_QUEUED_PER_AGENT = 10;
+
+  /** Max age for queued messages (10 minutes) */
+  private static readonly QUEUE_MAX_AGE_MS = 10 * 60_000;
+
   constructor(config: SpawnRequestManagerConfig) {
     this.config = config;
   }
@@ -98,6 +107,10 @@ export class SpawnRequestManager {
     const lastSpawn = this.lastSpawnByAgent.get(request.requester.agent) ?? 0;
     const timeSinceLastSpawn = Date.now() - lastSpawn;
     if (timeSinceLastSpawn < cooldownMs) {
+      // Queue the message context for delivery when cooldown expires
+      if (request.context) {
+        this.queueMessage(request.requester.agent, request.context, request.pendingMessages?.[0]);
+      }
       const retryAfter = cooldownMs - timeSinceLastSpawn;
       return {
         approved: false,
@@ -128,9 +141,10 @@ export class SpawnRequestManager {
       };
     }
 
-    // Approved — spawn the session
+    // Approved — spawn the session (include any queued messages from cooldown)
     try {
-      const prompt = this.buildSpawnPrompt(request);
+      const queuedMessages = this.drainQueue(request.requester.agent);
+      const prompt = this.buildSpawnPrompt(request, queuedMessages);
       const sessionId = await this.config.spawnSession(prompt, {
         model: request.suggestedModel,
         maxDurationMinutes: request.suggestedMaxDuration,
@@ -192,14 +206,61 @@ export class SpawnRequestManager {
   }
 
   /** Build the prompt for a spawned session */
-  private buildSpawnPrompt(request: SpawnRequest): string {
+  private buildSpawnPrompt(request: SpawnRequest, queuedMessages?: { context: string; threadId?: string }[]): string {
+    const queuedSection = queuedMessages && queuedMessages.length > 0
+      ? `\n\nAdditional messages received while you were being set up (${queuedMessages.length} queued):\n${queuedMessages.map((m, i) => `--- Queued message ${i + 1} ---\n${m.context}`).join('\n')}\n`
+      : '';
+
+    const totalPending = (request.pendingMessages?.length ?? 0) + (queuedMessages?.length ?? 0);
+
     return SPAWN_PROMPT_TEMPLATE
       .replace('{requester_agent}', request.requester.agent)
       .replace('{requester_session}', request.requester.session)
       .replace('{requester_machine}', request.requester.machine)
       .replace('{reason}', request.reason)
       .replace('{context_line}', request.context ? `Context: ${request.context}\n` : '')
-      .replace('{pending_count}', String(request.pendingMessages?.length ?? 0));
+      .replace('{pending_count}', String(totalPending))
+      + queuedSection;
+  }
+
+  /** Queue a message for an agent during cooldown */
+  private queueMessage(agent: string, context: string, threadId?: string): void {
+    let queue = this.pendingMessages.get(agent);
+    if (!queue) {
+      queue = [];
+      this.pendingMessages.set(agent, queue);
+    }
+
+    // Prune expired entries
+    const now = Date.now();
+    const maxAge = SpawnRequestManager.QUEUE_MAX_AGE_MS;
+    while (queue.length > 0 && now - queue[0].receivedAt > maxAge) {
+      queue.shift();
+    }
+
+    // Enforce max queue size
+    if (queue.length >= SpawnRequestManager.MAX_QUEUED_PER_AGENT) {
+      queue.shift(); // drop oldest
+    }
+
+    queue.push({ context, threadId, receivedAt: now });
+  }
+
+  /** Drain all queued messages for an agent */
+  private drainQueue(agent: string): { context: string; threadId?: string }[] {
+    const queue = this.pendingMessages.get(agent);
+    if (!queue || queue.length === 0) return [];
+
+    const now = Date.now();
+    const maxAge = SpawnRequestManager.QUEUE_MAX_AGE_MS;
+    const valid = queue.filter(m => now - m.receivedAt < maxAge);
+    this.pendingMessages.delete(agent);
+    return valid;
+  }
+
+  /** Get count of queued messages for an agent (for monitoring) */
+  getQueuedCount(agent: string): number {
+    return this.pendingMessages.get(agent)?.length ?? 0;
   }
 
   /** Generate a unique key for retry tracking */
@@ -211,6 +272,7 @@ export class SpawnRequestManager {
   getStatus(): {
     cooldowns: Array<{ agent: string; remainingMs: number }>;
     pendingRetries: number;
+    queuedMessages: Array<{ agent: string; count: number }>;
   } {
     const cooldownMs = this.config.cooldownMs ?? DEFAULT_COOLDOWN_MS;
     const cooldowns: Array<{ agent: string; remainingMs: number }> = [];
@@ -222,9 +284,17 @@ export class SpawnRequestManager {
       }
     }
 
+    const queuedMessages: Array<{ agent: string; count: number }> = [];
+    for (const [agent, queue] of this.pendingMessages) {
+      if (queue.length > 0) {
+        queuedMessages.push({ agent, count: queue.length });
+      }
+    }
+
     return {
       cooldowns,
       pendingRetries: this.pendingRetries.size,
+      queuedMessages,
     };
   }
 
@@ -232,5 +302,6 @@ export class SpawnRequestManager {
   reset(): void {
     this.lastSpawnByAgent.clear();
     this.pendingRetries.clear();
+    this.pendingMessages.clear();
   }
 }

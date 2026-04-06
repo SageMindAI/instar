@@ -57,9 +57,9 @@ describe('AgentTrustManager — Fingerprint API', () => {
   // ── getOrCreateProfileByFingerprint ────────────────────────────
 
   describe('getOrCreateProfileByFingerprint', () => {
-    it('creates a new profile with default untrusted level', () => {
+    it('creates a new profile with default verified level (relay agents)', () => {
       const profile = manager.getOrCreateProfileByFingerprint('fp-new', 'NewAgent');
-      expect(profile.level).toBe('untrusted');
+      expect(profile.level).toBe('verified');
       expect(profile.fingerprint).toBe('fp-new');
     });
 
@@ -129,11 +129,12 @@ describe('AgentTrustManager — Fingerprint API', () => {
 
     it('rejects upgrade from non-authorized source', () => {
       manager.getOrCreateProfileByFingerprint('fp-reject', 'Agent');
+      // Profile starts at 'verified' (relay default). Upgrade to 'trusted' from non-user source should fail.
       const success = manager.setTrustLevelByFingerprint(
         'fp-reject', 'trusted', 'setup-default', 'should fail'
       );
       expect(success).toBe(false);
-      expect(manager.getTrustLevelByFingerprint('fp-reject')).toBe('untrusted');
+      expect(manager.getTrustLevelByFingerprint('fp-reject')).toBe('verified');
     });
   });
 

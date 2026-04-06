@@ -154,6 +154,9 @@ export interface RouteContext {
   featureRegistry: import('../core/FeatureRegistry.js').FeatureRegistry | null;
   discoveryEvaluator: import('../core/DiscoveryEvaluator.js').DiscoveryEvaluator | null;
   unifiedTrust: UnifiedTrustSystem | null;
+  /** Pending reply waiters for threadline relay-send waitForReply support.
+   *  Key: sender fingerprint, Value: resolve callback with reply text */
+  threadlineReplyWaiters: Map<string, { resolve: (reply: string) => void; threadId: string; timer: ReturnType<typeof setTimeout> }>;
   startTime: Date;
 }
 
@@ -8311,6 +8314,36 @@ export function createRoutes(ctx: RouteContext): Router {
     });
   });
 
+  // ── Threadline Reply Waiter ─────────────────────────────────────────
+  // Waits for an incoming reply from a specific agent on a specific thread.
+  // Used by the relay-send endpoint when waitForReply is true.
+
+  function waitForThreadlineReply(
+    routeCtx: RouteContext,
+    senderAgent: string,
+    _threadId: string,
+    timeoutSec?: number,
+  ): Promise<string | null> {
+    const timeout = Math.min(Math.max(timeoutSec ?? 120, 5), 300) * 1000; // 5s–300s, default 120s
+
+    return new Promise<string | null>((resolve) => {
+      const timer = setTimeout(() => {
+        routeCtx.threadlineReplyWaiters.delete(senderAgent);
+        resolve(null);
+      }, timeout);
+
+      routeCtx.threadlineReplyWaiters.set(senderAgent, {
+        resolve: (reply: string) => {
+          clearTimeout(timer);
+          routeCtx.threadlineReplyWaiters.delete(senderAgent);
+          resolve(reply);
+        },
+        threadId: _threadId,
+        timer,
+      });
+    });
+  }
+
   // ── Threadline Relay Send ────────────────────────────────────────────
   // Used by the MCP server's threadline_send tool to route messages through
   // the relay WebSocket. Tries local delivery first for co-located agents,
@@ -8320,7 +8353,7 @@ export function createRoutes(ctx: RouteContext): Router {
 
   router.post('/threadline/relay-send', async (req, res) => {
     const relayClient = ctx.threadlineRelayClient;
-    const { targetAgent, message, threadId } = req.body;
+    const { targetAgent, message, threadId, waitForReply, timeoutSeconds } = req.body;
 
     if (!targetAgent || !message) {
       res.status(400).json({ success: false, error: 'Missing required fields: targetAgent, message' });
@@ -8409,13 +8442,26 @@ export function createRoutes(ctx: RouteContext): Router {
 
                 if (localResp.ok) {
                   console.log(`[relay-send] Local delivery to ${localTarget.name}:${localTarget.port} (thread: ${effectiveThreadId})`);
-                  res.json({
-                    success: true,
-                    messageId: msgId,
-                    threadId: effectiveThreadId,
-                    resolvedAgent: localTarget.name,
-                    deliveryPath: 'local',
-                  });
+
+                  if (waitForReply) {
+                    const reply = await waitForThreadlineReply(ctx, localTarget.name, effectiveThreadId, timeoutSeconds);
+                    res.json({
+                      success: true,
+                      messageId: msgId,
+                      threadId: effectiveThreadId,
+                      resolvedAgent: localTarget.name,
+                      deliveryPath: 'local',
+                      reply,
+                    });
+                  } else {
+                    res.json({
+                      success: true,
+                      messageId: msgId,
+                      threadId: effectiveThreadId,
+                      resolvedAgent: localTarget.name,
+                      deliveryPath: 'local',
+                    });
+                  }
                   return;
                 }
                 // Local delivery failed — fall through to relay
@@ -8449,13 +8495,27 @@ export function createRoutes(ctx: RouteContext): Router {
       }
 
       const relayMsgId = relayClient.sendAuto(resolvedId, message, threadId);
-      res.json({
-        success: true,
-        messageId: relayMsgId,
-        threadId: threadId ?? relayMsgId,
-        resolvedAgent: resolvedId,
-        deliveryPath: 'relay',
-      });
+      const effectiveRelayThreadId = threadId ?? relayMsgId;
+
+      if (waitForReply) {
+        const reply = await waitForThreadlineReply(ctx, resolvedId, effectiveRelayThreadId, timeoutSeconds);
+        res.json({
+          success: true,
+          messageId: relayMsgId,
+          threadId: effectiveRelayThreadId,
+          resolvedAgent: resolvedId,
+          deliveryPath: 'relay',
+          reply,
+        });
+      } else {
+        res.json({
+          success: true,
+          messageId: relayMsgId,
+          threadId: effectiveRelayThreadId,
+          resolvedAgent: resolvedId,
+          deliveryPath: 'relay',
+        });
+      }
     } catch (err) {
       res.status(500).json({
         success: false,

@@ -115,6 +115,7 @@ export class AgentServer {
     threadlineRouter?: import('../threadline/ThreadlineRouter.js').ThreadlineRouter;
     handshakeManager?: import('../threadline/HandshakeManager.js').HandshakeManager;
     threadlineRelayClient?: import('../threadline/client/ThreadlineClient.js').ThreadlineClient;
+    threadlineReplyWaiters?: Map<string, { resolve: (reply: string) => void; threadId: string; timer: ReturnType<typeof setTimeout> }>;
     listenerManager?: import('../threadline/ListenerSessionManager.js').ListenerSessionManager;
     responseReviewGate?: import('../core/CoherenceGate.js').CoherenceGate;
     telemetryHeartbeat?: import('../monitoring/TelemetryHeartbeat.js').TelemetryHeartbeat;
@@ -313,6 +314,7 @@ export class AgentServer {
       featureRegistry: options.featureRegistry ?? null,
       discoveryEvaluator: options.discoveryEvaluator ?? null,
       unifiedTrust: options.unifiedTrust ?? null,
+      threadlineReplyWaiters: options.threadlineReplyWaiters ?? new Map(),
       startTime: this.startTime,
     };
     this.routeContext = routeCtx;

@@ -199,19 +199,21 @@ export class AgentTrustManager {
   /**
    * Get or create a trust profile keyed by fingerprint.
    * For relay agents, the fingerprint IS the identity.
+   * Relay agents default to 'verified' (can send messages) rather than
+   * 'untrusted' (probes only), since they've already authenticated with the relay.
    */
   getOrCreateProfileByFingerprint(fingerprint: string, displayName?: string): AgentTrustProfile {
     // Check if profile already exists by fingerprint
     const existing = this.getProfileByFingerprint(fingerprint);
     if (existing) return existing;
 
-    // Create new profile keyed by fingerprint
+    // Create new profile keyed by fingerprint — default to 'verified' for relay agents
     const now = new Date().toISOString();
     const key = displayName ?? fingerprint;
     this.profiles[key] = {
       agent: key,
       fingerprint,
-      level: 'untrusted',
+      level: 'verified',
       source: 'setup-default',
       history: {
         messagesReceived: 0,
@@ -221,7 +223,7 @@ export class AgentTrustManager {
         lastInteraction: '',
         streakSinceIncident: 0,
       },
-      allowedOperations: [...DEFAULT_ALLOWED_OPS.untrusted],
+      allowedOperations: [...DEFAULT_ALLOWED_OPS.verified],
       blockedOperations: [],
       createdAt: now,
       updatedAt: now,

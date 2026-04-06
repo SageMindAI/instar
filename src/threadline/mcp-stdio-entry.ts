@@ -80,18 +80,19 @@ async function sendMessageViaHttp(
         targetAgent: params.targetAgent,
         threadId: params.threadId,
         message: params.message,
+        waitForReply: params.waitForReply,
+        timeoutSeconds: params.timeoutSeconds,
       }),
     });
 
     if (relayResponse.ok) {
-      const result = await relayResponse.json() as { success: boolean; messageId: string; threadId: string; error?: string };
+      const result = await relayResponse.json() as { success: boolean; messageId: string; threadId: string; reply?: string; error?: string };
       if (result.success) {
-        // Relay doesn't support waitForReply yet — return sent confirmation
         return {
           success: true,
           threadId: result.threadId,
           messageId: result.messageId,
-          reply: params.waitForReply ? undefined : undefined,
+          reply: result.reply ?? undefined,
         };
       }
     }
