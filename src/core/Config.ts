@@ -236,8 +236,8 @@ export function loadConfig(projectDir?: string): InstarConfig {
     // Non-fatal — config works without secrets (just missing the secret values)
   }
 
-  const tmuxPath = detectTmuxPath();
-  const claudePath = detectClaudePath();
+  const tmuxPath = fileConfig.sessions?.tmuxPath || detectTmuxPath();
+  const claudePath = fileConfig.sessions?.claudePath || detectClaudePath();
 
   if (!tmuxPath) {
     throw new Error('tmux not found. Install with: brew install tmux (macOS) or apt install tmux (Linux)');
