@@ -2,11 +2,11 @@
  * KnowledgeManager — Manages a structured knowledge base for Instar agents.
  *
  * Handles ingestion of external content (URLs, documents) into the
- * MemoryIndex-backed knowledge base. Provides catalog tracking,
+ * SemanticMemory-backed knowledge base. Provides catalog tracking,
  * YAML frontmatter generation, and source lifecycle management.
  *
  * The knowledge base is NOT a separate search engine — it's a set of
- * well-organized markdown files that MemoryIndex indexes via FTS5.
+ * well-organized markdown files that SemanticMemory indexes.
  *
  * Born from: Matthew Berman OpenClaw analysis (2026-02-25)
  */
@@ -172,14 +172,14 @@ export class KnowledgeManager {
   }
 
   /**
-   * Get the knowledge directory path (for MemoryIndex source configuration).
+   * Get the knowledge directory path (for SemanticMemory source configuration).
    */
   getKnowledgeDir(): string {
     return this.knowledgeDir;
   }
 
   /**
-   * Get the MemoryIndex source entries for knowledge base directories.
+   * Get the SemanticMemory source entries for knowledge base directories.
    * Use these to extend the agent's memory config.
    */
   getMemorySourceEntries(): Array<{ path: string; type: string; evergreen: boolean }> {

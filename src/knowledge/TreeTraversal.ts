@@ -330,7 +330,7 @@ export class TreeTraversal {
   }
 
   private searchKnowledge(query: string, topK: number): string | null {
-    // KnowledgeManager doesn't have search — it uses MemoryIndex
+    // KnowledgeManager doesn't have search — it uses SemanticMemory
     // Return catalog entries that might be relevant
     if (!this.deps.knowledgeManager?.getCatalog) return null;
 
