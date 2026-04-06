@@ -580,7 +580,12 @@ async function respawnSessionForTopic(
     }
   }
 
-  const storedName = telegram.getTopicName(topicId);
+  let storedName = telegram.getTopicName(topicId);
+  // If the name is unknown, try to resolve it from Telegram before falling back
+  if (!storedName || /^topic-\d+$/.test(storedName)) {
+    const resolved = await telegram.resolveTopicName(topicId);
+    if (resolved) storedName = resolved;
+  }
   // Use topic name, not tmux session name — tmux names include the project prefix
   // which causes cascading names like ai-guy-ai-guy-ai-guy-topic-1 on each respawn.
   const topicName = storedName || `topic-${topicId}`;
@@ -895,7 +900,7 @@ function wireTelegramRouting(
   // arrive faster than the async spawn completes.
   const spawningTopics = new Set<number>();
 
-  telegram.onTopicMessage = (msg: Message) => {
+  telegram.onTopicMessage = async (msg: Message) => {
     const topicId = (msg.metadata?.messageThreadId as number) ?? null;
     if (!topicId) return;
 
@@ -1079,8 +1084,15 @@ function wireTelegramRouting(
         return;
       }
 
-      const spawnName = storedTopicName || `topic-${topicId}`;
       spawningTopics.add(topicId);
+
+      // Resolve topic name — try in-memory, then active probe, then fallback
+      let spawnName = storedTopicName;
+      if (!spawnName || /^topic-\d+$/.test(spawnName)) {
+        const resolved = await telegram.resolveTopicName(topicId);
+        if (resolved) spawnName = resolved;
+      }
+      if (!spawnName) spawnName = `topic-${topicId}`;
 
       // Use the shared spawn helper that includes topic history + user context
       spawnSessionForTopic(sessionManager, telegram, spawnName, topicId, text, topicMemory, resolvedUser ?? undefined).then((newSessionName) => {
@@ -2270,6 +2282,11 @@ export async function startServer(options: StartOptions): Promise<void> {
       telegram = new TelegramAdapter(telegramConfig.config as any, config.stateDir);
       console.log(pc.green(`  Telegram send-only mode (${isStandbyTelegram ? 'standby' : 'lifeline owns polling'})`));
 
+      // Resolve any topic names still using the fallback "topic-NNNN" pattern
+      telegram.resolveUnknownTopicNames().catch(err => {
+        console.warn(`[telegram] Topic name resolution failed: ${err}`);
+      });
+
       // Ensure topics exist even in send-only mode (createForumTopic is a simple API call)
       ensureAgentAttentionTopic(telegram, state).catch(err => {
         console.error(`[server] Failed to ensure Agent Attention topic: ${err}`);
@@ -2791,43 +2808,52 @@ export async function startServer(options: StartOptions): Promise<void> {
             prefix = `[slack:${channelId} from ${safeSenderName}]`;
           }
 
-          // Write context file for the session
+          // Build context for the session — inject inline like Telegram does
+          // Use async fallback to fetch from Slack API if ring buffer is empty
           const tmpDir = '/tmp/instar-slack';
           fs.mkdirSync(tmpDir, { recursive: true });
-          const ctxPath = path.join(tmpDir, `ctx-${channelId}-${Date.now()}.txt`);
-          const history = slackAdapter!.getChannelMessages(channelId, 30);
+          const history = await slackAdapter!.getChannelMessagesWithFallback(channelId, 30);
           const unansweredCount = slackAdapter!.getUnansweredCount(channelId);
 
           const botUserId = slackAdapter!.getBotUserId?.() ?? null;
 
-          // Build human-readable thread history (matches Telegram's context format)
-          const lines: string[] = [];
-          lines.push(`--- Thread History (last ${history.length} messages) ---`);
-          lines.push('IMPORTANT: Read this history carefully before taking any action.');
-          lines.push('Your task is to continue THIS conversation, not start something new.');
-          lines.push(`Channel: ${channelId}`);
-          lines.push('');
-          for (const m of history) {
-            const date = new Date(parseFloat(m.ts) * 1000);
-            const time = date.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false });
-            const isBot = botUserId && m.user === botUserId;
-            const label = isBot ? 'Agent' : (senderName || m.user);
-            lines.push(`[${time}] ${label}: ${m.text}`);
+          // Build human-readable thread history (matches Telegram's inline context pattern)
+          const contextLines: string[] = [];
+          if (history.length > 0) {
+            contextLines.push('CONTINUATION — You are resuming an EXISTING Slack conversation. Read the context below before responding. Do NOT ask what was being discussed.');
+            contextLines.push('');
+            contextLines.push(`--- Thread History (last ${history.length} messages) ---`);
+            contextLines.push('IMPORTANT: Read this history carefully before taking any action.');
+            contextLines.push('Your task is to continue THIS conversation, not start something new.');
+            contextLines.push(`Channel: ${channelId}`);
+            contextLines.push('');
+            for (const m of history) {
+              const date = new Date(parseFloat(m.ts) * 1000);
+              const time = date.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false });
+              const isBot = botUserId && m.user === botUserId;
+              const label = isBot ? 'Agent' : (senderName || m.user);
+              contextLines.push(`[${time}] ${label}: ${m.text}`);
+            }
+            contextLines.push('');
+            contextLines.push('--- End Thread History ---');
+          } else {
+            console.warn(`[slack→context] No history available for channel ${channelId} — session starts without thread context`);
           }
-          lines.push('');
-          lines.push('--- End Thread History ---');
-          lines.push('');
-          lines.push('CRITICAL: You MUST relay your response back to Slack after responding.');
-          lines.push('Use the relay script (write ONLY your reply text — do NOT pipe or cat this file into the script):');
-          lines.push('');
-          lines.push(`cat <<'EOF' | .claude/scripts/slack-reply.sh ${channelId}`);
-          lines.push('Your response text here');
-          lines.push('EOF');
-          lines.push('');
-          lines.push('Strip the [slack:] prefix before interpreting the message.');
-          lines.push('Only relay conversational text — not tool output, file contents, or internal reasoning.');
+          contextLines.push('');
+          contextLines.push('CRITICAL: You MUST relay your response back to Slack after responding.');
+          contextLines.push('Use the relay script (write ONLY your reply text — do NOT pipe or cat this file into the script):');
+          contextLines.push('');
+          contextLines.push(`cat <<'EOF' | .claude/scripts/slack-reply.sh ${channelId}`);
+          contextLines.push('Your response text here');
+          contextLines.push('EOF');
+          contextLines.push('');
+          contextLines.push('Strip the [slack:] prefix before interpreting the message.');
+          contextLines.push('Only relay conversational text — not tool output, file contents, or internal reasoning.');
 
-          const contextData = lines.join('\n');
+          const contextData = contextLines.join('\n');
+
+          // Also write to file as backup reference
+          const ctxPath = path.join(tmpDir, `ctx-${channelId}-${Date.now()}.txt`);
           fs.writeFileSync(ctxPath, contextData);
 
           // Transform [image:path] and [document:path] tags into explicit read instructions
@@ -2849,15 +2875,19 @@ export async function startServer(options: StartOptions): Promise<void> {
             },
           );
 
-          const FILE_THRESHOLD = 500;
+          // Inject context INLINE in the bootstrap message (matches Telegram pattern).
+          // This ensures the agent sees thread history immediately without needing to read a file.
           const fullMessage = `${prefix} ${transformedContent} (IMPORTANT: Read ${ctxPath} for thread history and Slack relay instructions — you MUST relay your response back.)`;
 
-          // Long messages: write to temp file and inject reference (matches Telegram pattern)
+          // Large bootstrap messages: write to file with INLINE context included
+          const FILE_THRESHOLD = 500;
           let bootstrapMessage: string;
           if (fullMessage.length > FILE_THRESHOLD) {
+            // Write full message + inline context to the file so agent gets everything in one read
             const msgFilePath = path.join(tmpDir, `msg-${channelId}-${Date.now()}-${Math.random().toString(36).slice(2, 10)}.txt`);
-            fs.writeFileSync(msgFilePath, fullMessage);
-            bootstrapMessage = `${prefix} [Long message saved to ${msgFilePath} — read it to see the full message]`;
+            const fullContent = `${fullMessage}\n\n${contextData}`;
+            fs.writeFileSync(msgFilePath, fullContent);
+            bootstrapMessage = `${prefix} [Long message saved to ${msgFilePath} — read it to see the full message and thread history]`;
           } else {
             bootstrapMessage = fullMessage;
           }
@@ -2912,7 +2942,7 @@ export async function startServer(options: StartOptions): Promise<void> {
             const newSessionName = await sessionManager.spawnInteractiveSession(
               bootstrapMessage,
               targetSession,
-              { resumeSessionId },
+              { resumeSessionId, slackChannelId: channelId },
             );
             if (newSessionName) {
               slackAdapter!.registerChannelSession(channelId, newSessionName);
@@ -3697,22 +3727,30 @@ export async function startServer(options: StartOptions): Promise<void> {
               // Spawn a fresh session with recovery context
               await new Promise(resolve => setTimeout(resolve, 2000));
 
-              // Build a recovery bootstrap message with thread history
-              const history = _slackAdapter.getChannelMessages(slackChId, 30);
+              // Build a recovery bootstrap message with thread history (inline, matching Telegram pattern)
+              // Use async fallback to fetch from Slack API if ring buffer is empty (race condition on restart)
+              const history = await _slackAdapter.getChannelMessagesWithFallback(slackChId, 30);
               const botUserId = _slackAdapter.getBotUserId?.() ?? null;
               const lines: string[] = [];
+              lines.push(`CONTINUATION — You are resuming an EXISTING Slack conversation after context exhaustion. Read the context below and pick up where you left off. Do NOT ask what was being discussed.`);
+              lines.push('');
               lines.push(`[RECOVERY] Previous session hit the context window limit. This is a FRESH restart with thread history.`);
               if (recoveryPrompt) lines.push(recoveryPrompt);
               lines.push('');
-              lines.push(`--- Thread History (last ${history.length} messages) ---`);
-              for (const m of history) {
-                const date = new Date(parseFloat(m.ts) * 1000);
-                const time = date.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false });
-                const isBot = botUserId && m.user === botUserId;
-                const label = isBot ? 'Agent' : m.user;
-                lines.push(`[${time}] ${label}: ${m.text}`);
+              if (history.length > 0) {
+                lines.push(`--- Thread History (last ${history.length} messages) ---`);
+                for (const m of history) {
+                  const date = new Date(parseFloat(m.ts) * 1000);
+                  const time = date.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false });
+                  const isBot = botUserId && m.user === botUserId;
+                  const label = isBot ? 'Agent' : m.user;
+                  lines.push(`[${time}] ${label}: ${m.text}`);
+                }
+                lines.push('--- End Thread History ---');
+              } else {
+                console.warn(`[slack→recovery] WARNING: No history available for channel ${slackChId} — recovery context is empty. Ring buffer may not be populated yet.`);
+                lines.push('[WARNING: Thread history unavailable — ring buffer may not be populated. Check Slack channel for recent messages before responding.]');
               }
-              lines.push('--- End Thread History ---');
               lines.push('');
               lines.push('CRITICAL: You MUST relay your response back to Slack.');
               lines.push(`cat <<'EOF' | .claude/scripts/slack-reply.sh ${slackChId}`);
@@ -3725,10 +3763,10 @@ export async function startServer(options: StartOptions): Promise<void> {
               const contextData = lines.join('\n');
               fs.writeFileSync(ctxPath, contextData);
 
-              const bootstrapMessage = `[slack:${slackChId}] [RECOVERY] Context exhaustion — session restarted fresh. (IMPORTANT: Read ${ctxPath} for thread history and Slack relay instructions — you MUST relay your response back.)`;
+              const bootstrapMessage = `[slack:${slackChId}] ${contextData}`;
 
               try {
-                const newSessionName = await sessionManager.spawnInteractiveSession(bootstrapMessage);
+                const newSessionName = await sessionManager.spawnInteractiveSession(bootstrapMessage, undefined, { slackChannelId: slackChId });
                 if (newSessionName) {
                   _slackAdapter.registerChannelSession(slackChId, newSessionName);
                   console.log(`[slack→recovery] Fresh session "${newSessionName}" spawned for channel ${slackChId} (context exhaustion recovery)`);

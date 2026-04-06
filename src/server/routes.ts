@@ -2375,7 +2375,7 @@ export function createRoutes(ctx: RouteContext): Router {
           result.platform = 'telegram';
           result.platformId = topicId;
           const topicName = ctx.telegram.getTopicName?.(topicId);
-          if (topicName) result.platformName = topicName;
+          if (topicName && !/^topic-\d+$/.test(topicName)) result.platformName = topicName;
         }
       }
       if (!result.platform && ctx.slack) {
@@ -4849,7 +4849,7 @@ export function createRoutes(ctx: RouteContext): Router {
   });
 
   // Receive a secret submission (user-facing, NO auth — token + CSRF is the auth)
-  router.post('/secrets/drop/:token', (req, res) => {
+  router.post('/secrets/drop/:token', async (req, res) => {
     const { _csrf, ...values } = req.body;
 
     if (!_csrf || typeof _csrf !== 'string') {
@@ -4909,13 +4909,28 @@ export function createRoutes(ctx: RouteContext): Router {
       } else {
         // No live session — spawn one to handle the secret receipt
         let topicName = `topic-${topicId}`;
-        try {
-          if (fs.existsSync(sdRegistryPath)) {
-            const reg = JSON.parse(fs.readFileSync(sdRegistryPath, 'utf-8'));
-            const stored = reg.topicToName?.[String(topicId)];
-            if (stored) topicName = stored;
+        // Try live adapter first, then disk registry, then active probe
+        if (ctx.telegram) {
+          const liveName = ctx.telegram.getTopicName(topicId);
+          if (liveName && !/^topic-\d+$/.test(liveName)) {
+            topicName = liveName;
           }
-        } catch { /* fall through to default */ }
+        }
+        if (/^topic-\d+$/.test(topicName)) {
+          try {
+            if (fs.existsSync(sdRegistryPath)) {
+              const reg = JSON.parse(fs.readFileSync(sdRegistryPath, 'utf-8'));
+              const stored = reg.topicToName?.[String(topicId)];
+              if (stored && !/^topic-\d+$/.test(stored)) topicName = stored;
+            }
+          } catch { /* fall through */ }
+        }
+        if (/^topic-\d+$/.test(topicName) && ctx.telegram) {
+          try {
+            const resolved = await ctx.telegram.resolveTopicName(topicId);
+            if (resolved) topicName = resolved;
+          } catch { /* fall through to default */ }
+        }
 
         // Build context with thread history
         const historyLines: string[] = [];
@@ -5105,7 +5120,7 @@ export function createRoutes(ctx: RouteContext): Router {
   // Receives messages from the Telegram Lifeline process and injects
   // them into the appropriate session, just like TelegramAdapter would.
 
-  router.post('/internal/telegram-forward', (req, res) => {
+  router.post('/internal/telegram-forward', async (req, res) => {
     const { topicId, text, fromUserId, fromUsername, fromFirstName, messageId } = req.body;
 
     if (!topicId || !text) {
@@ -5222,13 +5237,28 @@ export function createRoutes(ctx: RouteContext): Router {
         // tmux names include the project prefix (e.g., "ai-guy-lifeline"), and
         // spawnInteractiveSession prepends it again → cascading names.
         let topicName = `topic-${topicId}`;
-        try {
-          if (fs.existsSync(registryPath)) {
-            const reg = JSON.parse(fs.readFileSync(registryPath, 'utf-8'));
-            const stored = reg.topicToName?.[String(topicId)];
-            if (stored) topicName = stored;
+        // Try live adapter first, then disk registry, then active probe
+        if (ctx.telegram) {
+          const liveName = ctx.telegram.getTopicName(topicId);
+          if (liveName && !/^topic-\d+$/.test(liveName)) {
+            topicName = liveName;
           }
-        } catch { /* fall through to default */ }
+        }
+        if (/^topic-\d+$/.test(topicName)) {
+          try {
+            if (fs.existsSync(registryPath)) {
+              const reg = JSON.parse(fs.readFileSync(registryPath, 'utf-8'));
+              const stored = reg.topicToName?.[String(topicId)];
+              if (stored && !/^topic-\d+$/.test(stored)) topicName = stored;
+            }
+          } catch { /* fall through */ }
+        }
+        if (/^topic-\d+$/.test(topicName) && ctx.telegram) {
+          try {
+            const resolved = await ctx.telegram.resolveTopicName(topicId);
+            if (resolved) topicName = resolved;
+          } catch { /* fall through to default */ }
+        }
         console.log(`[telegram-forward] No live session for topic ${topicId}, spawning "${topicName}"...`);
 
         // Fetch thread history so auto-spawned sessions have full conversational context
@@ -8401,9 +8431,34 @@ export function createRoutes(ctx: RouteContext): Router {
       if (fs.existsSync(knownAgentsPath)) {
         const knownData = JSON.parse(fs.readFileSync(knownAgentsPath, 'utf-8'));
         const agents: Array<{ name: string; port: number; path?: string; fingerprint?: string; publicKey?: string }> = knownData.agents ?? [];
-        const localTarget = agents.find(a =>
-          a.name === targetAgent || a.name?.toLowerCase() === targetAgent?.toLowerCase()
+
+        // Support "name:fingerprintPrefix" disambiguation syntax
+        let targetName = targetAgent;
+        let targetFpPrefix: string | undefined;
+        const colonIdx = targetAgent.lastIndexOf(':');
+        if (colonIdx > 0 && colonIdx < targetAgent.length - 1) {
+          const suffix = targetAgent.substring(colonIdx + 1);
+          if (/^[0-9a-f]{4,32}$/i.test(suffix)) {
+            targetName = targetAgent.substring(0, colonIdx);
+            targetFpPrefix = suffix.toLowerCase();
+          }
+        }
+
+        const nameMatches = agents.filter(a =>
+          a.name === targetName || a.name?.toLowerCase() === targetName?.toLowerCase()
         );
+
+        // If multiple same-named agents, disambiguate by fingerprint prefix
+        let localTarget = nameMatches.length === 1 ? nameMatches[0] : undefined;
+        if (nameMatches.length > 1 && targetFpPrefix) {
+          localTarget = nameMatches.find(a => {
+            const fp = a.fingerprint || a.publicKey?.substring(0, 32);
+            return fp?.toLowerCase().startsWith(targetFpPrefix!);
+          });
+        } else if (nameMatches.length > 1 && !targetFpPrefix) {
+          // Ambiguous — skip local delivery, let relay handle it
+          localTarget = undefined;
+        }
 
         if (localTarget?.port && localTarget.name !== ctx.config.projectName) {
           // Check if the local agent is actually running

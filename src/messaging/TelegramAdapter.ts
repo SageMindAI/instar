@@ -109,6 +109,8 @@ interface TelegramUpdate {
       mime_type?: string;
       file_size?: number;
     };
+    forum_topic_created?: { name: string };
+    forum_topic_edited?: { name?: string };
   };
   callback_query?: {
     id: string;
@@ -299,7 +301,7 @@ export class TelegramAdapter implements MessagingAdapter {
   private pendingPromises: Map<number, PendingPromise> = new Map(); // key = topicId
 
   // Topic message callback — fires on every incoming topic message
-  public onTopicMessage: ((message: Message) => void) | null = null;
+  public onTopicMessage: ((message: Message) => void | Promise<void>) | null = null;
 
   // Session management callbacks (wired by server.ts)
   public onInterruptSession: ((sessionName: string) => Promise<boolean>) | null = null;
@@ -650,6 +652,11 @@ export class TelegramAdapter implements MessagingAdapter {
 
     console.log(`[telegram] Starting long-polling...`);
     this.poll();
+
+    // Resolve any topic names still using the fallback "topic-NNNN" pattern
+    this.resolveUnknownTopicNames().catch(err => {
+      console.warn(`[telegram] Topic name resolution failed: ${err}`);
+    });
 
     // Start notification batcher if configured
     if (this.batcher) {
@@ -1553,6 +1560,74 @@ export class TelegramAdapter implements MessagingAdapter {
 
   getTopicName(topicId: number): string | null {
     return this.topicToName.get(topicId) ?? null;
+  }
+
+  /**
+   * Actively resolve a topic's name from Telegram by sending a temporary probe message
+   * that replies to the topic's service message (whose message_id = topic_id).
+   * The API response includes reply_to_message.forum_topic_created.name.
+   * The probe message is deleted immediately after.
+   */
+  async resolveTopicName(topicId: number): Promise<string | null> {
+    if (this.notAForum) return null;
+    try {
+      // Send a temp message replying to the topic creation service message
+      const result = await this.apiCall('sendMessage', {
+        chat_id: this.config.chatId,
+        text: '.', // minimal probe message — deleted immediately after
+        message_thread_id: topicId,
+        reply_to_message_id: topicId,
+      }) as { message_id: number; reply_to_message?: { forum_topic_created?: { name: string } } };
+
+      // Extract topic name from the reply target
+      const name = result.reply_to_message?.forum_topic_created?.name;
+
+      // Delete the probe message immediately
+      try {
+        await this.apiCall('deleteMessage', {
+          chat_id: this.config.chatId,
+          message_id: result.message_id,
+        });
+      } catch {
+        // @silent-fallback-ok — best-effort cleanup
+      }
+
+      if (name) {
+        this.topicToName.set(topicId, name);
+        this.saveRegistry();
+        console.log(`[telegram] Resolved topic name: ${topicId} → "${name}"`);
+        return name;
+      }
+    } catch (err) {
+      const errStr = String(err);
+      console.log(`[telegram] Could not resolve topic name for ${topicId}: ${err}`);
+      // If the topic was deleted, mark it so we don't retry resolution on every startup
+      if (errStr.includes('message thread not found') || errStr.includes('TOPIC_DELETED')) {
+        this.topicToName.set(topicId, `[deleted] topic-${topicId}`);
+        this.saveRegistry();
+      }
+    }
+    return null;
+  }
+
+  /**
+   * Resolve all topic names that are still using the fallback "topic-NNNN" pattern.
+   * Called on startup to backfill names for topics created before name tracking.
+   */
+  async resolveUnknownTopicNames(): Promise<void> {
+    const unknowns: number[] = [];
+    for (const [topicId, name] of this.topicToName) {
+      if (/^topic-\d+$/.test(name)) {
+        unknowns.push(topicId);
+      }
+    }
+    if (unknowns.length === 0) return;
+    console.log(`[telegram] Resolving ${unknowns.length} unknown topic names...`);
+    for (const topicId of unknowns) {
+      await this.resolveTopicName(topicId);
+      // Small delay to avoid hitting rate limits
+      await new Promise(r => setTimeout(r, 200));
+    }
   }
 
   // ── Topic Purpose Management ─────────────────────────────────
@@ -3104,14 +3179,26 @@ export class TelegramAdapter implements MessagingAdapter {
     const numericTopicId = msg.message_thread_id ?? GENERAL_TOPIC_ID;
     const topicId = numericTopicId.toString();
 
-    // Auto-capture topic name from reply_to_message
-    if (msg.reply_to_message?.forum_topic_created?.name) {
+    // Auto-capture topic name from multiple sources:
+    // 1. Service message when topic is created (msg.forum_topic_created)
+    // 2. Service message when topic is renamed (msg.forum_topic_edited)
+    // 3. Reply to the topic creation service message (msg.reply_to_message.forum_topic_created)
+    const detectedName =
+      msg.forum_topic_created?.name ??
+      msg.forum_topic_edited?.name ??
+      msg.reply_to_message?.forum_topic_created?.name;
+    if (detectedName) {
       const currentName = this.topicToName.get(numericTopicId);
-      const realName = msg.reply_to_message.forum_topic_created.name;
-      if (!currentName || /^topic-\d+$/.test(currentName)) {
-        this.topicToName.set(numericTopicId, realName);
+      if (!currentName || /^topic-\d+$/.test(currentName) || msg.forum_topic_edited?.name) {
+        this.topicToName.set(numericTopicId, detectedName);
         this.saveRegistry();
+        console.log(`[telegram] Captured topic name: ${numericTopicId} → "${detectedName}"`);
       }
+    }
+
+    // Service messages (topic created/edited) have no user content — skip further processing
+    if (msg.forum_topic_created || msg.forum_topic_edited) {
+      return;
     }
 
     // Handle voice messages
@@ -3226,9 +3313,11 @@ export class TelegramAdapter implements MessagingAdapter {
     // Fire topic message callback (always fires — General topic falls back to ID 1)
     if (this.onTopicMessage) {
       try {
-        this.onTopicMessage(message);
+        Promise.resolve(this.onTopicMessage(message)).catch(err => {
+          console.error(`[telegram] Topic message handler error: ${err}`);
+        });
       } catch (err) {
-        console.error(`[telegram] Topic message handler error: ${err}`);
+        console.error(`[telegram] Topic message handler sync error: ${err}`);
       }
     }
 
