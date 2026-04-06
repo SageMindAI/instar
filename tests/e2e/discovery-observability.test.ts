@@ -315,59 +315,54 @@ describe('E2E: Discovery Observability (Phase 5)', () => {
     const dashboardPath = path.join(__dirname, '../../dashboard/index.html');
     const html = fs.readFileSync(dashboardPath, 'utf-8');
 
-    it('has Discovery tab button', () => {
-      expect(html).toContain('data-tab="discovery"');
-      expect(html).toContain('>Discovery<');
+    it('has Features tab button', () => {
+      expect(html).toContain('data-tab="features"');
+      expect(html).toContain('>Features<');
     });
 
-    it('has discovery tab container', () => {
-      expect(html).toContain('id="discoveryTab"');
+    it('has features tab container', () => {
+      expect(html).toContain('id="featuresTab"');
     });
 
-    it('has TAB_REGISTRY entry for discovery', () => {
-      expect(html).toContain("id: 'discovery'");
-      expect(html).toContain("panels: ['discoveryTab']");
+    it('has TAB_REGISTRY entry for features', () => {
+      expect(html).toContain("id: 'features'");
+      expect(html).toContain("panels: ['featuresTab']");
     });
 
-    it('has funnel chart container', () => {
-      expect(html).toContain('id="funnelChart"');
+    it('has feature detail view', () => {
+      expect(html).toContain('id="featDetailView"');
     });
 
-    it('has feature grid container', () => {
-      expect(html).toContain('id="featureGrid"');
+    it('has features container', () => {
+      expect(html).toContain('class="features-container"');
     });
 
-    it('has event log container', () => {
-      expect(html).toContain('id="eventLog"');
+    it('has profile selector view', () => {
+      expect(html).toContain('id="profileSelectorView"');
     });
 
-    it('has digest section', () => {
-      expect(html).toContain('id="digestSection"');
-      expect(html).toContain('id="digestContent"');
+    it('has features refresh button', () => {
+      expect(html).toContain('loadFeatures()');
+      expect(html).toContain('features-refresh');
     });
 
-    it('has discovery filter buttons', () => {
-      expect(html).toContain('setDiscoveryFilter');
-      expect(html).toContain("data-filter=\"enabled\"");
-      expect(html).toContain("data-filter=\"undiscovered\"");
-      expect(html).toContain("data-filter=\"cooldown\"");
+    it('has loadFeatures function', () => {
+      expect(html).toContain('async function loadFeatures');
     });
 
-    it('has loadDiscovery function', () => {
-      expect(html).toContain('async function loadDiscovery');
+    it('has CSS for features components', () => {
+      expect(html).toContain('.features-container');
+      expect(html).toContain('.feat-card');
+      expect(html).toContain('.feat-grid');
+      expect(html).toContain('.feat-toggle');
     });
 
-    it('has CSS for discovery components', () => {
-      expect(html).toContain('.discovery-container');
-      expect(html).toContain('.funnel-chart');
-      expect(html).toContain('.feature-card');
-      expect(html).toContain('.feature-state-badge');
-      expect(html).toContain('.event-log');
-      expect(html).toContain('.metric-card');
+    it('has features subtitle', () => {
+      expect(html).toContain('features-subtitle');
     });
 
-    it('fetches from /features/analytics endpoint', () => {
-      expect(html).toContain("apiFetch('/features/analytics')");
+    it('has feature category styling', () => {
+      expect(html).toContain('.feat-category');
     });
   });
 });
