@@ -9279,7 +9279,7 @@ export function createRoutes(ctx: RouteContext): Router {
       res.status(501).json({ error: 'FeatureRegistry not initialized' });
       return;
     }
-    const { to, userId: bodyUserId, trigger, consentRecord, context } = req.body || {};
+    const { to, userId: bodyUserId, trigger, consentRecord, context, activationChallenge } = req.body || {};
     if (!to) {
       res.status(400).json({ error: { code: 'MISSING_TARGET', message: 'Request body must include "to" (target state)' } });
       return;
@@ -9289,6 +9289,7 @@ export function createRoutes(ctx: RouteContext): Router {
       trigger,
       consentRecord,
       context,
+      activationChallenge,
     });
     if (!result.success) {
       const status = result.error?.code === 'FEATURE_NOT_FOUND' ? 404
