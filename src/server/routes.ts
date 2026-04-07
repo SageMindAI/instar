@@ -2904,17 +2904,48 @@ export function createRoutes(ctx: RouteContext): Router {
       return;
     }
 
-    // Allow-list: only { enabled: boolean } is accepted
+    // Allow-list of mutable fields
     const body = req.body;
-    const allowedKeys = ['enabled'];
+    const allowedKeys = ['enabled', 'description', 'schedule', 'model', 'priority'];
     const bodyKeys = Object.keys(body || {});
     if (bodyKeys.length === 0 || bodyKeys.some(k => !allowedKeys.includes(k))) {
-      res.status(400).json({ error: 'Only { enabled: boolean } is accepted' });
+      res.status(400).json({ error: `Only these fields are accepted: ${allowedKeys.join(', ')}` });
       return;
     }
-    if (typeof body.enabled !== 'boolean') {
+
+    // Validate individual fields
+    if ('enabled' in body && typeof body.enabled !== 'boolean') {
       res.status(400).json({ error: '"enabled" must be a boolean' });
       return;
+    }
+    if ('description' in body && (typeof body.description !== 'string' || body.description.length > 500)) {
+      res.status(400).json({ error: '"description" must be a string (max 500 chars)' });
+      return;
+    }
+    if ('schedule' in body) {
+      if (typeof body.schedule !== 'string') {
+        res.status(400).json({ error: '"schedule" must be a cron string' });
+        return;
+      }
+      const cronParts = body.schedule.trim().split(/\s+/);
+      if (cronParts.length < 5 || cronParts.length > 6) {
+        res.status(400).json({ error: 'Invalid cron expression (expected 5 or 6 fields)' });
+        return;
+      }
+    }
+    if ('model' in body) {
+      const validModels = ['haiku', 'sonnet', 'opus'];
+      if (!validModels.includes(body.model)) {
+        res.status(400).json({ error: `"model" must be one of: ${validModels.join(', ')}` });
+        return;
+      }
+    }
+    if ('priority' in body) {
+      const validPriorities = ['low', 'medium', 'high', 'critical'];
+      if (!validPriorities.includes(body.priority)) {
+        res.status(400).json({ error: `"priority" must be one of: ${validPriorities.join(', ')}` });
+        return;
+      }
     }
 
     const job = ctx.scheduler.getJobs().find(j => j.slug === slug);
@@ -2923,14 +2954,19 @@ export function createRoutes(ctx: RouteContext): Router {
       return;
     }
 
-    // Update the job's enabled state in the jobs.json config file
+    // Update the job in the jobs.json config file
+    const changes: Record<string, unknown> = {};
     try {
       const jobsFile = ctx.config.scheduler.jobsFile ?? path.join(ctx.config.stateDir, '..', 'jobs.json');
       if (fs.existsSync(jobsFile)) {
         const jobsData = JSON.parse(fs.readFileSync(jobsFile, 'utf-8'));
         const jobEntry = (jobsData.jobs || jobsData).find((j: { slug: string }) => j.slug === slug);
         if (jobEntry) {
-          jobEntry.enabled = body.enabled;
+          if ('enabled' in body) { jobEntry.enabled = body.enabled; changes.enabled = body.enabled; }
+          if ('description' in body) { jobEntry.description = body.description; changes.description = body.description; }
+          if ('schedule' in body) { jobEntry.schedule = body.schedule; changes.schedule = body.schedule; }
+          if ('model' in body) { jobEntry.model = body.model; changes.model = body.model; }
+          if ('priority' in body) { jobEntry.priority = body.priority; changes.priority = body.priority; }
           fs.writeFileSync(jobsFile, JSON.stringify(jobsData, null, 2) + '\n');
         }
       }
@@ -2943,9 +2979,9 @@ export function createRoutes(ctx: RouteContext): Router {
     try {
       const securityEntry = JSON.stringify({
         timestamp: new Date().toISOString(),
-        action: 'job-toggle',
+        action: 'job-config-update',
         slug,
-        enabled: body.enabled,
+        changes,
         source: 'dashboard',
         ip: req.ip,
       });
@@ -2954,7 +2990,7 @@ export function createRoutes(ctx: RouteContext): Router {
       // Security logging failure is non-fatal
     }
 
-    res.json({ slug, enabled: body.enabled, message: `Job ${body.enabled ? 'enabled' : 'disabled'}` });
+    res.json({ slug, changes, message: `Job updated: ${Object.keys(changes).join(', ')}` });
   });
 
   // ── Job Events (SSE) ──────────────────────────────────────────
