@@ -76,10 +76,19 @@ For dashboard web access, a simpler `dashboardPin` is also available:
 {
   "sessions": {
     "maxConcurrent": 5,
-    "timeoutMinutes": 120
+    "timeoutMinutes": 120,
+    "claudePath": "/path/to/claude",
+    "tmuxPath": "/path/to/tmux"
   }
 }
 ```
+
+| Field | Default | Description |
+|-------|---------|-------------|
+| `maxConcurrent` | `5` | Maximum number of concurrent Claude Code sessions |
+| `timeoutMinutes` | `120` | Session idle timeout in minutes |
+| `claudePath` | auto-detected | Path to the `claude` CLI binary. Override if your Claude Code installation is in a non-standard location or if auto-detection fails. |
+| `tmuxPath` | auto-detected | Path to the `tmux` binary. Override if tmux is installed in a non-standard location. |
 
 ## Safety & Autonomy
 
