@@ -1,35 +1,22 @@
 # Upgrade Guide — vNEXT
 
 <!-- bump: patch -->
-<!-- Valid values: patch, minor, major -->
-<!-- patch = bug fixes, refactors, test additions, doc updates -->
-<!-- minor = new features, new APIs, new capabilities (backwards-compatible) -->
-<!-- major = breaking changes to existing APIs or behavior -->
 
 ## What Changed
 
-<!-- Describe what changed technically. What new features, APIs, behavioral changes? -->
-<!-- Write this for the AGENT — they need to understand the system deeply. -->
+- **Startup grace period for gate evaluation**: Job gates (health checks, quota checks) that require HTTP endpoints are now evaluated after a configurable grace period (default 5 seconds) at startup, rather than immediately. This fixes a race condition where health-gated jobs would permanently fail because the HTTP server wasn't ready yet during the initial missed-job catch-up evaluation. Configurable via startupGraceMs in JobScheduler config. Set to 0 to disable.
+
+- **QuotaTracker stale data handling**: When quota data is older than the staleness threshold (default 30 minutes), the tracker now returns null instead of the stale values. This triggers the existing fail-open path, allowing jobs to run when quota data is unavailable rather than blocking them with outdated percentages.
 
 ## What to Tell Your User
 
-<!-- Write talking points the agent should relay to their user. -->
-<!-- This should be warm, conversational, user-facing — not a changelog. -->
-<!-- Focus on what THEY can now do, not internal plumbing. -->
-<!--                                                                    -->
-<!-- PROHIBITED in this section (will fail validation):                 -->
-<!--   camelCase config keys: silentReject, maxRetries, telegramNotify -->
-<!--   Inline code backtick references like silentReject: false        -->
-<!--   Fenced code blocks                                              -->
-<!--   Instructions to edit files or run commands                      -->
-<!--                                                                    -->
-<!-- CORRECT style: "I can turn that on for you" not "set X to false"  -->
-<!-- The agent relays this to their user — keep it human.              -->
+- **"Scheduled jobs should start running more reliably"**: If your user noticed that certain scheduled jobs never seemed to execute despite being enabled and due, that should be resolved now. The system was accidentally blocking them during startup.
 
-- **[Feature name]**: "[Brief, friendly description of what this means for the user]"
+- **"The system handles missing data more gracefully"**: When usage tracking data gets stale, the system now allows work to continue rather than blocking it based on outdated information.
 
 ## Summary of New Capabilities
 
 | Capability | How to Use |
 |-----------|-----------|
-| [Capability] | [Endpoint, command, or "automatic"] |
+| Startup grace period | Automatic — 5s default delay before first gate evaluation |
+| Stale quota fail-open | Automatic — stale data allows all jobs to proceed |
