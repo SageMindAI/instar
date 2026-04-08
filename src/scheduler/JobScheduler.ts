@@ -70,11 +70,15 @@ export class JobScheduler {
   /** Retry state for skipped jobs: slug → { retries, lastAttempt, timer } */
   private retryState: Map<string, { retries: number; timer: ReturnType<typeof setTimeout> }> = new Map();
 
-  /** Max retries before giving up within a single scheduled window */
-  private static readonly MAX_RETRIES = 5;
-
-  /** Base retry delay in ms (doubles each attempt: 30s, 60s, 120s, 240s, 480s) */
-  private static readonly BASE_RETRY_DELAY_MS = 30_000;
+  /** Retry delays in ms: 1min, 5min, 15min, 30min, 1h, 2h */
+  private static readonly RETRY_DELAYS_MS = [
+    60_000,       // 1 min
+    300_000,      // 5 min
+    900_000,      // 15 min
+    1_800_000,    // 30 min
+    3_600_000,    // 1 hour
+    7_200_000,    // 2 hours
+  ];
 
   /** Local machine identity — used for machine-scoped job filtering */
   private machineId: string | null = null;
@@ -1106,25 +1110,29 @@ export class JobScheduler {
 
   /**
    * Schedule a retry for a transiently-skipped job.
-   * Uses exponential backoff: 30s, 60s, 120s, 240s, 480s.
-   * Gives up after MAX_RETRIES within a single scheduled window.
+   * Uses escalating delays: 1min, 5min, 15min, 30min, 1h, 2h.
+   * Gives up after exhausting all retry slots within a single scheduled window.
    */
   private scheduleRetry(slug: string, skipReason: string): void {
     const state = this.retryState.get(slug);
     const retries = state ? state.retries : 0;
+    const maxRetries = JobScheduler.RETRY_DELAYS_MS.length;
 
-    if (retries >= JobScheduler.MAX_RETRIES) {
-      console.log(`[scheduler] Job "${slug}" exhausted ${JobScheduler.MAX_RETRIES} retries (last skip: ${skipReason}) — waiting for next cron window`);
+    if (retries >= maxRetries) {
+      console.log(`[scheduler] Job "${slug}" exhausted ${maxRetries} retries (last skip: ${skipReason}) — waiting for next cron window`);
       return;
     }
 
     // Clear any existing retry timer
     if (state?.timer) clearTimeout(state.timer);
 
-    const delayMs = JobScheduler.BASE_RETRY_DELAY_MS * Math.pow(2, retries);
+    const delayMs = JobScheduler.RETRY_DELAYS_MS[retries];
     const nextRetry = retries + 1;
+    const delayLabel = delayMs >= 3_600_000 ? `${delayMs / 3_600_000}h`
+      : delayMs >= 60_000 ? `${delayMs / 60_000}m`
+      : `${delayMs / 1000}s`;
 
-    console.log(`[scheduler] Job "${slug}" skipped (${skipReason}) — retry ${nextRetry}/${JobScheduler.MAX_RETRIES} in ${Math.round(delayMs / 1000)}s`);
+    console.log(`[scheduler] Job "${slug}" skipped (${skipReason}) — retry ${nextRetry}/${maxRetries} in ${delayLabel}`);
 
     const timer = setTimeout(() => {
       if (!this.running || this.paused) return;

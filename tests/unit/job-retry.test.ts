@@ -75,9 +75,9 @@ describe('JobScheduler retry on skip', () => {
     // No session spawned yet
     expect(mockSM._spawnCount).toBe(0);
 
-    // Advance past the first retry delay (30s)
+    // Advance past the first retry delay (1min)
     // The retry should re-attempt (and fail the gate again)
-    vi.advanceTimersByTime(31_000);
+    vi.advanceTimersByTime(61_000);
 
     // Still no session — gate still fails — but a second retry is scheduled
     expect(mockSM._spawnCount).toBe(0);
@@ -111,8 +111,8 @@ describe('JobScheduler retry on skip', () => {
     // Fix the quota issue
     s.canRunJob = () => true;
 
-    // Advance past first retry delay (30s)
-    vi.advanceTimersByTime(31_000);
+    // Advance past first retry delay (1min)
+    vi.advanceTimersByTime(61_000);
 
     // Now the retry should succeed (quota is available, no gate on this path)
     expect(mockSM._spawnCount).toBe(1);
@@ -136,20 +136,21 @@ describe('JobScheduler retry on skip', () => {
     // Block quota permanently
     s.canRunJob = () => false;
 
-    // Trigger initial + 5 retries = 6 total attempts
+    // Trigger initial + 6 retries (1m, 5m, 15m, 30m, 1h, 2h)
     s.triggerJob('max-retry', 'scheduled');
 
-    // Advance through all retry windows: 30s, 60s, 120s, 240s, 480s = 930s
-    for (let i = 0; i < 6; i++) {
-      vi.advanceTimersByTime(500_000);
+    // Advance through all retry windows with generous margins
+    const delays = [61_000, 301_000, 901_000, 1_801_000, 3_601_000, 7_201_000];
+    for (const delay of delays) {
+      vi.advanceTimersByTime(delay);
     }
 
     // Should never have spawned
     expect(mockSM._spawnCount).toBe(0);
 
     // No more retries scheduled — the job gave up
-    // Verify by advancing another 10 minutes — nothing happens
-    vi.advanceTimersByTime(600_000);
+    // Verify by advancing another 3 hours — nothing happens
+    vi.advanceTimersByTime(10_800_000);
     expect(mockSM._spawnCount).toBe(0);
   });
 
