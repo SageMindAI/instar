@@ -5329,33 +5329,38 @@
       const container = document.getElementById('jobReportsSection');
       if (!container) return;
 
-      // If the job has never run, don't show misleading keyword-matched reports
+      // If the job has never run, don't show reports
       if (!hasRunHistory) {
         container.innerHTML = '<div style="font-size:13px;color:var(--text-dim)">No reports — this job hasn\'t run yet</div>';
         return;
       }
 
       try {
-        const data = await apiFetch('/views');
-        const views = data.views || data || [];
-        // Match by job slug or name — require ALL significant words to match (AND logic)
-        const nameWords = jobName.toLowerCase().split(/[\s-]+/).filter(w => w.length > 3);
-        const slugWords = slug.toLowerCase().split(/[\s-]+/).filter(w => w.length > 3);
-        const allWords = [...new Set([...nameWords, ...slugWords])];
-        const related = views.filter(v => {
-          const title = (v.title || '').toLowerCase();
-          // Require ALL words from the job name to appear in the report title
-          const nameMatches = nameWords.filter(w => title.includes(w));
-          return nameMatches.length >= Math.max(1, nameWords.length);
-        }).slice(0, 5);
+        // First try: fetch views linked by job metadata (source=job:slug)
+        let data = await apiFetch('/views?source=job:' + encodeURIComponent(slug));
+        let views = data.views || data || [];
 
+        // Fallback: if no metadata-linked views, try keyword matching for legacy views
+        if (views.length === 0) {
+          data = await apiFetch('/views');
+          const allViews = data.views || data || [];
+          const nameWords = jobName.toLowerCase().split(/[\s-]+/).filter(w => w.length > 3);
+          views = allViews.filter(v => {
+            const title = (v.title || '').toLowerCase();
+            const matches = nameWords.filter(w => title.includes(w));
+            return matches.length >= Math.max(1, nameWords.length);
+          });
+        }
+
+        const related = views.slice(0, 10);
         if (related.length === 0) {
-          container.innerHTML = '<div style="font-size:13px;color:var(--text-dim)">No related reports found</div>';
+          container.innerHTML = '<div style="font-size:13px;color:var(--text-dim)">No reports found</div>';
           return;
         }
         container.innerHTML = related.map(v => {
           const url = v.tunnelUrl || v.localUrl || '#';
           const date = v.createdAt ? new Date(v.createdAt).toLocaleDateString() : '';
+          const isLinked = v.metadata?.source?.id === slug;
           return `<a href="${esc(url)}" target="_blank" style="display:block;padding:8px 12px;background:var(--bg);border:1px solid var(--border);border-radius:6px;margin-bottom:6px;text-decoration:none;color:var(--text-bright);font-size:13px">
             ${esc(v.title)} <span style="color:var(--text-dim);font-size:11px;margin-left:8px">${date}</span>
           </a>`;
