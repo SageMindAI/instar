@@ -2715,6 +2715,7 @@
           <div id="secretFields">
             <div class="secret-field-row">
               <input type="text" placeholder="Field name (e.g. token)" class="form-input secret-field-name">
+              <input type="text" placeholder="Value" class="form-input secret-field-value">
               <button onclick="this.closest('.secret-field-row').remove()" title="Remove">&#x2715;</button>
             </div>
           </div>
@@ -5101,15 +5102,18 @@
         + '<div id="jobSparkline" class="job-sparkline"></div>'
         + '<div class="sparkline-legend"><div class="sparkline-legend-item"><div class="sparkline-legend-dot success"></div>Success</div><div class="sparkline-legend-item"><div class="sparkline-legend-dot failure"></div>Failure</div><div class="sparkline-legend-item"><div class="sparkline-legend-dot skipped"></div>Skipped</div></div>'
         + '<div class="job-history-section"><h4>Run History</h4>'
-        + '<div id="jobHistoryTable">' + renderLoadingState('Loading history...') + '</div></div>';
+        + '<div id="jobHistoryTable">' + renderLoadingState('Loading history...') + '</div></div>'
+        + '<div class="job-history-section" style="margin-top:16px"><h4>Related Reports</h4>'
+        + '<div id="jobReportsSection">' + renderLoadingState('Loading reports...') + '</div></div>';
 
       // Show back button on mobile
       if (window.innerWidth <= 768) {
         detail.querySelector('.back-btn').style.display = 'inline-block';
       }
 
-      // Load history
+      // Load history and reports
       loadJobHistory(slug);
+      loadJobReports(slug, displayName);
     }
 
     function jobsGoBack() {
@@ -5141,24 +5145,59 @@
           return;
         }
 
+        const hasNotes = runs.some(r => r.handoffNotes);
         table.innerHTML = '<table class="job-history-table">'
-          + '<thead><tr><th>Time</th><th>Result</th><th>Duration</th><th>Error</th></tr></thead>'
+          + '<thead><tr><th>Time</th><th>Result</th><th>Duration</th>' + (hasNotes ? '<th>Notes</th>' : '') + '<th>Error</th></tr></thead>'
           + '<tbody>' + runs.slice(0, 100).map(r => {
             const time = r.startedAt ? new Date(r.startedAt).toLocaleTimeString() : '—';
             const result = r.result || '—';
             const dur = r.durationSeconds != null ? r.durationSeconds + 's'
               : r.durationMs != null ? Math.round(r.durationMs / 1000) + 's' : '—';
             const error = r.error ? esc(r.error) : '—';
+            const notes = r.handoffNotes || '';
+            const notesPreview = notes.length > 100 ? notes.slice(0, 100) + '...' : notes;
             return '<tr>'
               + '<td>' + esc(time) + '</td>'
               + '<td><span class="result-badge ' + esc(result) + '">' + esc(result) + '</span></td>'
               + '<td>' + esc(dur) + '</td>'
+              + (hasNotes ? '<td style="color:var(--text-dim);max-width:250px;word-break:break-word;font-size:11px" title="' + esc(notes) + '">' + esc(notesPreview) + '</td>' : '')
               + '<td style="color:var(--text-dim);max-width:300px;word-break:break-word" title="' + esc(r.error || '') + '">' + error + '</td>'
               + '</tr>';
           }).join('') + '</tbody></table>';
       } catch (e) {
         document.getElementById('jobHistoryTable').innerHTML =
           '<div style="color:var(--red)">Failed to load history</div>';
+      }
+    }
+
+    async function loadJobReports(slug, jobName) {
+      const container = document.getElementById('jobReportsSection');
+      if (!container) return;
+      try {
+        const data = await apiFetch('/views');
+        const views = data.views || data || [];
+        // Match by job slug or name in view title
+        const nameWords = jobName.toLowerCase().split(/[\s-]+/).filter(w => w.length > 3);
+        const slugWords = slug.toLowerCase().split(/[\s-]+/).filter(w => w.length > 3);
+        const allWords = [...new Set([...nameWords, ...slugWords])];
+        const related = views.filter(v => {
+          const title = (v.title || '').toLowerCase();
+          return allWords.some(w => title.includes(w));
+        }).slice(0, 5);
+
+        if (related.length === 0) {
+          container.innerHTML = '<div style="font-size:13px;color:var(--text-dim)">No related reports found</div>';
+          return;
+        }
+        container.innerHTML = related.map(v => {
+          const url = v.tunnelUrl || v.localUrl || '#';
+          const date = v.createdAt ? new Date(v.createdAt).toLocaleDateString() : '';
+          return `<a href="${esc(url)}" target="_blank" style="display:block;padding:8px 12px;background:var(--bg);border:1px solid var(--border);border-radius:6px;margin-bottom:6px;text-decoration:none;color:var(--text-bright);font-size:13px">
+            ${esc(v.title)} <span style="color:var(--text-dim);font-size:11px;margin-left:8px">${date}</span>
+          </a>`;
+        }).join('');
+      } catch (e) {
+        container.innerHTML = '<div style="font-size:13px;color:var(--text-dim)">Could not load reports</div>';
       }
     }
 
@@ -6093,7 +6132,7 @@
       const container = document.getElementById('secretFields');
       const row = document.createElement('div');
       row.className = 'secret-field-row';
-      row.innerHTML = `<input type="text" placeholder="Field name" class="form-input secret-field-name"><button onclick="this.closest('.secret-field-row').remove()" title="Remove">&#x2715;</button>`;
+      row.innerHTML = `<input type="text" placeholder="Field name" class="form-input secret-field-name"><input type="text" placeholder="Value" class="form-input secret-field-value"><button onclick="this.closest('.secret-field-row').remove()" title="Remove">&#x2715;</button>`;
       container.appendChild(row);
     }
 
@@ -6101,11 +6140,12 @@
       const label = document.getElementById('secretLabel').value.trim();
       if (!label) { showToast('Label is required', 'error'); return; }
 
-      const fieldEls = document.querySelectorAll('.secret-field-name');
+      const fieldRows = document.querySelectorAll('.secret-field-row');
       const fields = [];
-      fieldEls.forEach(el => {
-        const name = el.value.trim();
-        if (name) fields.push({ name, label: name, type: 'text' });
+      fieldRows.forEach(row => {
+        const name = (row.querySelector('.secret-field-name')?.value || '').trim();
+        const value = (row.querySelector('.secret-field-value')?.value || '').trim();
+        if (name) fields.push({ name, label: name, type: 'text', value: value || '' });
       });
       if (fields.length === 0) fields.push({ name: 'secret', label: 'Secret', type: 'text' });
 
