@@ -4,7 +4,7 @@
 
 ## What Changed
 
-<!-- Describe what changed technically. -->
+No changes yet — placeholder for next version.
 
 ## What to Tell Your User
 
