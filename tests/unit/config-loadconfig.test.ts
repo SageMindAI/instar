@@ -150,6 +150,7 @@ describe('Config module', () => {
         safety: { level: 2 },
         agentAutonomy: { level: 'autonomous' },
         autonomyProfile: 'collaborative',
+        sessions: { tmuxPath: '/usr/bin/tmux', claudePath: '/usr/bin/claude' },
       }));
 
       const config = loadConfig(projectDir);
