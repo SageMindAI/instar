@@ -8,14 +8,17 @@
 
 ## What Changed
 
-Fixed 8 CI test failures across trust wiring, quota tracking, config validation, and job scheduler edge cases. UnifiedTrustWiring now handles missing threadline config gracefully. Quota tracker tests updated for consistent warning/failure threshold assertions. Config tests aligned with current schema defaults. Job scheduler edge case test fixed for timing sensitivity. Builtin manifest updated to reflect current version.
+Added `PATCH /config` endpoint that all FeatureDefinition enable/disable actions reference. Previously, toggling features from the dashboard (evolution, threadline, publishing, tunnel, etc.) returned 404 because the endpoint didn't exist. The new endpoint deep-merges the request body into config.json with an allowlist of safe config keys, and updates runtime config.
+
+Also includes CI test fixes from previous commits (trust wiring, quota tracking, config validation, job scheduler edge cases).
 
 ## What to Tell Your User
 
-- **Stability improvements**: "Under-the-hood reliability fixes — nothing you need to do, everything just works more consistently now."
+- **Dashboard feature toggles now work**: "You can now enable/disable features from the dashboard — the toggle buttons actually persist your choice."
 
 ## Summary of New Capabilities
 
 | Capability | How to Use |
 |-----------|-----------|
-| Improved trust wiring resilience | Automatic — threadline config failures no longer cascade |
+| Config patch API | `PATCH /config` with JSON body — dashboard uses this automatically |
+| Feature toggle persistence | Toggle features on/off from dashboard, changes persist to config.json |
