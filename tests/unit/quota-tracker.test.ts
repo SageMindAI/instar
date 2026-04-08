@@ -161,7 +161,7 @@ describe('QuotaTracker', () => {
     });
 
     const state = tracker.getState();
-    expect(state).not.toBeNull();
-    expect(state!.recommendation).toBeUndefined();
+    // Stale data now returns null (fail-open behavior)
+    expect(state).toBeNull();
   });
 });

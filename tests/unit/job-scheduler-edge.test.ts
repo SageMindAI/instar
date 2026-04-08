@@ -220,7 +220,7 @@ describe('JobScheduler edge cases', () => {
     it('triggers jobs that have never run on startup', async () => {
       // Jobs with no prior run history should be triggered at startup,
       // not silently skipped because checkMissedJobs requires lastRun.
-      createScheduler([makeJob('never-ran', { schedule: '0 */4 * * *' })]);
+      createScheduler([makeJob('never-ran', { schedule: '0 */4 * * *' })], { startupGraceMs: 0 });
       scheduler.start();
       await new Promise(r => setTimeout(r, 50));
 

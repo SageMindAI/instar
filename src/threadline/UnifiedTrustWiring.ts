@@ -167,7 +167,8 @@ export function createUnifiedTrustSystem(
     const trustLevel = existingTrustManager.getTrustLevelByFingerprint(fingerprint) as TrustLevel;
     // checkPermission needs the agent name or fingerprint key — find the profile
     const profile = existingTrustManager.getProfileByFingerprint(fingerprint);
-    const agentKey = profile?.agent ?? fingerprint;
+    // Use fingerprint as key since profiles are now keyed by fingerprint
+    const agentKey = fingerprint;
     const trustBaseline = existingTrustManager.checkPermission(
       agentKey,
       mapActionToOperation(action),

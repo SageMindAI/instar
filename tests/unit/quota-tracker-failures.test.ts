@@ -239,10 +239,8 @@ describe('QuotaTracker — failure paths', () => {
 
       const tracker = createTracker({ maxStalenessMs: 5 * 60 * 1000 });
       const result = tracker.getState();
-      expect(result).not.toBeNull();
-      expect(result!.recommendation).toBeUndefined();
-      // But usagePercent is still readable (stale doesn't mean invalid)
-      expect(result!.usagePercent).toBe(80);
+      // Stale data now returns null (fail-open behavior)
+      expect(result).toBeNull();
     });
 
     it('preserves recommendation within custom staleness window', () => {

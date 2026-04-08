@@ -75,8 +75,8 @@ describe('QuotaTracker edge cases', () => {
       writeQuotaState(60, 60);
       const tracker = createTracker();
       const state = tracker.getState();
-      expect(state).not.toBeNull();
-      expect(state!.recommendation).toBeUndefined();
+      // Stale data now returns null (fail-open behavior)
+      expect(state).toBeNull();
     });
 
     it('preserves recommendation for fresh data', () => {

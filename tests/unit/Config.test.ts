@@ -36,7 +36,7 @@ describe('Config', () => {
       fs.writeFileSync(
         path.join(stateDir, 'config.json'),
         JSON.stringify({
-          sessions: { claudePath: customClaudePath },
+          sessions: { claudePath: customClaudePath, tmuxPath: '/usr/bin/tmux' },
         }),
       );
 
@@ -56,7 +56,7 @@ describe('Config', () => {
       fs.writeFileSync(
         path.join(stateDir, 'config.json'),
         JSON.stringify({
-          sessions: { tmuxPath: customTmuxPath },
+          sessions: { tmuxPath: customTmuxPath, claudePath: '/usr/bin/claude-stub' },
         }),
       );
 
@@ -68,6 +68,12 @@ describe('Config', () => {
     });
 
     it('falls back to auto-detected claudePath when config omits it', () => {
+      const detected = detectClaudePath();
+      if (!detected) {
+        // Claude CLI not available (e.g., CI environment) — skip
+        return;
+      }
+
       const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'instar-config-test-'));
       const stateDir = path.join(tmpDir, '.instar');
       fs.mkdirSync(stateDir, { recursive: true });
@@ -78,11 +84,7 @@ describe('Config', () => {
       );
 
       const config = loadConfig(tmpDir);
-      const detected = detectClaudePath();
-      // Should use the auto-detected path when config doesn't specify one
-      if (detected) {
-        expect(config.sessions.claudePath).toBe(detected);
-      }
+      expect(config.sessions.claudePath).toBe(detected);
 
       // Cleanup
       fs.rmSync(tmpDir, { recursive: true, force: true });

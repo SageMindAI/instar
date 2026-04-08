@@ -59,8 +59,8 @@ describe('QuotaTracker — warnings and staleness', () => {
     });
 
     const state = tracker.getState();
-    expect(state).not.toBeNull();
-    expect(state!.recommendation).toBeUndefined(); // Cleared due to staleness
+    // Stale data now returns null (fail-open behavior)
+    expect(state).toBeNull();
     expect(warnSpy).toHaveBeenCalledWith(
       expect.stringContaining('Stale data')
     );
