@@ -4118,7 +4118,34 @@ export async function startServer(options: StartOptions): Promise<void> {
           }
         }, 10_000);
       });
-      console.log(pc.green('  Compaction auto-resume wired to triage orchestrator'));
+      console.log(pc.green('  Compaction auto-resume wired to triage orchestrator (PreCompact event)'));
+    }
+
+    // Watchdog compaction-idle polling — fallback for when PreCompact events
+    // don't fire (Claude Code doesn't reliably emit them). The watchdog polls
+    // every 30s and detects sessions that compacted + are idle at a prompt.
+    if (watchdog && triageOrchestrator) {
+      const _triageOrch2 = triageOrchestrator;
+      watchdog.on('compaction-idle', (sessionName: string) => {
+        // Check Telegram topics
+        if (telegram) {
+          const topicId = telegram.getTopicForSession(sessionName);
+          if (topicId) {
+            const history = telegram.getTopicHistory(topicId, 5);
+            const lastMsg = history[history.length - 1];
+            if (lastMsg?.fromUser) {
+              console.log(`[CompactionResume] Watchdog detected compaction-idle, topic ${topicId} has unanswered message — activating triage`);
+              _triageOrch2.activate(topicId, sessionName, 'watchdog', lastMsg.text, Date.now()).catch(err => {
+                console.warn(`[CompactionResume] Triage activation failed for topic ${topicId}:`, err);
+              });
+              return;
+            }
+          }
+        }
+        // Note: Slack compaction-resume is handled separately below (after
+        // slackChannelToSyntheticId is defined) to avoid TDZ reference errors.
+      });
+      console.log(pc.green('  Compaction auto-resume wired to watchdog polling (fallback)'));
     }
 
     // Subagent Tracker — monitors subagent lifecycle via hook events
@@ -4248,6 +4275,38 @@ export async function startServer(options: StartOptions): Promise<void> {
       for (const channelId of Object.keys(registry)) {
         slackChannelToSyntheticId(channelId);
       }
+    }
+
+    // Slack compaction-resume wiring — needs slackChannelToSyntheticId which is now defined
+    if (watchdog && triageOrchestrator && _slackAdapter) {
+      const _triageOrch3 = triageOrchestrator;
+      const _slack = _slackAdapter;
+      watchdog.on('compaction-idle', (sessionName: string) => {
+        const channelId = _slack.getChannelForSession(sessionName);
+        if (!channelId) return;
+        const syntheticId = slackChannelToSyntheticId(channelId);
+        // Read from the Slack messages JSONL log (local, no API call)
+        const slackLogPath = path.join(config.stateDir, 'slack-messages.jsonl');
+        try {
+          const content = fs.readFileSync(slackLogPath, 'utf-8');
+          const lines = content.trim().split('\n').slice(-10);
+          for (let i = lines.length - 1; i >= 0; i--) {
+            try {
+              const msg = JSON.parse(lines[i]);
+              if (msg.channelId === channelId) {
+                if (msg.fromUser) {
+                  console.log(`[CompactionResume] Watchdog detected compaction-idle, Slack channel ${channelId} has unanswered message — activating triage`);
+                  _triageOrch3.activate(syntheticId, sessionName, 'watchdog', msg.text || 'message after compaction', Date.now()).catch(err => {
+                    console.warn(`[CompactionResume] Triage activation failed for Slack channel ${channelId}:`, err);
+                  });
+                }
+                break; // Only check the most recent message for this channel
+              }
+            } catch { /* skip malformed line */ }
+          }
+        } catch { /* log file doesn't exist — no Slack messages */ }
+      });
+      console.log(pc.green('  Compaction auto-resume wired to watchdog for Slack channels'));
     }
 
     let presenceProxy: import('../monitoring/PresenceProxy.js').PresenceProxy | undefined;

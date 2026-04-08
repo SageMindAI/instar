@@ -105,6 +105,7 @@ const MAX_RETRIES = 2;
 export interface WatchdogEvents {
   intervention: [event: InterventionEvent];
   recovery: [sessionName: string, fromLevel: EscalationLevel];
+  'compaction-idle': [sessionName: string];
 }
 
 export class SessionWatchdog extends EventEmitter {
@@ -132,6 +133,10 @@ export class SessionWatchdog extends EventEmitter {
 
   /** Pending outcome checks — maps sessionName to intervention event */
   private pendingOutcomeChecks = new Map<string, InterventionEvent>();
+
+  /** Cooldowns for compaction-idle detection — prevents repeated emissions */
+  private compactionIdleCooldowns = new Map<string, number>(); // sessionName → timestamp
+  private static readonly COMPACTION_IDLE_COOLDOWN_MS = 300_000; // 5 minutes
 
   constructor(config: InstarConfig, sessionManager: SessionManager, state: StateManager) {
     super();
@@ -269,6 +274,69 @@ export class SessionWatchdog extends EventEmitter {
         this.temporaryExclusions.delete(pid);
       }
     }
+
+    // Post-compaction idle detection — catch sessions that compacted and are
+    // sitting at a bare prompt with no one at the terminal to nudge them.
+    // This is the polling-based fallback for the PreCompact event path which
+    // is unreliable (Claude Code doesn't always fire the event).
+    this.checkCompactionIdle(tmuxSession);
+  }
+
+  /**
+   * Detects sessions that just went through context compaction and are idle
+   * at a prompt. Emits 'compaction-idle' so server.ts can activate triage
+   * to reinject pending user messages.
+   *
+   * Defense-in-depth against false positives:
+   *   1. Compaction marker must appear in last 10 lines (recency — avoids stale buffer)
+   *   2. Prompt must be in last 3 lines (structural — avoids > in content)
+   *   3. No active child processes (process-level — Claude is truly idle, not mid-tool)
+   *   4. Cooldown per session (prevents re-triggering on same compaction)
+   *   5. server.ts checks message history before activating triage (data-level guard)
+   *   6. TriageOrchestrator Pattern 2b re-validates before reinjecting (redundant check)
+   */
+  checkCompactionIdle(tmuxSession: string): void {
+    // Cooldown — don't re-emit for the same session within 5 minutes
+    const lastEmitted = this.compactionIdleCooldowns.get(tmuxSession);
+    if (lastEmitted && (Date.now() - lastEmitted) < SessionWatchdog.COMPACTION_IDLE_COOLDOWN_MS) {
+      return;
+    }
+
+    // Guard 1: Structural process check — if Claude has active child processes,
+    // it's executing tools/commands, not stalled. Skip entirely.
+    const claudePid = this.getClaudePid(tmuxSession);
+    if (claudePid) {
+      const children = this.getChildProcesses(claudePid);
+      const activeChildren = children.filter(c => !this.isExcluded(c.command));
+      if (activeChildren.length > 0) return;
+    }
+
+    // Capture recent tmux output — only last 10 lines to ensure compaction is recent.
+    // If the compaction marker has scrolled beyond 10 lines, the session has had
+    // enough activity since compaction that it clearly recovered.
+    const output = this.sessionManager.captureOutput(tmuxSession, 10);
+    if (!output) return;
+
+    // Guard 2: Compaction marker must be present in this narrow window
+    if (!/Conversation compacted|✱.*compacted/i.test(output)) return;
+
+    // Guard 3: Prompt must be in the last 3 lines (tighter than general heuristics).
+    // A bare `>` in markdown, code output, or file content won't appear as the
+    // final line of tmux output — it would have subsequent content after it.
+    const lines = output.split('\n').filter(l => l.trim());
+    const tail = lines.slice(-3).join('\n');
+    const atPrompt =
+      tail.includes('❯') ||
+      tail.includes('bypass permissions') ||
+      /^>\s*$/m.test(tail) ||
+      tail.trim() === '>';
+
+    if (!atPrompt) return;
+
+    // All guards passed — session compacted recently and is truly idle
+    console.log(`[Watchdog] "${tmuxSession}": compaction-idle detected — session compacted and at prompt`);
+    this.compactionIdleCooldowns.set(tmuxSession, Date.now());
+    this.emit('compaction-idle', tmuxSession);
   }
 
   private handleEscalation(tmuxSession: string, state: EscalationState): void {
