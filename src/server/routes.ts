@@ -7435,6 +7435,68 @@ export function createRoutes(ctx: RouteContext): Router {
     res.json(ctx.telemetryHeartbeat.getStatus());
   });
 
+  // PATCH /config — generic config patcher used by FeatureDefinitions enableAction/disableAction.
+  // Deep-merges the request body into config.json and updates runtime ctx.config.
+  router.patch('/config', (req, res) => {
+    const patch = req.body;
+    if (!patch || typeof patch !== 'object' || Array.isArray(patch)) {
+      res.status(400).json({ error: 'Request body must be a JSON object' });
+      return;
+    }
+
+    // Allowlist of top-level config keys that can be patched via API.
+    // Prevents callers from overwriting auth tokens, project paths, etc.
+    const allowedKeys = new Set([
+      'evolution', 'threadline', 'publishing', 'tunnel', 'gitBackup',
+      'externalOperations', 'responseReview', 'inputGuard', 'monitoring',
+      'updates', 'sessions', 'jobs',
+    ]);
+
+    const disallowed = Object.keys(patch).filter(k => !allowedKeys.has(k));
+    if (disallowed.length > 0) {
+      res.status(400).json({
+        error: `Cannot patch these config keys via API: ${disallowed.join(', ')}`,
+        allowed: [...allowedKeys],
+      });
+      return;
+    }
+
+    try {
+      const configPath = path.join(ctx.config.projectDir, '.instar', 'config.json');
+      let fileConfig: Record<string, any> = {};
+      if (fs.existsSync(configPath)) {
+        fileConfig = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
+      }
+
+      // Deep merge (one level deep — sufficient for feature toggles)
+      for (const [key, value] of Object.entries(patch)) {
+        if (typeof value === 'object' && value !== null && !Array.isArray(value) &&
+            typeof fileConfig[key] === 'object' && fileConfig[key] !== null) {
+          fileConfig[key] = { ...fileConfig[key], ...value };
+        } else {
+          fileConfig[key] = value;
+        }
+        // Also update runtime config
+        if (typeof value === 'object' && value !== null && !Array.isArray(value) &&
+            typeof (ctx.config as any)[key] === 'object' && (ctx.config as any)[key] !== null) {
+          (ctx.config as any)[key] = { ...(ctx.config as any)[key], ...value };
+        } else {
+          (ctx.config as any)[key] = value;
+        }
+      }
+
+      fs.writeFileSync(configPath, JSON.stringify(fileConfig, null, 2) + '\n');
+
+      res.json({
+        success: true,
+        patched: Object.keys(patch),
+        note: 'Some changes may require a server restart to take full effect.',
+      });
+    } catch (err) {
+      res.status(500).json({ error: `Failed to patch config: ${err instanceof Error ? err.message : String(err)}` });
+    }
+  });
+
   // POST /config/telemetry — enable/disable telemetry (used by agent after asking user)
   // Also dismisses the session-start nudge by writing a marker file.
   router.post('/config/telemetry', (req, res) => {
