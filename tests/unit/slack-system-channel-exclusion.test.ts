@@ -1,9 +1,12 @@
 /**
  * SlackAdapter system channel exclusion — verifies that system channels
- * (dashboard, lifeline) never spawn sessions or process user messages.
+ * (dashboard, lifeline) block unprompted messages but allow @mentions
+ * from authorized users through.
  *
  * Root cause: The dashboard channel had a stale session registered to it,
  * causing the SessionMonitor to send "session has stopped" messages hourly.
+ * Fix was too aggressive — also blocked @mentions, making the lifeline
+ * channel (the primary chat channel for some agents) unresponsive.
  */
 
 import { describe, it, expect } from 'vitest';
@@ -48,7 +51,7 @@ describe('SlackAdapter system channel exclusion', () => {
     expect(adapter.isSystemChannel(NORMAL_CHANNEL)).toBe(false);
   });
 
-  it('silently drops messages from dashboard channel', async () => {
+  it('drops unprompted messages (no @mention) from system channels', async () => {
     const { adapter, messages } = createTestAdapter();
     const handleMessage = (adapter as any)._handleMessage.bind(adapter);
 
@@ -59,18 +62,43 @@ describe('SlackAdapter system channel exclusion', () => {
       ts: '1774829441.001',
     });
 
-    expect(messages.length).toBe(0);
-  });
-
-  it('silently drops messages from lifeline channel', async () => {
-    const { adapter, messages } = createTestAdapter();
-    const handleMessage = (adapter as any)._handleMessage.bind(adapter);
-
     await handleMessage({
       user: 'U_TEST',
       text: 'hello',
       channel: LIFELINE_CHANNEL,
       ts: '1774829441.002',
+    });
+
+    expect(messages.length).toBe(0);
+  });
+
+  it('allows @mention messages through in system channels', async () => {
+    const { adapter, messages } = createTestAdapter();
+    // Set bot user ID so _isBotMentioned can detect mentions
+    (adapter as any).botUserId = 'U_BOT';
+    const handleMessage = (adapter as any)._handleMessage.bind(adapter);
+
+    await handleMessage({
+      user: 'U_TEST',
+      text: '<@U_BOT> please help',
+      channel: LIFELINE_CHANNEL,
+      ts: '1774829441.003',
+    });
+
+    expect(messages.length).toBe(1);
+    expect(messages[0].channel).toBe(LIFELINE_CHANNEL);
+  });
+
+  it('still drops non-mention messages from lifeline channel', async () => {
+    const { adapter, messages } = createTestAdapter();
+    (adapter as any).botUserId = 'U_BOT';
+    const handleMessage = (adapter as any)._handleMessage.bind(adapter);
+
+    await handleMessage({
+      user: 'U_TEST',
+      text: 'random chatter without mention',
+      channel: LIFELINE_CHANNEL,
+      ts: '1774829441.004',
     });
 
     expect(messages.length).toBe(0);

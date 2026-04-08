@@ -76,6 +76,9 @@ export class SlackAdapter implements MessagingAdapter {
   private channelResumeMap: Map<string, { uuid: string; savedAt: string; sessionName: string }> = new Map();
   private channelResumeMapPath: string;
 
+  // Disconnect tracking for missed message recovery
+  private _lastDisconnectedAt = 0;
+
   // Stall tracking (matches Telegram's trackMessageInjection pattern)
   private pendingStalls: Map<string, { channelId: string; sessionName: string; text: string; injectedAt: number }> = new Map();
   private stallCheckTimer: ReturnType<typeof setInterval> | null = null;
@@ -162,10 +165,18 @@ export class SlackAdapter implements MessagingAdapter {
       onInteraction: async (payload) => this._handleInteraction(payload as unknown as InteractionPayload),
       onConnected: () => {
         console.log('[slack] Socket Mode connected');
+        const wasStarted = this.started;
         this.started = true;
+        // On reconnection (not initial connect), recover missed messages
+        if (wasStarted && this._lastDisconnectedAt > 0) {
+          this._recoverMissedMessages().catch(err => {
+            console.warn(`[slack] Missed message recovery failed: ${(err as Error).message}`);
+          });
+        }
       },
       onDisconnected: (reason) => {
         console.log(`[slack] Disconnected: ${reason}`);
+        this._lastDisconnectedAt = Date.now();
       },
       onError: (err, permanent) => {
         if (permanent) {
@@ -209,6 +220,11 @@ export class SlackAdapter implements MessagingAdapter {
 
     // Backfill ring buffers with recent channel history so sessions have context on restart
     this._backfillChannelHistory();
+
+    // Recover missed messages from conversation channels after server restart.
+    // The in-process _recoverMissedMessages only handles WebSocket reconnects;
+    // this handles the case where the entire server was restarted.
+    this._recoverOnStartup();
 
     // Start pending prompt TTL eviction
     this._startPromptEviction();
@@ -798,9 +814,13 @@ export class SlackAdapter implements MessagingAdapter {
       this.seenMessageTs.add(ts);
     }
 
-    // System channels (dashboard, lifeline) are for agent-to-user notifications only.
-    // Never spawn sessions or process user messages from these channels.
-    if (this.isSystemChannel(channelId)) return;
+    // System channels (dashboard, lifeline) are primarily for agent-to-user notifications.
+    // Allow @mentions from authorized users through (they clearly want a response),
+    // but ignore unprompted messages to prevent noise-driven session spawns.
+    if (this.isSystemChannel(channelId)) {
+      const isDM = channelId.startsWith('D');
+      if (!isDM && !this._isBotMentioned(text)) return;
+    }
 
     // Bot messages: store in ring buffer for context but don't process as user input
     // This ensures spawned sessions see the full conversation (both sides).
@@ -1680,6 +1700,168 @@ export class SlackAdapter implements MessagingAdapter {
       } catch (err) {
         console.warn(`[slack] Could not backfill channel ${channelId}: ${(err as Error).message}`);
       }
+    }
+  }
+
+  /**
+   * Recover messages missed during a WebSocket outage.
+   * Fetches recent history from channels with active sessions and replays
+   * any messages that arrived after the disconnect time.
+   */
+  private async _recoverMissedMessages(): Promise<void> {
+    if (this._lastDisconnectedAt <= 0) return;
+
+    const disconnectedTs = (this._lastDisconnectedAt / 1000).toFixed(6);
+    const now = Date.now();
+    const outageMs = now - this._lastDisconnectedAt;
+    console.log(`[slack] Recovering missed messages (outage: ${Math.round(outageMs / 1000)}s)`);
+
+    // Collect channels that had recent sessions (these are the ones users were talking to)
+    const channelsToCheck = new Set<string>();
+    for (const [channelId] of this.channelToSession) {
+      channelsToCheck.add(channelId);
+    }
+    for (const [channelId] of this.channelResumeMap) {
+      channelsToCheck.add(channelId);
+    }
+
+    if (channelsToCheck.size === 0) {
+      console.log('[slack] No active channels to recover messages from');
+      return;
+    }
+
+    let totalRecovered = 0;
+    for (const channelId of channelsToCheck) {
+      // Don't skip system channels — _handleMessage filters appropriately
+      // (allows @mentions from authorized users, drops unprompted messages)
+
+      try {
+        const result = await this.apiClient.call('conversations.history', {
+          channel: channelId,
+          oldest: disconnectedTs,
+          limit: 50,
+        }) as { messages?: Array<Record<string, unknown>> };
+
+        const messages = result.messages ?? [];
+        // API returns newest-first — find the latest user message per channel.
+        // Only replay ONE to avoid spawning duplicate sessions.
+        const latestUserMsg = messages.find(m => {
+          if (m.bot_id) return false;
+          const subtype = m.subtype as string | undefined;
+          if (subtype && subtype !== 'file_share') return false;
+          const userId = m.user as string;
+          return userId && this.isAuthorized(userId);
+        });
+
+        if (latestUserMsg) {
+          await this._handleMessage({
+            type: 'message',
+            user: latestUserMsg.user as string,
+            text: latestUserMsg.text as string ?? '',
+            channel: channelId,
+            ts: latestUserMsg.ts as string,
+            thread_ts: latestUserMsg.thread_ts as string | undefined,
+            files: latestUserMsg.files as Array<Record<string, unknown>> | undefined,
+          });
+          totalRecovered++;
+        }
+      } catch (err) {
+        console.warn(`[slack] Could not recover messages for channel ${channelId}: ${(err as Error).message}`);
+      }
+    }
+
+    if (totalRecovered > 0) {
+      console.log(`[slack] Recovered ${totalRecovered} missed message(s) across ${channelsToCheck.size} channel(s)`);
+    } else {
+      console.log('[slack] No missed messages found during outage');
+    }
+
+    // Reset disconnect time so we don't re-recover on future reconnects
+    this._lastDisconnectedAt = 0;
+  }
+
+  /**
+   * On server startup, check conversation channels for messages that arrived
+   * while the server was down. Uses the persisted channel resume map (on disk)
+   * to know which channels had active sessions, and checks for user messages
+   * newer than the last saved session timestamp.
+   *
+   * This complements _recoverMissedMessages (which handles WebSocket reconnects
+   * within a running process) by handling full server restart scenarios.
+   */
+  private async _recoverOnStartup(): Promise<void> {
+    try {
+      // Collect channels from the persisted resume map (loaded from disk in constructor)
+      const channelsToCheck = new Map<string, string>(); // channelId → oldest ts to check from
+      for (const [channelId, info] of this.channelResumeMap) {
+        // Don't skip system channels — _handleMessage filters appropriately
+        // Use the savedAt timestamp as the "last known alive" point
+        const savedAtMs = new Date(info.savedAt).getTime();
+        if (isNaN(savedAtMs)) continue;
+        channelsToCheck.set(channelId, (savedAtMs / 1000).toFixed(6));
+      }
+
+      if (channelsToCheck.size === 0) return;
+
+      console.log(`[slack] Startup recovery: checking ${channelsToCheck.size} conversation channel(s) for missed messages`);
+
+      let totalRecovered = 0;
+      for (const [channelId, oldestTs] of channelsToCheck) {
+        try {
+          const result = await this.apiClient.call('conversations.history', {
+            channel: channelId,
+            oldest: oldestTs,
+            limit: 20,
+          }) as { messages?: Array<Record<string, unknown>> };
+
+          const messages = result.messages ?? [];
+          // API returns newest-first — find the latest user message to process.
+          // Only replay ONE message per channel to avoid spawning duplicate sessions.
+          // Earlier messages go into the ring buffer for context but don't spawn sessions.
+          const latestUserMsg = messages.find(m => {
+            if (m.bot_id) return false;
+            const subtype = m.subtype as string | undefined;
+            if (subtype && subtype !== 'file_share') return false;
+            const userId = m.user as string;
+            return userId && this.isAuthorized(userId);
+          });
+
+          if (latestUserMsg) {
+            // Backfill older messages into ring buffer for context (oldest-first)
+            const olderMsgs = [...messages].reverse();
+            const buffer = this.channelHistory.get(channelId) ?? new RingBuffer<SlackMessage>(RING_BUFFER_CAPACITY);
+            for (const m of olderMsgs) {
+              const user = m.user as string ?? m.bot_id as string;
+              const ts = m.ts as string;
+              if (!user || !ts) continue;
+              buffer.push({ ts, user, text: m.text as string ?? '', channel: channelId });
+            }
+            this.channelHistory.set(channelId, buffer);
+
+            // Process only the latest message — this spawns/resumes one session
+            await this._handleMessage({
+              type: 'message',
+              user: latestUserMsg.user as string,
+              text: latestUserMsg.text as string ?? '',
+              channel: channelId,
+              ts: latestUserMsg.ts as string,
+              thread_ts: latestUserMsg.thread_ts as string | undefined,
+              files: latestUserMsg.files as Array<Record<string, unknown>> | undefined,
+            });
+            totalRecovered++;
+          }
+        } catch (err) {
+          console.warn(`[slack] Startup recovery failed for channel ${channelId}: ${(err as Error).message}`);
+        }
+      }
+
+      if (totalRecovered > 0) {
+        console.log(`[slack] Startup recovery: processed ${totalRecovered} missed message(s)`);
+      } else {
+        console.log('[slack] Startup recovery: no missed messages');
+      }
+    } catch (err) {
+      console.warn(`[slack] Startup recovery error: ${(err as Error).message}`);
     }
   }
 
