@@ -432,12 +432,6 @@
       padding: 4px 8px;
     }
     .dz-paste-delete:hover { color: #f85149; }
-    @media (max-width: 768px) {
-      .dropzone-container { padding: 16px; }
-      .dropzone-actions { flex-direction: column; }
-      .dropzone-session-select { width: 100%; }
-    }
-
     /* WhatsApp QR panel */
     .wa-qr-panel {
       position: fixed;
@@ -2248,6 +2242,106 @@
     @media (max-width: 768px) {
       .app {
         grid-template-columns: 1fr;
+        grid-template-rows: auto auto 1fr;
+      }
+
+      /* Prevent horizontal overflow on mobile */
+      .app {
+        overflow: hidden;
+        max-width: 100vw;
+      }
+
+      /* All full-span containers must respect viewport width */
+      .systems-container,
+      .features-container,
+      .secrets-container,
+      .jobs-container,
+      .files-container,
+      .dropzone-container {
+        max-width: 100vw;
+        box-sizing: border-box;
+        overflow-x: hidden;
+      }
+
+      /* Header: stacks vertically on mobile */
+      .header {
+        padding: 0;
+        flex-direction: column;
+        align-items: stretch;
+        overflow: hidden;
+        max-width: 100vw;
+      }
+
+      .header-left {
+        display: contents;
+      }
+
+      /* Logo + title row */
+      .header .logo,
+      .header h1 {
+        display: none;
+      }
+
+      /* Tab bar — primary navigation, full width, scrollable, large touch targets */
+      .tab-bar {
+        display: flex;
+        margin-left: 0;
+        padding: 0 4px;
+        gap: 0;
+        background: var(--bg-panel);
+        border-bottom: 1px solid var(--border);
+        overflow-x: auto;
+        -webkit-overflow-scrolling: touch;
+      }
+
+      .tab-bar .tab {
+        padding: 12px 14px;
+        font-size: 13px;
+        min-height: 44px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        border-radius: 0;
+        border: none;
+        border-bottom: 3px solid transparent;
+        margin-bottom: 0;
+        background: transparent;
+      }
+
+      .tab-bar .tab.active {
+        border-bottom-color: var(--accent);
+        background: transparent;
+        color: var(--accent);
+      }
+
+      .tab-bar .tab:hover {
+        background: var(--bg-hover);
+      }
+
+      /* Vital signs — compact row on mobile instead of hidden */
+      .vital-signs {
+        display: flex;
+        flex-wrap: nowrap;
+        overflow-x: auto;
+        padding: 6px 14px;
+        gap: 12px;
+        font-size: 11px;
+        background: var(--bg);
+        max-width: 100vw;
+        box-sizing: border-box;
+      }
+
+      .vital-sep {
+        display: none;
+      }
+
+      .vital {
+        white-space: nowrap;
+        font-size: 11px;
+      }
+
+      .vital-bar {
+        display: none;
       }
 
       .sidebar {
@@ -2284,8 +2378,9 @@
       }
 
       .action-btn {
-        padding: 8px 14px;
+        padding: 10px 16px;
         font-size: 14px;
+        min-height: 44px;
       }
 
       .terminal-actions {
@@ -2325,6 +2420,7 @@
       .input-bar button {
         padding: 10px 14px;
         font-size: 14px;
+        min-height: 44px;
       }
 
       /* Terminal font smaller on mobile */
@@ -2347,34 +2443,11 @@
       .auth-box button {
         padding: 12px;
         font-size: 15px;
-      }
-
-      /* Header compact */
-      .header {
-        padding: 10px 14px;
-      }
-
-      .header h1 {
-        font-size: 15px;
-      }
-
-      .header .logo {
-        width: 24px;
-        height: 24px;
+        min-height: 44px;
       }
 
       .sidebar-header {
         padding: 12px 14px;
-      }
-
-      /* Tab bar compact */
-      .tab-bar {
-        margin-left: 12px;
-      }
-
-      .tab-bar .tab {
-        padding: 5px 12px;
-        font-size: 12px;
       }
 
       /* File viewer mobile */
@@ -2429,11 +2502,6 @@
         padding: 10px 16px;
       }
 
-      /* Vital signs mobile */
-      .vital-signs {
-        display: none;
-      }
-
       /* Jobs tab mobile */
       .jobs-container {
         flex-direction: column;
@@ -2466,6 +2534,92 @@
 
       .jobs-detail-content {
         padding: 14px;
+      }
+
+      /* Jobs summary cards wrap */
+      .jobs-summary {
+        flex-wrap: wrap;
+      }
+
+      /* Secret Drop mobile */
+      .secret-form {
+        padding: 14px;
+      }
+
+      .secret-field-row {
+        flex-wrap: wrap;
+      }
+
+      .secret-field-row input {
+        min-width: 0;
+      }
+
+      /* Features mobile */
+      .feat-grid {
+        grid-template-columns: 1fr;
+      }
+
+      .feat-card {
+        padding: 14px;
+      }
+
+      .feat-card-name {
+        font-size: 14px;
+      }
+
+      .features-main {
+        padding: 0 14px;
+      }
+
+      /* Systems/Health mobile */
+      .sys-main,
+      .systems-main {
+        padding: 14px;
+        max-width: 100vw;
+        box-sizing: border-box;
+        overflow-x: hidden;
+      }
+
+      .cap-grid {
+        grid-template-columns: 1fr;
+      }
+
+      /* Dropzone mobile */
+      .dropzone-container {
+        padding: 14px;
+      }
+
+      .dropzone-actions {
+        flex-direction: column;
+      }
+
+      .dropzone-session-select {
+        width: 100%;
+      }
+    }
+
+    /* Extra small screens (≤480px) */
+    @media (max-width: 480px) {
+      .tab-bar .tab {
+        padding: 10px 10px;
+        font-size: 12px;
+      }
+
+      .header h1 {
+        font-size: 14px;
+      }
+
+      .session-item {
+        padding: 12px 10px;
+      }
+
+      .job-config-grid {
+        grid-template-columns: 1fr;
+      }
+
+      .job-config-key {
+        font-weight: 600;
+        color: var(--text-dim);
       }
     }
   </style>
