@@ -1,6 +1,6 @@
 # PROP: Session-End Maintenance (Cross-pollinated from Dawn)
 
-**Status**: Proposed
+**Status**: Implemented (v1 — JSONL rotation + journal trim, 2026-04-09)
 **Source**: Dawn's `session-maintenance.py` (Portal `.claude/scripts/session-maintenance.py`)
 **Date**: 2026-03-26
 

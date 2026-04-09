@@ -1,40 +1,69 @@
 # Dawn-to-Instar Audit Report
 
-**Date**: 2026-04-02 (Updated)
-**Previous Audit**: 2026-03-30 (v0.25.4, scored ~88%)
-**Current Version**: v0.26.3
+**Date**: 2026-04-09 (Updated)
+**Previous Audit**: 2026-04-02 (v0.26.3, scored ~89%)
+**Current Version**: v0.28.12
 **Purpose**: Map Dawn's battle-tested infrastructure against Instar's current state. Identify remaining gaps and cross-pollination opportunities.
 
 ---
 
 ## Executive Summary
 
-Instar has matured to **~89% coverage** of Dawn's proven patterns (up from ~88% in the March 30 audit). This cycle focused on verifying Dawn's new infrastructure patterns (auto-fixer, lesson-behavior-gap analyzer, PermissionDenied hooks) against Instar's existing capabilities. Finding: most "new Dawn patterns" are either already covered by Instar's different architecture or still at proposal stage in Dawn. One concrete improvement made: MCP tool identity grounding injection in the external-operation-gate hook, bringing Dawn's "grounding before public action" pattern to browser/API tool calls.
+Instar has matured to **~90% coverage** of Dawn's proven patterns (up from ~89% in the April 2 audit). v0.26.3 to v0.28.12 brought significant reliability hardening: scheduler retry with exponential backoff, Slack reconnection fixes, gate retry for transient failures, dashboard revamp with live status and mobile layout, and config field passthrough fixes. This audit cycle cross-pollinated two new gravity wells ("Symptom-Level Fix" and "Doing vs Being") and a skill-usage telemetry hook for local pattern detection.
 
-**Key shift**: Parity is approaching convergence. Most gaps are now architectural differences (both valid) rather than missing capabilities. Cross-pollination value increasingly comes from conceptual patterns rather than code porting.
+**Key shift**: Parity remains near convergence. The v0.26.3→v0.28.12 delta was primarily reliability and UX polish rather than new capabilities, which is a healthy sign of maturation. Remaining gaps (multi-session awareness at 72%, skills system at 68%) require architectural decisions rather than simple porting.
 
 ---
 
 ## Coverage by Area
 
-| # | Area | Feb Score | Mar 26 | Mar 30 | Apr 2 | Status |
-|---|------|-----------|--------|--------|-------|--------|
-| 1 | Job Scheduling | 30% | 85% | 85% | 85% | Quota suite, claim manager, job reflector |
-| 2 | Session Management | 25% | 88% | 88% | 89% | +SessionMonitor escalation fix (v0.26.2) |
-| 3 | Identity & Grounding | 20% | 82% | 82% | 84% | +MCP identity grounding for external ops |
-| 4 | Hook System | 15% | 92% | 92% | 93% | +MCP matcher in settings template |
-| 5 | Reflection & Learning | 10% | 87% | 87% | 87% | ReflectionConsolidator, JobReflector, PatternAnalyzer |
-| 6 | Telegram Integration | 60% | 78% | 80% | 80% | Platform-agnostic messaging via adapters |
-| 7 | Multi-Session Awareness | 15% | 72% | 72% | 72% | Activity registry, session sentinel, work ledger |
-| 8 | Quota & Resource | 5% | 91% | 91% | 91% | QuotaManager, multi-account, exhaustion detection |
-| 9 | Skills System | 5% | 68% | 68% | 68% | AutonomySkill, capability mapper, MCP interop |
-| 10 | Safety & Security | 40% | 89% | 89% | 90% | +ConfigDefaults unified system, PromptGate default-on |
-| 11 | Monitoring & Health | 20% | 85% | 85% | 86% | +FeatureRegistry graceful degradation, native module preflight |
-| 12 | Self-Evolution | 5% | 84% | 90% | 90% | Implicit evolution detection stable |
-| 13 | Research & Web | N/A | N/A | 92% | 92% | Smart-fetch, research navigation, canonical state hierarchy |
-| | **Aggregate** | **~25%** | **~83%** | **~88%** | **~89%** | **Production-ready, approaching convergence** |
+| # | Area | Feb Score | Mar 26 | Mar 30 | Apr 2 | Apr 9 | Status |
+|---|------|-----------|--------|--------|-------|-------|--------|
+| 1 | Job Scheduling | 30% | 85% | 85% | 85% | 87% | +Scheduler retry w/ exponential backoff, gate retry |
+| 2 | Session Management | 25% | 88% | 88% | 89% | 89% | Stable — startup grace period, stale fail-open |
+| 3 | Identity & Grounding | 20% | 82% | 82% | 84% | 84% | Stable — crypto identity (v0.27.0) is beyond Dawn |
+| 4 | Hook System | 15% | 92% | 92% | 93% | 94% | +Skill-usage telemetry PostToolUse hook |
+| 5 | Reflection & Learning | 10% | 87% | 87% | 87% | 87% | Stable |
+| 6 | Telegram Integration | 60% | 78% | 80% | 80% | 80% | Stable — platform-agnostic messaging |
+| 7 | Multi-Session Awareness | 15% | 72% | 72% | 72% | 72% | Biggest gap — needs unified event stream |
+| 8 | Quota & Resource | 5% | 91% | 91% | 91% | 92% | +QuotaTracker stale fail-open (v0.28.4) |
+| 9 | Skills System | 5% | 68% | 68% | 68% | 69% | +Skill telemetry for pattern detection |
+| 10 | Safety & Security | 40% | 89% | 89% | 90% | 91% | +Three-layer trust model, Ed25519 identity (v0.27.0) |
+| 11 | Monitoring & Health | 20% | 85% | 85% | 86% | 87% | +Dashboard revamp, live status, activity tab |
+| 12 | Self-Evolution | 5% | 84% | 90% | 90% | 90% | Stable |
+| 13 | Research & Web | N/A | N/A | 92% | 92% | 92% | Stable |
+| | **Aggregate** | **~25%** | **~83%** | **~88%** | **~89%** | **~90%** | **Production-ready, approaching convergence** |
 
 ---
+
+## What Changed (Apr 2 -> Apr 9)
+
+v0.26.3 → v0.28.12 — Reliability hardening, dashboard revamp, scheduler resilience, and cross-pollinated gravity wells:
+
+- **Scheduler retry with exponential backoff** (v0.28.9) — Skipped jobs now retry with widening delays (1m, 5m, 15m, 30m, 1h, 2h)
+- **Gate retry for transient failures** (v0.28.10) — Job gate checks retry on transient errors with configurable attempts
+- **Dashboard revamp** (v0.28.6-v0.28.9) — Comprehensive v2 with Secret Drop, Jobs config, Features layout, live status, Activity tab, mobile responsive design
+- **Slack reliability batch** (v0.28.9) — Fast heartbeat, missed message recovery, reconnect race condition fix, phantom ping timeout fix
+- **LLM classifier disambiguation** (v0.28.9) — Conversational "hold on" no longer misclassified as pause command
+- **Startup grace period** (v0.28.4) — Prevents missed-job gate evaluation during startup
+- **QuotaTracker stale fail-open** (v0.28.4) — Fails open on stale data instead of blocking
+- **Context endpoint diagnostics** (v0.28.11) — contextDir path in GET /context response
+- **Supervisor restart cascade prevention** — High CPU no longer triggers restart loops
+- **Compaction-idle detection** (v0.28.8) — Polling-based detection in watchdog
+
+### Dawn → Instar (cross-pollinated this session)
+1. **"Symptom-Level Fix" gravity well** — Metrics are shadows; diagnose before fixing
+2. **"Doing vs Being" gravity well** — Undocumented presence is erased presence
+3. **Skill-usage telemetry hook** — PostToolUse hook logging skill invocations to local JSONL for pattern detection
+4. **Settings migration** — Existing agents get the PostToolUse telemetry hook on upgrade
+
+### Dawn Patterns Audited (Not Ported)
+
+| Dawn Pattern | Instar Status | Notes |
+|-------------|--------------|-------|
+| Message convergence gate (PROP-159 Phase 2) | N/A | Dawn-specific — checks voice, commitment, identity on ALL outgoing messages. Instar's CoherenceGate covers this differently |
+| Build-stop hook | Already covered | Instar has build-stop-hook.sh in templates |
+| Session-end maintenance (PROP) | Implemented | SessionMaintenanceRunner v1: JSONL rotation + journal trim on sessionComplete |
 
 ## What Changed (Mar 30 -> Apr 2)
 
@@ -97,9 +126,9 @@ Activity is scattered across PlatformActivityRegistry, SessionActivitySentinel, 
 
 AutonomySkill and CapabilityMapper provide infrastructure, but user-created skill persistence, versioning, and the skill evolution loop (skills that improve themselves) are underdeveloped. Dawn's 80+ skills demonstrate the value of composable markdown-based workflows.
 
-### 3. Session-End Maintenance (NEW)
+### 3. Session-End Maintenance — RESOLVED (Apr 9)
 
-Dawn runs lightweight housekeeping at every session boundary (retire stale data, refresh one metric). This distributes maintenance load rather than concentrating it in periodic maintenance jobs. See `PROP-session-maintenance.md`.
+Implemented as `SessionMaintenanceRunner` in `src/core/SessionMaintenanceRunner.ts`. v1 handles JSONL rotation and execution journal trim. Wired into `sessionComplete` event in server.ts. See `PROP-session-maintenance.md` (status: Implemented).
 
 ### 4. Meta-Reflection
 
@@ -154,6 +183,20 @@ The highest-value remaining work is:
 5. **Soul integrity verification** — Port Instar's server-side soul.md integrity check to Dawn's PostCompact hook
 
 Future audits should focus on behavioral testing — not just "does the feature exist" but "does it work correctly under real conditions."
+
+---
+
+## Appendix: Apr 9 Audit Session Details
+
+**Session**: AUT-5006-wo | **Instar Version**: v0.28.12 | **Dawn-to-Instar direction**: 3 implementations | **Instar-to-Dawn direction**: 0
+
+### Dawn → Instar (implemented this session)
+1. `src/scaffold/templates.ts` — Added "Symptom-Level Fix" and "Doing vs Being" gravity wells
+2. `src/templates/hooks/skill-usage-telemetry.sh` — New PostToolUse hook for skill invocation tracking
+3. `src/core/PostUpdateMigrator.ts` — Hook installation + settings migration for skill telemetry
+4. `src/templates/hooks/settings-template.json` — PostToolUse section for skill telemetry
+5. `src/core/SessionMaintenanceRunner.ts` — Session-end maintenance: JSONL rotation + journal trim
+6. `src/commands/server.ts` — Wired SessionMaintenanceRunner into sessionComplete event
 
 ---
 

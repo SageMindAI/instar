@@ -221,6 +221,13 @@ export class PostUpdateMigrator {
       result.errors.push(`auto-approve-permissions.js: ${err instanceof Error ? err.message : String(err)}`);
     }
 
+    try {
+      fs.writeFileSync(path.join(instarHooksDir, 'skill-usage-telemetry.sh'), this.getSkillUsageTelemetryHook(), { mode: 0o755 });
+      result.upgraded.push('hooks/instar/skill-usage-telemetry.sh (skill invocation tracking)');
+    } catch (err) {
+      result.errors.push(`skill-usage-telemetry.sh: ${err instanceof Error ? err.message : String(err)}`);
+    }
+
     // Hook event reporter — always overwrite (built-in infrastructure).
     // Previously only installed-if-missing by migrateHttpHooksToCommandHooks, which left
     // agents stuck on a broken template (the old template used CommonJS `require('http')`,
@@ -1327,6 +1334,27 @@ The user has been talking to you (possibly for days). A generic greeting like "H
       }
     }
 
+    // Ensure PostToolUse skill-usage-telemetry hook exists
+    {
+      const postToolUse = (hooks.PostToolUse || []) as Array<{ matcher?: string; hooks?: Array<{ command?: string }> }>;
+      const hasSkillTelemetry = postToolUse.some(e =>
+        e.matcher === 'Skill' && e.hooks?.some(h => h.command?.includes('skill-usage-telemetry'))
+      );
+      if (!hasSkillTelemetry) {
+        postToolUse.push({
+          matcher: 'Skill',
+          hooks: [{
+            type: 'command' as never,
+            command: 'bash .instar/hooks/instar/skill-usage-telemetry.sh',
+            timeout: 3000,
+          } as never],
+        });
+        hooks.PostToolUse = postToolUse;
+        patched = true;
+        result.upgraded.push('.claude/settings.json: added PostToolUse skill-usage-telemetry hook');
+      }
+    }
+
     // Migrate all hook paths from flat layout to instar/ subdirectory
     if (hooks.PostToolUse) {
       this.migrateSettingsHookPaths(hooks.PostToolUse as unknown[], result);
@@ -1629,7 +1657,7 @@ The user has been talking to you (possibly for days). A generic greeting like "H
    * Get the content of a named hook template.
    * Used by init.ts to share canonical hook content without duplication.
    */
-  getHookContent(name: 'session-start' | 'compaction-recovery' | 'external-operation-gate' | 'deferral-detector' | 'post-action-reflection' | 'external-communication-guard' | 'scope-coherence-collector' | 'scope-coherence-checkpoint' | 'claim-intercept' | 'claim-intercept-response' | 'telegram-topic-context' | 'response-review' | 'auto-approve-permissions'): string {
+  getHookContent(name: 'session-start' | 'compaction-recovery' | 'external-operation-gate' | 'deferral-detector' | 'post-action-reflection' | 'external-communication-guard' | 'scope-coherence-collector' | 'scope-coherence-checkpoint' | 'claim-intercept' | 'claim-intercept-response' | 'telegram-topic-context' | 'response-review' | 'auto-approve-permissions' | 'skill-usage-telemetry'): string {
     switch (name) {
       case 'session-start': return this.getSessionStartHook();
       case 'compaction-recovery': return this.getCompactionRecovery();
@@ -1644,6 +1672,7 @@ The user has been talking to you (possibly for days). A generic greeting like "H
       case 'telegram-topic-context': return this.getTelegramTopicContextHook();
       case 'response-review': return this.getResponseReviewHook();
       case 'auto-approve-permissions': return this.getAutoApprovePermissionsHook();
+      case 'skill-usage-telemetry': return this.getSkillUsageTelemetryHook();
     }
   }
 
@@ -3823,6 +3852,38 @@ process.stdin.on('end', () => {
   } catch {}
   process.exit(0);
 });
+`;
+  }
+
+  private getSkillUsageTelemetryHook(): string {
+    return `#!/bin/bash
+# Skill Usage Telemetry — PostToolUse hook for Skill tool.
+#
+# Logs every skill invocation to .instar/skill-telemetry.jsonl
+# for future pattern detection (which skills are used, when, how often).
+#
+# Cross-pollinated from Dawn's Portal project (2026-04-09).
+# Lightweight: appends one JSONL line, no network calls.
+
+INPUT=$(cat)
+
+TOOL_NAME=$(echo "$INPUT" | python3 -c "import json,sys; print(json.load(sys.stdin).get('tool_name',''))" 2>/dev/null)
+if [ "$TOOL_NAME" != "Skill" ]; then
+  exit 0
+fi
+
+INSTAR_DIR="\${CLAUDE_PROJECT_DIR:-.}/.instar"
+TELEMETRY_FILE="$INSTAR_DIR/skill-telemetry.jsonl"
+
+SKILL_NAME=$(echo "$INPUT" | python3 -c "import json,sys; print(json.load(sys.stdin).get('tool_input',{}).get('skill','unknown'))" 2>/dev/null)
+SKILL_ARGS=$(echo "$INPUT" | python3 -c "import json,sys; a=json.load(sys.stdin).get('tool_input',{}).get('args',''); print(a[:200])" 2>/dev/null)
+OUTPUT_LEN=$(echo "$INPUT" | python3 -c "import json,sys; print(len(str(json.load(sys.stdin).get('tool_output',''))))" 2>/dev/null)
+TIMESTAMP=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+
+SESSION_ID="\${INSTAR_SESSION_ID:-}"
+
+mkdir -p "$INSTAR_DIR"
+echo "{\\"timestamp\\":\\"$TIMESTAMP\\",\\"skill\\":\\"$SKILL_NAME\\",\\"args\\":\\"$SKILL_ARGS\\",\\"session_id\\":\\"$SESSION_ID\\",\\"output_length\\":$OUTPUT_LEN}" >> "$TELEMETRY_FILE"
 `;
   }
 

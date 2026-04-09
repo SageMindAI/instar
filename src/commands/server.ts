@@ -4195,6 +4195,23 @@ export async function startServer(options: StartOptions): Promise<void> {
     });
     console.log(pc.green('  Worktree monitor enabled (post-session + periodic)'));
 
+    // Session-end maintenance — lightweight housekeeping at session boundaries
+    // Cross-pollinated from Dawn: distributes maintenance load across all sessions
+    const { SessionMaintenanceRunner } = await import('../core/SessionMaintenanceRunner.js');
+    const sessionMaintenance = new SessionMaintenanceRunner({ stateDir: config.stateDir });
+    sessionManager.on('sessionComplete', async () => {
+      try {
+        const result = await sessionMaintenance.run();
+        if (result.tasksRun.length > 0) {
+          console.log(`[SessionMaintenance] ${result.summary}`);
+        }
+      } catch (err) {
+        // Fire-and-forget — maintenance failures never block session cleanup
+        console.error('[SessionMaintenance] Failed:', err);
+      }
+    });
+    console.log(pc.green('  Session-end maintenance enabled'));
+
     // Instructions Verifier — tracks which CLAUDE.md files loaded
     const { InstructionsVerifier } = await import('../monitoring/InstructionsVerifier.js');
     const instructionsVerifier = new InstructionsVerifier({ stateDir: config.stateDir });

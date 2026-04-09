@@ -105,6 +105,18 @@
         ]
       }
     ],
+    "PostToolUse": [
+      {
+        "matcher": "Skill",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash .instar/hooks/instar/skill-usage-telemetry.sh",
+            "timeout": 3000
+          }
+        ]
+      }
+    ],
     "SubagentStart": [
       {
         "matcher": "",
