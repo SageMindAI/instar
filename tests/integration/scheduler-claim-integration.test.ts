@@ -160,19 +160,19 @@ describe('scheduler skips jobs claimed by remote machines', () => {
     cleanup(tmpDir);
   });
 
-  it('skips job when remote machine holds active claim', () => {
+  it('skips job when remote machine holds active claim', async () => {
     simulateRemoteClaim(bus, 'm_dawn_macbook', 'daily-sync', 'claim_remote');
 
-    const result = scheduler.triggerJob('daily-sync', 'manual');
+    const result = await scheduler.triggerJob('daily-sync', 'manual');
 
     expect(result).toBe('skipped');
     expect(sessionManager.spawnSession).not.toHaveBeenCalled();
   });
 
-  it('records claimed skip reason in skip ledger', () => {
+  it('records claimed skip reason in skip ledger', async () => {
     simulateRemoteClaim(bus, 'm_dawn_macbook', 'daily-sync', 'claim_remote');
 
-    scheduler.triggerJob('daily-sync', 'manual');
+    await scheduler.triggerJob('daily-sync', 'manual');
 
     const ledger = scheduler.getSkipLedger();
     const skips = ledger.getSkips({ slug: 'daily-sync' });
@@ -180,8 +180,8 @@ describe('scheduler skips jobs claimed by remote machines', () => {
     expect(skips[0].reason).toBe('claimed');
   });
 
-  it('triggers job when no remote claim exists', () => {
-    const result = scheduler.triggerJob('daily-sync', 'manual');
+  it('triggers job when no remote claim exists', async () => {
+    const result = await scheduler.triggerJob('daily-sync', 'manual');
 
     expect(result).toBe('triggered');
     expect(sessionManager.spawnSession).toHaveBeenCalled();
@@ -258,7 +258,7 @@ describe('scheduler broadcasts claims before spawning', () => {
     const sentMessages: AgentMessage[] = [];
     bus.on('sent', (msg) => sentMessages.push(msg));
 
-    scheduler.triggerJob('daily-sync', 'manual');
+    await scheduler.triggerJob('daily-sync', 'manual');
 
     // Allow async claim broadcast to settle
     await new Promise(resolve => setTimeout(resolve, 50));
@@ -269,7 +269,7 @@ describe('scheduler broadcasts claims before spawning', () => {
   });
 
   it('claim timeout is based on expectedDurationMinutes', async () => {
-    scheduler.triggerJob('daily-sync', 'manual');
+    await scheduler.triggerJob('daily-sync', 'manual');
 
     // Allow async claim broadcast to settle
     await new Promise(resolve => setTimeout(resolve, 50));
@@ -325,8 +325,8 @@ describe('scheduler without claim manager (single machine)', () => {
     cleanup(tmpDir);
   });
 
-  it('triggers jobs normally without claim manager', () => {
-    const result = scheduler.triggerJob('daily-sync', 'manual');
+  it('triggers jobs normally without claim manager', async () => {
+    const result = await scheduler.triggerJob('daily-sync', 'manual');
     expect(result).toBe('triggered');
   });
 });

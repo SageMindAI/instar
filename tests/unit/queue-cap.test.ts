@@ -45,7 +45,7 @@ describe('JobScheduler — queue cap', () => {
     project.cleanup();
   });
 
-  it('caps queue at 50 items', () => {
+  it('caps queue at 50 items', async () => {
     scheduler = new JobScheduler(
       { jobsFile, enabled: true, maxParallelJobs: 1, quotaThresholds: { normal: 50, elevated: 70, critical: 85, shutdown: 95 } },
       mockSM as any,
@@ -55,12 +55,12 @@ describe('JobScheduler — queue cap', () => {
     scheduler.start();
 
     // First trigger fills the slot
-    scheduler.triggerJob('job-0', 'test');
+    await scheduler.triggerJob('job-0', 'test');
     expect(mockSM._spawnCount).toBe(1);
 
     // Queue 50 more — only 50 should be queued, rest dropped
     for (let i = 1; i <= 55; i++) {
-      scheduler.triggerJob(`job-${i}`, 'test');
+      await scheduler.triggerJob(`job-${i}`, 'test');
     }
 
     // Queue should be capped at 50

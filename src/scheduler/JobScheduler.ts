@@ -9,8 +9,11 @@
  */
 
 import { Cron } from 'croner';
-import { execFileSync } from 'node:child_process';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
 import fs from 'node:fs';
+
+const execFileAsync = promisify(execFile);
 import path from 'node:path';
 import { ExecutionJournal } from '../core/ExecutionJournal.js';
 import { IntegrationGate } from './IntegrationGate.js';
@@ -221,10 +224,10 @@ export class JobScheduler {
 
     for (const job of scopedJobs) {
       try {
-        const task = new Cron(job.schedule, () => {
+        const task = new Cron(job.schedule, async () => {
           // New cron window — reset retry state so we get fresh attempts
           this.clearRetryState(job.slug);
-          this.triggerJob(job.slug, 'scheduled');
+          await this.triggerJob(job.slug, 'scheduled');
         });
         this.cronTasks.set(job.slug, task);
       } catch (err) {
@@ -286,7 +289,7 @@ export class JobScheduler {
   /**
    * Trigger a job by slug. Checks claims, quota, session limits, queues if at capacity.
    */
-  triggerJob(slug: string, reason: string): 'triggered' | 'queued' | 'skipped' {
+  async triggerJob(slug: string, reason: string): Promise<'triggered' | 'queued' | 'skipped'> {
     const job = this.jobs.find(j => j.slug === slug);
     if (!job) {
       throw new Error(`Unknown job: ${slug}`);
@@ -335,9 +338,9 @@ export class JobScheduler {
       return 'skipped';
     }
 
-    // Run gate command if configured — zero-token pre-screening
+    // Run gate command if configured — zero-token pre-screening (async, non-blocking)
     if (job.gate) {
-      if (!this.runGate(job)) {
+      if (!await this.runGateAsync(job)) {
         this.scheduleRetry(slug, 'gate');
         return 'skipped';
       }
@@ -1080,21 +1083,24 @@ export class JobScheduler {
   }
 
   /**
-   * Run a job's gate command. Returns true if the job should proceed, false to skip.
+   * Run a job's gate command asynchronously. Returns true if the job should proceed, false to skip.
    * Gates are zero-token pre-screening — a bash command that exits 0 (proceed) or non-zero (skip).
    * Retries up to 3 times with 5s delay to handle transient failures (e.g., server restart windows).
+   *
+   * Uses non-blocking async execution to avoid stalling the Node.js event loop while gates run.
+   * Synchronous gate execution was causing health-check timeouts under startup load (many gates
+   * firing concurrently after a restart would block the event loop for 30-300+ seconds).
    */
-  private runGate(job: JobDefinition): boolean {
+  private async runGateAsync(job: JobDefinition): Promise<boolean> {
     const maxAttempts = this.config.gateRetries ?? 3;
     const retryDelayMs = this.config.gateRetryDelayMs ?? 5000;
     let lastErr: unknown;
 
     for (let attempt = 1; attempt <= maxAttempts; attempt++) {
       try {
-        execFileSync('/bin/sh', ['-c', job.gate!], {
+        await execFileAsync('/bin/sh', ['-c', job.gate!], {
           encoding: 'utf-8',
           timeout: 10000,
-          stdio: ['pipe', 'pipe', 'pipe'],
         });
         if (attempt > 1) {
           console.log(`[scheduler] Gate for "${job.slug}" passed on attempt ${attempt}/${maxAttempts}`);
@@ -1104,7 +1110,7 @@ export class JobScheduler {
         lastErr = err;
         if (attempt < maxAttempts) {
           console.log(`[scheduler] Gate for "${job.slug}" failed (attempt ${attempt}/${maxAttempts}), retrying in ${retryDelayMs / 1000}s...`);
-          try { execFileSync('/bin/sleep', [String(retryDelayMs / 1000)], { stdio: 'ignore' }); } catch { /* ignore */ }
+          await new Promise(resolve => setTimeout(resolve, retryDelayMs));
         }
       }
     }
@@ -1155,7 +1161,9 @@ export class JobScheduler {
       const job = this.jobs.find(j => j.slug === slug);
       if (!job || !job.enabled) return;
       console.log(`[scheduler] Retrying job "${slug}" (attempt ${nextRetry})`);
-      this.triggerJob(slug, `retry:${skipReason}`);
+      this.triggerJob(slug, `retry:${skipReason}`).catch(err => {
+        console.error(`[scheduler] Retry trigger failed for "${slug}": ${err}`);
+      });
     }, delayMs);
 
     this.retryState.set(slug, { retries: nextRetry, timer });
@@ -1258,7 +1266,7 @@ export class JobScheduler {
     return lines.join('\n');
   }
 
-  private checkMissedJobs(enabledJobs: JobDefinition[]): void {
+  private async checkMissedJobs(enabledJobs: JobDefinition[]): Promise<void> {
     const now = Date.now();
 
     // Collect all missed jobs first, then sort by priority before triggering.
@@ -1305,7 +1313,7 @@ export class JobScheduler {
     });
 
     for (const { job } of missedJobs) {
-      this.triggerJob(job.slug, 'missed');
+      await this.triggerJob(job.slug, 'missed');
     }
   }
 

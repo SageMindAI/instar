@@ -157,9 +157,9 @@ describe('Memory Export Job (integration)', () => {
   // ─── Job triggering ─────────────────────────────────────────────
 
   // 3. Gate skips when server is not running (correct behavior)
-  it('memory-export job gate skips when server is unreachable', () => {
+  it('memory-export job gate skips when server is unreachable', async () => {
     // The gate requires a running server — in test env it should skip
-    const result = scheduler.triggerJob('memory-export', 'test');
+    const result = await scheduler.triggerJob('memory-export', 'test');
     expect(result).toBe('skipped');
   });
 

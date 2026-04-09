@@ -81,70 +81,70 @@ describe('JobScheduler', () => {
   });
 
   describe('triggerJob', () => {
-    it('triggers a known job', () => {
+    it('triggers a known job', async () => {
       createScheduler();
       scheduler.start();
 
-      const result = scheduler.triggerJob('health-check', 'test');
+      const result = await scheduler.triggerJob('health-check', 'test');
       expect(result).toBe('triggered');
       expect(mockSM._spawnCount).toBe(1);
     });
 
-    it('throws for unknown job', () => {
+    it('throws for unknown job', async () => {
       createScheduler();
       scheduler.start();
 
-      expect(() => scheduler.triggerJob('nonexistent', 'test'))
-        .toThrow('Unknown job: nonexistent');
+      await expect(scheduler.triggerJob('nonexistent', 'test'))
+        .rejects.toThrow('Unknown job: nonexistent');
     });
 
-    it('queues when at max parallel jobs', () => {
+    it('queues when at max parallel jobs', async () => {
       createScheduler({ maxParallelJobs: 1 });
       scheduler.start();
 
       // First trigger succeeds
-      const r1 = scheduler.triggerJob('health-check', 'test');
+      const r1 = await scheduler.triggerJob('health-check', 'test');
       expect(r1).toBe('triggered');
 
       // Second trigger gets queued — at capacity
-      const r2 = scheduler.triggerJob('email-check', 'test');
+      const r2 = await scheduler.triggerJob('email-check', 'test');
       expect(r2).toBe('queued');
 
       expect(scheduler.getStatus().queueLength).toBe(1);
     });
 
-    it('skips when paused', () => {
+    it('skips when paused', async () => {
       createScheduler();
       scheduler.start();
       scheduler.pause();
 
-      const result = scheduler.triggerJob('health-check', 'test');
+      const result = await scheduler.triggerJob('health-check', 'test');
       expect(result).toBe('skipped');
       expect(mockSM._spawnCount).toBe(0);
     });
 
-    it('skips when quota callback returns false', () => {
+    it('skips when quota callback returns false', async () => {
       createScheduler();
       scheduler.start();
       scheduler.canRunJob = () => false;
 
-      const result = scheduler.triggerJob('health-check', 'test');
+      const result = await scheduler.triggerJob('health-check', 'test');
       expect(result).toBe('skipped');
       expect(mockSM._spawnCount).toBe(0);
     });
   });
 
   describe('queue processing', () => {
-    it('drains queue when slot opens', () => {
+    it('drains queue when slot opens', async () => {
       createScheduler({ maxParallelJobs: 1 });
       scheduler.start();
 
       // Fill the slot
-      scheduler.triggerJob('health-check', 'test');
+      await scheduler.triggerJob('health-check', 'test');
       expect(mockSM._spawnCount).toBe(1);
 
       // Queue a job
-      scheduler.triggerJob('email-check', 'test');
+      await scheduler.triggerJob('email-check', 'test');
       expect(scheduler.getStatus().queueLength).toBe(1);
 
       // Simulate session completion — mark the running session as completed
@@ -158,23 +158,23 @@ describe('JobScheduler', () => {
       expect(scheduler.getStatus().queueLength).toBe(0);
     });
 
-    it('does not dequeue duplicates', () => {
+    it('does not dequeue duplicates', async () => {
       createScheduler({ maxParallelJobs: 1 });
       scheduler.start();
 
-      scheduler.triggerJob('health-check', 'test');
-      scheduler.triggerJob('email-check', 'test-1');
-      scheduler.triggerJob('email-check', 'test-2'); // duplicate slug
+      await scheduler.triggerJob('health-check', 'test');
+      await scheduler.triggerJob('email-check', 'test-1');
+      await scheduler.triggerJob('email-check', 'test-2'); // duplicate slug
 
       expect(scheduler.getStatus().queueLength).toBe(1);
     });
 
-    it('does not process queue when paused', () => {
+    it('does not process queue when paused', async () => {
       createScheduler({ maxParallelJobs: 1 });
       scheduler.start();
 
-      scheduler.triggerJob('health-check', 'test');
-      scheduler.triggerJob('email-check', 'test');
+      await scheduler.triggerJob('health-check', 'test');
+      await scheduler.triggerJob('email-check', 'test');
 
       // Clear the slot
       mockSM._sessions[0].status = 'completed';
@@ -187,12 +187,12 @@ describe('JobScheduler', () => {
   });
 
   describe('pause/resume', () => {
-    it('resume processes pending queue', () => {
+    it('resume processes pending queue', async () => {
       createScheduler({ maxParallelJobs: 1 });
       scheduler.start();
 
-      scheduler.triggerJob('health-check', 'test');
-      scheduler.triggerJob('email-check', 'test');
+      await scheduler.triggerJob('health-check', 'test');
+      await scheduler.triggerJob('email-check', 'test');
       scheduler.pause();
 
       // Clear the slot
@@ -223,7 +223,7 @@ describe('JobScheduler', () => {
       // Make spawnSession reject
       mockSM.spawnSession = async () => { throw new Error('tmux failed'); };
 
-      scheduler.triggerJob('health-check', 'test');
+      await scheduler.triggerJob('health-check', 'test');
 
       // Wait for the async rejection to be handled
       await new Promise(r => setTimeout(r, 50));
@@ -258,7 +258,7 @@ describe('JobScheduler', () => {
     it('emits job_triggered event', async () => {
       createScheduler();
       scheduler.start();
-      scheduler.triggerJob('health-check', 'manual');
+      await scheduler.triggerJob('health-check', 'manual');
 
       // Wait for async spawn to complete
       await new Promise(r => setTimeout(r, 50));
@@ -279,27 +279,27 @@ describe('JobScheduler', () => {
   });
 
   describe('machine scope filtering', () => {
-    it('runs all jobs when no machine identity is set', () => {
+    it('runs all jobs when no machine identity is set', async () => {
       createScheduler();
       scheduler.start();
 
       // Both enabled jobs should be schedulable
-      const result1 = scheduler.triggerJob('health-check', 'test');
+      const result1 = await scheduler.triggerJob('health-check', 'test');
       expect(result1).toBe('triggered');
     });
 
-    it('runs unscoped jobs on any machine', () => {
+    it('runs unscoped jobs on any machine', async () => {
       jobsFile = createSampleJobsFile(project.stateDir);
       createScheduler();
       scheduler.setMachineIdentity('m_abc123def456', 'justins-macbook');
       scheduler.start();
 
       // Default sample jobs have no machines field — should run
-      const result = scheduler.triggerJob('health-check', 'test');
+      const result = await scheduler.triggerJob('health-check', 'test');
       expect(result).toBe('triggered');
     });
 
-    it('runs jobs scoped to this machine by ID', () => {
+    it('runs jobs scoped to this machine by ID', async () => {
       jobsFile = createSampleJobsFile(project.stateDir, [
         {
           slug: 'scoped-job',
@@ -318,11 +318,11 @@ describe('JobScheduler', () => {
       scheduler.setMachineIdentity('m_abc123def456', 'justins-macbook');
       scheduler.start();
 
-      const result = scheduler.triggerJob('scoped-job', 'test');
+      const result = await scheduler.triggerJob('scoped-job', 'test');
       expect(result).toBe('triggered');
     });
 
-    it('runs jobs scoped to this machine by name (case-insensitive)', () => {
+    it('runs jobs scoped to this machine by name (case-insensitive)', async () => {
       jobsFile = createSampleJobsFile(project.stateDir, [
         {
           slug: 'name-scoped',
@@ -341,11 +341,11 @@ describe('JobScheduler', () => {
       scheduler.setMachineIdentity('m_abc123def456', 'justins-macbook');
       scheduler.start();
 
-      const result = scheduler.triggerJob('name-scoped', 'test');
+      const result = await scheduler.triggerJob('name-scoped', 'test');
       expect(result).toBe('triggered');
     });
 
-    it('skips jobs scoped to a different machine', () => {
+    it('skips jobs scoped to a different machine', async () => {
       jobsFile = createSampleJobsFile(project.stateDir, [
         {
           slug: 'other-machine-job',
@@ -364,7 +364,7 @@ describe('JobScheduler', () => {
       scheduler.setMachineIdentity('m_abc123def456', 'justins-macbook');
       scheduler.start();
 
-      const result = scheduler.triggerJob('other-machine-job', 'test');
+      const result = await scheduler.triggerJob('other-machine-job', 'test');
       expect(result).toBe('skipped');
       expect(mockSM._spawnCount).toBe(0);
     });
@@ -412,7 +412,7 @@ describe('JobScheduler', () => {
       expect(events[0].summary).toContain('1 skipped by machine scope');
     });
 
-    it('treats empty machines array as unscoped (runs everywhere)', () => {
+    it('treats empty machines array as unscoped (runs everywhere)', async () => {
       jobsFile = createSampleJobsFile(project.stateDir, [
         {
           slug: 'empty-scope',
@@ -431,7 +431,7 @@ describe('JobScheduler', () => {
       scheduler.setMachineIdentity('m_any_machine', 'any-name');
       scheduler.start();
 
-      const result = scheduler.triggerJob('empty-scope', 'test');
+      const result = await scheduler.triggerJob('empty-scope', 'test');
       expect(result).toBe('triggered');
     });
   });
@@ -442,7 +442,7 @@ describe('JobScheduler', () => {
       scheduler.start();
 
       // Trigger a job to create session state
-      scheduler.triggerJob('health-check', 'test');
+      await scheduler.triggerJob('health-check', 'test');
       await new Promise(r => setTimeout(r, 50));
 
       // Get the spawned session
@@ -466,7 +466,7 @@ describe('JobScheduler', () => {
       scheduler.start();
 
       // Trigger a job to create session state
-      scheduler.triggerJob('health-check', 'test');
+      await scheduler.triggerJob('health-check', 'test');
       await new Promise(r => setTimeout(r, 50));
 
       const sessions = mockSM._sessions;
@@ -487,7 +487,7 @@ describe('JobScheduler', () => {
       createScheduler();
       scheduler.start();
 
-      scheduler.triggerJob('health-check', 'test');
+      await scheduler.triggerJob('health-check', 'test');
       await new Promise(r => setTimeout(r, 50));
 
       const sessions = mockSM._sessions;

@@ -70,7 +70,7 @@ describe('JobScheduler edge cases', () => {
         makeJob('test', { execute: { type: 'prompt', value: 'Check the weather' } }),
       ]);
       scheduler.start();
-      scheduler.triggerJob('test', 'manual');
+      await scheduler.triggerJob('test', 'manual');
       await new Promise(r => setTimeout(r, 50));
 
       expect(mockSM._lastSpawnArgs?.prompt).toContain('Check the weather');
@@ -81,7 +81,7 @@ describe('JobScheduler edge cases', () => {
         makeJob('test', { execute: { type: 'skill', value: 'scan' } }),
       ]);
       scheduler.start();
-      scheduler.triggerJob('test', 'manual');
+      await scheduler.triggerJob('test', 'manual');
       await new Promise(r => setTimeout(r, 50));
 
       expect(mockSM._lastSpawnArgs?.prompt).toContain('/scan');
@@ -92,7 +92,7 @@ describe('JobScheduler edge cases', () => {
         makeJob('test', { execute: { type: 'skill', value: 'scan', args: '--deep' } }),
       ]);
       scheduler.start();
-      scheduler.triggerJob('test', 'manual');
+      await scheduler.triggerJob('test', 'manual');
       await new Promise(r => setTimeout(r, 50));
 
       expect(mockSM._lastSpawnArgs?.prompt).toContain('/scan --deep');
@@ -103,7 +103,7 @@ describe('JobScheduler edge cases', () => {
         makeJob('test', { execute: { type: 'script', value: './check.sh' } }),
       ]);
       scheduler.start();
-      scheduler.triggerJob('test', 'manual');
+      await scheduler.triggerJob('test', 'manual');
       await new Promise(r => setTimeout(r, 50));
 
       expect(mockSM._lastSpawnArgs?.prompt).toContain('Run this script: ./check.sh');
@@ -114,7 +114,7 @@ describe('JobScheduler edge cases', () => {
         makeJob('test', { model: 'haiku' }),
       ]);
       scheduler.start();
-      scheduler.triggerJob('test', 'manual');
+      await scheduler.triggerJob('test', 'manual');
       await new Promise(r => setTimeout(r, 50));
 
       expect(mockSM._lastSpawnArgs?.model).toBe('haiku');
@@ -125,7 +125,7 @@ describe('JobScheduler edge cases', () => {
         makeJob('my-job'),
       ]);
       scheduler.start();
-      scheduler.triggerJob('my-job', 'manual');
+      await scheduler.triggerJob('my-job', 'manual');
       await new Promise(r => setTimeout(r, 50));
 
       expect(mockSM._lastSpawnArgs?.jobSlug).toBe('my-job');
@@ -133,7 +133,7 @@ describe('JobScheduler edge cases', () => {
   });
 
   describe('queue priority ordering', () => {
-    it('sorts queued jobs by priority (critical first)', () => {
+    it('sorts queued jobs by priority (critical first)', async () => {
       createScheduler([
         makeJob('low-job', { priority: 'low' }),
         makeJob('critical-job', { priority: 'critical' }),
@@ -142,9 +142,9 @@ describe('JobScheduler edge cases', () => {
       scheduler.start();
 
       // Queue all three (maxParallelJobs = 0 means all get queued)
-      scheduler.triggerJob('low-job', 'test');
-      scheduler.triggerJob('critical-job', 'test');
-      scheduler.triggerJob('high-job', 'test');
+      await scheduler.triggerJob('low-job', 'test');
+      await scheduler.triggerJob('critical-job', 'test');
+      await scheduler.triggerJob('high-job', 'test');
 
       const queue = scheduler.getQueue();
       expect(queue).toHaveLength(3);
@@ -169,12 +169,12 @@ describe('JobScheduler edge cases', () => {
   });
 
   describe('quota gating', () => {
-    it('emits job_skipped event when quota fails', () => {
+    it('emits job_skipped event when quota fails', async () => {
       createScheduler([makeJob('test')]);
       scheduler.start();
       scheduler.canRunJob = () => false;
 
-      scheduler.triggerJob('test', 'test');
+      await scheduler.triggerJob('test', 'test');
 
       const events = project.state.queryEvents({ type: 'job_skipped' });
       expect(events).toHaveLength(1);
@@ -183,7 +183,7 @@ describe('JobScheduler edge cases', () => {
   });
 
   describe('queue re-add on quota failure', () => {
-    it('re-adds job to queue when quota check fails during processQueue', () => {
+    it('re-adds job to queue when quota check fails during processQueue', async () => {
       createScheduler([
         makeJob('queued-job'),
       ], { maxParallelJobs: 1 });
@@ -198,7 +198,7 @@ describe('JobScheduler edge cases', () => {
       mockSM._aliveSet.add('tmux-dummy');
 
       // Queue a job (slot is full)
-      const result = scheduler.triggerJob('queued-job', 'test');
+      const result = await scheduler.triggerJob('queued-job', 'test');
       expect(result).toBe('queued');
       expect(scheduler.getQueue()).toHaveLength(1);
 
@@ -237,11 +237,11 @@ describe('JobScheduler edge cases', () => {
 
       mockSM.spawnSession = async () => { throw new Error('boom'); };
 
-      scheduler.triggerJob('fail-job', 'test-1');
+      await scheduler.triggerJob('fail-job', 'test-1');
       await new Promise(r => setTimeout(r, 50));
       expect(project.state.getJobState('fail-job')?.consecutiveFailures).toBe(1);
 
-      scheduler.triggerJob('fail-job', 'test-2');
+      await scheduler.triggerJob('fail-job', 'test-2');
       await new Promise(r => setTimeout(r, 50));
       expect(project.state.getJobState('fail-job')?.consecutiveFailures).toBe(2);
     });
@@ -252,7 +252,7 @@ describe('JobScheduler edge cases', () => {
 
       // Fail first
       mockSM.spawnSession = async () => { throw new Error('boom'); };
-      scheduler.triggerJob('recover-job', 'test-1');
+      await scheduler.triggerJob('recover-job', 'test-1');
       await new Promise(r => setTimeout(r, 50));
       expect(project.state.getJobState('recover-job')?.consecutiveFailures).toBe(1);
 
@@ -264,7 +264,7 @@ describe('JobScheduler edge cases', () => {
         mockSM._aliveSet.add(session.tmuxSession);
         return session;
       };
-      scheduler.triggerJob('recover-job', 'test-2');
+      await scheduler.triggerJob('recover-job', 'test-2');
       await new Promise(r => setTimeout(r, 50));
       expect(project.state.getJobState('recover-job')?.consecutiveFailures).toBe(0);
     });

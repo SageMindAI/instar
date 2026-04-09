@@ -920,15 +920,30 @@ const NODE_SYMLINK = ${JSON.stringify(path.join(nodeSymlinkDir, 'node'))};
 const NODE_CANDIDATES_FILE = ${JSON.stringify(nodeCandidatesFile)};
 
 // ── Self-heal node symlink ──
-// Update the stable node symlink to point at the most durable node binary.
-// Prefers stable, non-versioned paths (e.g. /opt/homebrew/bin/node) over
-// version-specific paths (e.g. /opt/homebrew/opt/node@20/bin/node) because
-// version-specific paths disappear when that version is uninstalled.
+// Update the stable node symlink to point at a working node binary.
+// CRITICAL: Only change the symlink if it's broken (missing or won't run).
+// "More durable" path selection must NOT cross major versions because the
+// shadow-install's native modules (better-sqlite3) are compiled for a specific
+// NODE_MODULE_VERSION. Switching from v22 -> v25 (or any major bump) breaks
+// native modules and causes server crash-loops / event loop deadlocks.
 function selfHealNodeSymlink() {
   try {
     const currentNode = process.execPath;
     const symlinkDir = path.dirname(NODE_SYMLINK);
     fs.mkdirSync(symlinkDir, { recursive: true });
+
+    // If symlink exists and works, don't touch it — changing node major version
+    // breaks native modules compiled for the previous version.
+    try {
+      const target = fs.readlinkSync(NODE_SYMLINK);
+      if (fs.existsSync(target)) {
+        const { execFileSync } = require('child_process');
+        const result = execFileSync(target, ['--version'], { encoding: 'utf-8', timeout: 5000 });
+        if (result.trim()) return; // symlink works, leave it alone
+      }
+    } catch { /* broken — proceed to fix */ }
+
+    process.stderr.write('[instar-boot] Node symlink broken — attempting repair\\n');
 
     // Build candidate list
     const candidates = [currentNode];
@@ -937,24 +952,36 @@ function selfHealNodeSymlink() {
       if (p !== currentNode && fs.existsSync(p)) candidates.push(p);
     }
 
-    // Pick the most durable path — prefer stable, non-versioned paths
-    const versionPattern = /node@\\d|\\/Cellar\\/node\\/|\\.asdf\\/installs\\/|\\.nvm\\/versions\\//;
-    const stablePrefixes = ['/opt/homebrew/bin/', '/usr/local/bin/'];
+    // Check if native modules exist — if so, prefer a node with the same major version
+    const sqliteNode = path.join(${JSON.stringify(stateDir)}, 'shadow-install', 'node_modules', 'better-sqlite3', 'build', 'Release', 'better_sqlite3.node');
     let best = currentNode;
-    for (const prefix of stablePrefixes) {
-      const match = candidates.find(c => c.startsWith(prefix) && !versionPattern.test(c) && fs.existsSync(c));
-      if (match) { best = match; break; }
-    }
-    if (versionPattern.test(best)) {
-      const nonVersioned = candidates.find(c => !versionPattern.test(c) && fs.existsSync(c));
-      if (nonVersioned) best = nonVersioned;
-    }
 
-    // Check if symlink already points to the best candidate
-    try {
-      const target = fs.readlinkSync(NODE_SYMLINK);
-      if (target === best) return; // already optimal
-    } catch { /* broken or missing — will recreate */ }
+    if (fs.existsSync(sqliteNode)) {
+      // Try to find which candidate can actually load the native module
+      const { execFileSync } = require('child_process');
+      for (const candidate of candidates) {
+        try {
+          execFileSync(candidate, ['-e', "require('" + sqliteNode.replace(/'/g, "\\\\'") + "')"], {
+            encoding: 'utf-8', timeout: 10000
+          });
+          best = candidate;
+          process.stderr.write('[instar-boot] Found compatible node for native modules: ' + candidate + '\\n');
+          break;
+        } catch { /* this candidate can't load native modules */ }
+      }
+    } else {
+      // No native modules to worry about — pick most durable path
+      const versionPattern = /node@\\d|\\/Cellar\\/node\\/|\\.asdf\\/installs\\/|\\.nvm\\/versions\\//;
+      const stablePrefixes = ['/opt/homebrew/bin/', '/usr/local/bin/'];
+      for (const prefix of stablePrefixes) {
+        const match = candidates.find(c => c.startsWith(prefix) && !versionPattern.test(c) && fs.existsSync(c));
+        if (match) { best = match; break; }
+      }
+      if (versionPattern.test(best)) {
+        const nonVersioned = candidates.find(c => !versionPattern.test(c) && fs.existsSync(c));
+        if (nonVersioned) best = nonVersioned;
+      }
+    }
 
     // Update symlink
     try { fs.unlinkSync(NODE_SYMLINK); } catch { /* didn't exist */ }

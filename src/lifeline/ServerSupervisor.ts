@@ -399,28 +399,46 @@ export class ServerSupervisor extends EventEmitter {
 
     // 4. Native module mismatch — better-sqlite3 compiled for wrong Node version.
     //    This is the #1 cause of server crash-loops after a Node upgrade.
+    //    IMPORTANT: Test with the node binary the SERVER will use (.instar/bin/node),
+    //    not process.execPath (the lifeline's node), since these may differ.
     if (this.stateDir) {
       const sqliteNode = path.join(this.stateDir, 'shadow-install', 'node_modules', 'better-sqlite3', 'build', 'Release', 'better_sqlite3.node');
+      const serverNode = path.join(this.stateDir, 'bin', 'node');
+      const checkNode = (fs.existsSync(serverNode)) ? serverNode : process.execPath;
       if (fs.existsSync(sqliteNode)) {
         try {
-          // Try loading the native module with the current Node — if it fails, rebuild
-          const result = spawnSync(process.execPath, ['-e', `require('${sqliteNode.replace(/'/g, "\\'")}')`], {
+          // Try loading the native module with the SERVER's Node — if it fails, rebuild
+          const result = spawnSync(checkNode, ['-e', `require('${sqliteNode.replace(/'/g, "\\'")}')`], {
             encoding: 'utf-8',
             timeout: 10_000,
             cwd: this.projectDir,
           });
           if (result.status !== 0 && result.stderr?.includes('NODE_MODULE_VERSION')) {
-            console.log('[Supervisor] Preflight: better-sqlite3 native module version mismatch — rebuilding');
+            console.log(`[Supervisor] Preflight: better-sqlite3 native module version mismatch — rebuilding (server node: ${checkNode})`);
             const npmPath = this.findNpmPath();
             if (npmPath) {
-              const rebuildResult = spawnSync(npmPath, ['rebuild', 'better-sqlite3', '--prefix', path.join(this.stateDir, 'shadow-install')], {
+              // Use the server's node for the rebuild so the native module matches
+              const rebuildEnv: Record<string, string | undefined> = { ...process.env, npm_config_node_gyp: undefined };
+              if (checkNode !== process.execPath) {
+                rebuildEnv.npm_node_execpath = checkNode;
+              }
+              const rebuildResult = spawnSync(checkNode, [npmPath, 'rebuild', 'better-sqlite3', '--prefix', path.join(this.stateDir, 'shadow-install')], {
                 encoding: 'utf-8',
                 timeout: 60_000,
                 cwd: this.projectDir,
+                env: rebuildEnv,
               });
               if (rebuildResult.status === 0) {
-                healed.push('better-sqlite3 rebuilt for current Node');
-                console.log('[Supervisor] Preflight: better-sqlite3 rebuilt successfully');
+                // Verify the rebuild actually produced a working module
+                const verifyResult = spawnSync(checkNode, ['-e', `require('${sqliteNode.replace(/'/g, "\\'")}')`], {
+                  encoding: 'utf-8', timeout: 10_000, cwd: this.projectDir,
+                });
+                if (verifyResult.status === 0) {
+                  healed.push('better-sqlite3 rebuilt for current Node');
+                  console.log('[Supervisor] Preflight: better-sqlite3 rebuilt and verified successfully');
+                } else {
+                  console.error(`[Supervisor] Preflight: better-sqlite3 rebuild succeeded but module still fails to load: ${(verifyResult.stderr || '').slice(-200)}`);
+                }
               } else {
                 console.error(`[Supervisor] Preflight: better-sqlite3 rebuild failed: ${(rebuildResult.stderr || '').slice(-200)}`);
               }
@@ -555,8 +573,16 @@ export class ServerSupervisor extends EventEmitter {
       const crashLogPath = path.join(crashLogDir, 'server-stderr.log');
 
       // --no-telegram: lifeline owns the Telegram connection, server should not poll
+      // Use the agent's node symlink (.instar/bin/node) instead of bare `node` so the
+      // server runs the same Node version the native modules were compiled against.
+      // Bare `node` resolves to whatever is on PATH in the tmux session, which may be
+      // a different major version (e.g. v25 via Homebrew when shadow-install was built
+      // with v22), causing better-sqlite3 ABI mismatches and event loop deadlocks.
+      const nodeSymlink = this.stateDir ? path.join(this.stateDir, 'bin', 'node') : null;
+      const nodeExe = (nodeSymlink && fs.existsSync(nodeSymlink)) ? nodeSymlink : 'node';
+      const quotedNode = nodeExe.replace(/'/g, "'\\''");
       const quotedCli = cliPath.replace(/'/g, "'\\''");
-      const nodeCmd = `'node' '${quotedCli}' 'server' 'start' '--foreground' '--no-telegram' 2> >(tee '${crashLogPath}' >&2)`;
+      const nodeCmd = `'${quotedNode}' '${quotedCli}' 'server' 'start' '--foreground' '--no-telegram' 2> >(tee '${crashLogPath}' >&2)`;
 
       execFileSync(this.tmuxPath, [
         'new-session', '-d',
