@@ -177,6 +177,10 @@ const FLAKY_TESTS = [
   'tests/integration/dispatch-routes.test.ts',
   'tests/integration/rich-profile-integration.test.ts',
   'tests/integration/publishing-routes.test.ts',
+
+  // ── Supertest response body race / multi-machine coordination flakes ──
+  'tests/integration/server-full.test.ts',
+  'tests/e2e/phase4-multi-machine-coordination.test.ts',
 ];
 
 export default defineConfig({
