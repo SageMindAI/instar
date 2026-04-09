@@ -955,6 +955,15 @@
       flex: 1;
       overflow-y: auto;
       padding: 16px;
+      min-height: 0;
+    }
+
+    /* When editing, let the editor fill the content body (no padding, flex column) */
+    .file-content-body:has(.file-editor) {
+      display: flex;
+      flex-direction: column;
+      padding: 0;
+      overflow: hidden;
     }
 
     .file-content-body .markdown-content {
