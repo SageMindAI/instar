@@ -2788,7 +2788,7 @@ export function createRoutes(ctx: RouteContext): Router {
     });
   });
 
-  router.post('/jobs/:slug/trigger', (req, res) => {
+  router.post('/jobs/:slug/trigger', async (req, res) => {
     if (!JOB_SLUG_RE.test(req.params.slug)) {
       res.status(400).json({ error: 'Invalid job slug' });
       return;
@@ -2802,7 +2802,7 @@ export function createRoutes(ctx: RouteContext): Router {
     const reason = typeof rawReason === 'string' ? rawReason.slice(0, 500) : 'manual';
 
     try {
-      const result = ctx.scheduler.triggerJob(req.params.slug, reason);
+      const result = await ctx.scheduler.triggerJob(req.params.slug, reason);
       res.json({ slug: req.params.slug, result });
     } catch (err) {
       res.status(404).json({ error: err instanceof Error ? err.message : String(err) });
@@ -2818,7 +2818,7 @@ export function createRoutes(ctx: RouteContext): Router {
   let manualTriggerConcurrent = 0;
   const MANUAL_TRIGGER_MAX_CONCURRENT = 5;
 
-  router.post('/jobs/:slug/run', (req, res) => {
+  router.post('/jobs/:slug/run', async (req, res) => {
     const { slug } = req.params;
 
     if (!/^[a-z0-9-]+$/.test(slug)) {
@@ -2864,7 +2864,7 @@ export function createRoutes(ctx: RouteContext): Router {
       manualTriggerConcurrent++;
       manualTriggerLastRun.set(slug, Date.now());
 
-      const result = ctx.scheduler.triggerJob(slug, 'dashboard-manual');
+      const result = await ctx.scheduler.triggerJob(slug, 'dashboard-manual');
       const runId = `manual-${slug}-${Date.now().toString(36)}`;
 
       // Decrement concurrent counter after a reasonable time
