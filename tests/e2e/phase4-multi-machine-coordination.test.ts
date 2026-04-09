@@ -283,7 +283,7 @@ describe('two-machine job coordination (4A + 4C)', () => {
 
   it('machine A claims job → machine B sees claim and skips', async () => {
     // Machine A triggers a job and broadcasts a claim
-    const resultA = machineA.scheduler!.triggerJob('daily-sync', 'manual');
+    const resultA = await machineA.scheduler!.triggerJob('daily-sync', 'manual');
     expect(resultA).toBe('triggered');
     expect(machineA.sessionManager!.spawnSession).toHaveBeenCalled();
 
@@ -296,7 +296,7 @@ describe('two-machine job coordination (4A + 4C)', () => {
     // Machine B tries to trigger the same job — should be skipped
     // Clear spy to isolate from any background cron triggers that may have fired
     vi.mocked(machineB.sessionManager!.spawnSession).mockClear();
-    const resultB = machineB.scheduler!.triggerJob('daily-sync', 'manual');
+    const resultB = await machineB.scheduler!.triggerJob('daily-sync', 'manual');
     expect(resultB).toBe('skipped');
     expect(machineB.sessionManager!.spawnSession).not.toHaveBeenCalled();
 
@@ -308,7 +308,7 @@ describe('two-machine job coordination (4A + 4C)', () => {
 
   it('machine A completes job → machine B can now claim it', async () => {
     // A claims and completes
-    machineA.scheduler!.triggerJob('daily-sync', 'manual');
+    await machineA.scheduler!.triggerJob('daily-sync', 'manual');
     await new Promise(r => setTimeout(r, 50));
     relayMessages(machineA.bus, machineB.bus);
 
@@ -320,21 +320,21 @@ describe('two-machine job coordination (4A + 4C)', () => {
     relayMessages(machineA.bus, machineB.bus);
 
     // B should now be able to trigger the job
-    const resultB = machineB.scheduler!.triggerJob('daily-sync', 'manual');
+    const resultB = await machineB.scheduler!.triggerJob('daily-sync', 'manual');
     expect(resultB).toBe('triggered');
     expect(machineB.sessionManager!.spawnSession).toHaveBeenCalled();
   });
 
   it('two different jobs can be claimed by different machines simultaneously', async () => {
     // A claims daily-sync
-    machineA.scheduler!.triggerJob('daily-sync', 'manual');
+    await machineA.scheduler!.triggerJob('daily-sync', 'manual');
     await new Promise(r => setTimeout(r, 50));
     relayMessages(machineA.bus, machineB.bus);
 
     // B claims health-check (different job)
     // Clear spy to isolate from any background cron triggers that may have fired
     vi.mocked(machineB.sessionManager!.spawnSession).mockClear();
-    const resultB = machineB.scheduler!.triggerJob('health-check', 'manual');
+    const resultB = await machineB.scheduler!.triggerJob('health-check', 'manual');
     expect(resultB).toBe('triggered');
     expect(machineB.sessionManager!.spawnSession).toHaveBeenCalledTimes(1);
 
@@ -342,14 +342,14 @@ describe('two-machine job coordination (4A + 4C)', () => {
     relayMessages(machineB.bus, machineA.bus);
 
     // A tries health-check — should be skipped (B claimed it)
-    const resultA = machineA.scheduler!.triggerJob('health-check', 'manual');
+    const resultA = await machineA.scheduler!.triggerJob('health-check', 'manual');
     expect(resultA).toBe('skipped');
   });
 
   it('bidirectional claim relay preserves job isolation', async () => {
     // Both machines trigger different jobs
-    machineA.scheduler!.triggerJob('daily-sync', 'manual');
-    machineB.scheduler!.triggerJob('health-check', 'manual');
+    await machineA.scheduler!.triggerJob('daily-sync', 'manual');
+    await machineB.scheduler!.triggerJob('health-check', 'manual');
     await new Promise(r => setTimeout(r, 50));
 
     // Relay in both directions
@@ -373,7 +373,7 @@ describe('two-machine job coordination (4A + 4C)', () => {
 
   it('expired remote claim allows local machine to claim', async () => {
     // A claims the job
-    machineA.scheduler!.triggerJob('daily-sync', 'manual');
+    await machineA.scheduler!.triggerJob('daily-sync', 'manual');
     await new Promise(r => setTimeout(r, 50));
     relayMessages(machineA.bus, machineB.bus);
 
@@ -500,12 +500,12 @@ describe('machine-prefixed state correlation (4D)', () => {
     machineB = createTestMachine(MACHINE_B, { jobs: STANDARD_JOBS });
 
     // A claims the job
-    machineA.scheduler!.triggerJob('daily-sync', 'manual');
+    await machineA.scheduler!.triggerJob('daily-sync', 'manual');
     await new Promise(r => setTimeout(r, 50));
     relayMessages(machineA.bus, machineB.bus);
 
     // B skips due to remote claim
-    machineB.scheduler!.triggerJob('daily-sync', 'manual');
+    await machineB.scheduler!.triggerJob('daily-sync', 'manual');
 
     // Check B's activity events contain machineId
     const eventsB = readActivityEvents(machineB.dir);
@@ -813,16 +813,16 @@ describe('full multi-machine lifecycle (4A + 4C + 4D)', () => {
       timestamp: new Date().toISOString(),
     });
 
-    machineA.scheduler!.triggerJob('daily-sync', 'manual');
+    await machineA.scheduler!.triggerJob('daily-sync', 'manual');
     await new Promise(r => setTimeout(r, 50));
     relayMessages(machineA.bus, machineB.bus);
 
     // B should skip daily-sync (A claimed it)
-    const resultB = machineB.scheduler!.triggerJob('daily-sync', 'manual');
+    const resultB = await machineB.scheduler!.triggerJob('daily-sync', 'manual');
     expect(resultB).toBe('skipped');
 
     // But B can still run health-check
-    const healthResult = machineB.scheduler!.triggerJob('health-check', 'manual');
+    const healthResult = await machineB.scheduler!.triggerJob('health-check', 'manual');
     expect(healthResult).toBe('triggered');
 
     // ── Phase 3: State correlation ──
@@ -863,7 +863,7 @@ describe('full multi-machine lifecycle (4A + 4C + 4D)', () => {
     const user1 = createTestUser('user_x', 'User X', 'telegram', 'topic_x');
     machineA.userManager.upsertUser(user1);
     await machineA.userPropagator.propagateUser(user1);
-    machineA.scheduler!.triggerJob('daily-sync', 'manual');
+    await machineA.scheduler!.triggerJob('daily-sync', 'manual');
     machineA.state.appendEvent({
       type: 'custom_event',
       summary: 'Machine A custom event',
@@ -874,7 +874,7 @@ describe('full multi-machine lifecycle (4A + 4C + 4D)', () => {
     const user2 = createTestUser('user_y', 'User Y', 'email', 'y@example.com');
     machineB.userManager.upsertUser(user2);
     await machineB.userPropagator.propagateUser(user2);
-    machineB.scheduler!.triggerJob('health-check', 'manual');
+    await machineB.scheduler!.triggerJob('health-check', 'manual');
     machineB.state.appendEvent({
       type: 'custom_event',
       summary: 'Machine B custom event',
@@ -1071,7 +1071,7 @@ describe('three-machine coordination', () => {
 
   it('first-claimer wins across three machines', async () => {
     // A claims daily-sync first
-    machineA.scheduler!.triggerJob('daily-sync', 'manual');
+    await machineA.scheduler!.triggerJob('daily-sync', 'manual');
     await new Promise(r => setTimeout(r, 50));
 
     // Relay A's claim to B and C
@@ -1079,8 +1079,8 @@ describe('three-machine coordination', () => {
     relayMessages(machineA.bus, machineC.bus);
 
     // B and C should both skip
-    expect(machineB.scheduler!.triggerJob('daily-sync', 'manual')).toBe('skipped');
-    expect(machineC.scheduler!.triggerJob('daily-sync', 'manual')).toBe('skipped');
+    expect(await machineB.scheduler!.triggerJob('daily-sync', 'manual')).toBe('skipped');
+    expect(await machineC.scheduler!.triggerJob('daily-sync', 'manual')).toBe('skipped');
   });
 
   it('user propagated from A reaches both B and C', async () => {
@@ -1119,19 +1119,19 @@ describe('three-machine coordination', () => {
     machineC = createTestMachine('m_server', { jobs: threeJobs });
 
     // A claims daily-sync
-    machineA.scheduler!.triggerJob('daily-sync', 'manual');
+    await machineA.scheduler!.triggerJob('daily-sync', 'manual');
     await new Promise(r => setTimeout(r, 50));
     relayMessages(machineA.bus, machineB.bus);
     relayMessages(machineA.bus, machineC.bus);
 
     // B claims health-check
-    machineB.scheduler!.triggerJob('health-check', 'manual');
+    await machineB.scheduler!.triggerJob('health-check', 'manual');
     await new Promise(r => setTimeout(r, 50));
     relayMessages(machineB.bus, machineA.bus);
     relayMessages(machineB.bus, machineC.bus);
 
     // C claims report-gen
-    machineC.scheduler!.triggerJob('report-gen', 'manual');
+    await machineC.scheduler!.triggerJob('report-gen', 'manual');
     await new Promise(r => setTimeout(r, 50));
     relayMessages(machineC.bus, machineA.bus);
     relayMessages(machineC.bus, machineB.bus);

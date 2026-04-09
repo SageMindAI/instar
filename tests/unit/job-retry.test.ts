@@ -52,7 +52,7 @@ describe('JobScheduler retry on skip', () => {
     return scheduler;
   }
 
-  it('schedules a retry after gate failure', () => {
+  it('schedules a retry after gate failure', async () => {
     const jobs: JobDefinition[] = [{
       slug: 'gated-job',
       name: 'Gated Job',
@@ -68,8 +68,11 @@ describe('JobScheduler retry on skip', () => {
     const s = makeScheduler(jobs);
     s.start();
 
+    // Mock runGateAsync to avoid real child process + fake timer deadlock
+    (s as any).runGateAsync = vi.fn().mockResolvedValue(false);
+
     // Trigger the job — gate fails, should be skipped
-    const result = s.triggerJob('gated-job', 'test');
+    const result = await s.triggerJob('gated-job', 'test');
     expect(result).toBe('skipped');
 
     // No session spawned yet
@@ -77,13 +80,13 @@ describe('JobScheduler retry on skip', () => {
 
     // Advance past the first retry delay (1min)
     // The retry should re-attempt (and fail the gate again)
-    vi.advanceTimersByTime(61_000);
+    await vi.advanceTimersByTimeAsync(61_000);
 
     // Still no session — gate still fails — but a second retry is scheduled
     expect(mockSM._spawnCount).toBe(0);
   });
 
-  it('succeeds on retry after transient gate failure', () => {
+  it('succeeds on retry after transient gate failure', async () => {
     let gateCallCount = 0;
     const jobs: JobDefinition[] = [{
       slug: 'retry-success',
@@ -102,23 +105,27 @@ describe('JobScheduler retry on skip', () => {
     const s = makeScheduler(jobs);
     s.start();
 
-    // First trigger — will skip (quota blocked)
+    // Mock runGateAsync to avoid real child process + fake timer deadlock
+    // First call: gate passes (but quota blocks). Second call (retry): gate passes.
+    (s as any).runGateAsync = vi.fn().mockResolvedValue(true);
+
+    // First trigger — will skip (quota blocked, gate never reached due to ordering)
     s.canRunJob = () => false;
-    const result = s.triggerJob('retry-success', 'scheduled');
+    const result = await s.triggerJob('retry-success', 'scheduled');
     expect(result).toBe('skipped');
     expect(mockSM._spawnCount).toBe(0);
 
     // Fix the quota issue
     s.canRunJob = () => true;
 
-    // Advance past first retry delay (1min)
-    vi.advanceTimersByTime(61_000);
+    // Advance past first retry delay (1min) — use async to flush promises from async triggerJob
+    await vi.advanceTimersByTimeAsync(61_000);
 
-    // Now the retry should succeed (quota is available, no gate on this path)
+    // Now the retry should succeed (quota is available, gate passes)
     expect(mockSM._spawnCount).toBe(1);
   });
 
-  it('stops retrying after MAX_RETRIES', () => {
+  it('stops retrying after MAX_RETRIES', async () => {
     const jobs: JobDefinition[] = [{
       slug: 'max-retry',
       name: 'Max Retry',
@@ -137,12 +144,12 @@ describe('JobScheduler retry on skip', () => {
     s.canRunJob = () => false;
 
     // Trigger initial + 6 retries (1m, 5m, 15m, 30m, 1h, 2h)
-    s.triggerJob('max-retry', 'scheduled');
+    await s.triggerJob('max-retry', 'scheduled');
 
     // Advance through all retry windows with generous margins
     const delays = [61_000, 301_000, 901_000, 1_801_000, 3_601_000, 7_201_000];
     for (const delay of delays) {
-      vi.advanceTimersByTime(delay);
+      await vi.advanceTimersByTimeAsync(delay);
     }
 
     // Should never have spawned
@@ -150,11 +157,11 @@ describe('JobScheduler retry on skip', () => {
 
     // No more retries scheduled — the job gave up
     // Verify by advancing another 3 hours — nothing happens
-    vi.advanceTimersByTime(10_800_000);
+    await vi.advanceTimersByTimeAsync(10_800_000);
     expect(mockSM._spawnCount).toBe(0);
   });
 
-  it('clears retry state on stop', () => {
+  it('clears retry state on stop', async () => {
     const jobs: JobDefinition[] = [{
       slug: 'cleanup-test',
       name: 'Cleanup Test',
@@ -170,13 +177,13 @@ describe('JobScheduler retry on skip', () => {
     s.start();
 
     s.canRunJob = () => false;
-    s.triggerJob('cleanup-test', 'scheduled');
+    await s.triggerJob('cleanup-test', 'scheduled');
 
     // Stop should clear timers without errors
     s.stop();
 
     // Advance time — no retry should fire
-    vi.advanceTimersByTime(60_000);
+    await vi.advanceTimersByTimeAsync(60_000);
     expect(mockSM._spawnCount).toBe(0);
   });
 });
