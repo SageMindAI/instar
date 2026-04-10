@@ -700,7 +700,10 @@ describe('Threadline Integration Tests', () => {
       expect(result2.spawned).toBe(true);
     });
 
-    it('no threadId means message bypasses ThreadlineRouter', async () => {
+    it('no threadId (first-contact): mints a threadId and handles the message', async () => {
+      // PR-2: First-contact messages without a threadId used to be dropped
+      // (handled: false). The router now mints a fresh UUID and routes normally
+      // so the recipient actually sees the message.
       const threadResumeMap = new ThreadResumeMap(tmpDir, '/test/project');
       const spawnManager = makeMockSpawnManager(true);
       const messageRouter = makeMockMessageRouter();
@@ -714,8 +717,10 @@ describe('Threadline Integration Tests', () => {
       const envelope = makeEnvelope({ fromAgent: 'remote-agent' }); // no threadId
       const result = await router.handleInboundMessage(envelope);
 
-      expect(result.handled).toBe(false);
-      expect(spawnManager.evaluate).not.toHaveBeenCalled();
+      expect(result.handled).toBe(true);
+      expect(result.threadId).toBeDefined();
+      expect(result.threadId).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i);
+      expect(envelope.message.threadId).toBe(result.threadId);
     });
 
     it('self-sent message (from.agent === localAgent) is not handled', async () => {
