@@ -464,8 +464,6 @@ export class CoherenceGate {
         // Row 10, 12, 14: QUEUE for external
         if (channelConfig.queueOnFailure) {
           this.logAudit(sessionId, context, 'queued', auditViolations, `${llmVerdict}: queued`);
-          // For now, queue-and-hold is implemented by returning pass:false
-          // In production, this would integrate with a message queue
           return {
             pass: false,
             feedback: '[unreviewed] Review system temporarily unavailable. Message held for review.',
@@ -474,8 +472,20 @@ export class CoherenceGate {
             _outcome: 'queue',
           };
         }
+        // Fail-closed for external channels even without queueOnFailure,
+        // unless explicitly configured as failOpen
+        if (channelConfig.failOpen === false || channelConfig.failOpen === undefined) {
+          this.logAudit(sessionId, context, 'block-failclosed', auditViolations, `${llmVerdict}: fail-closed (external)`);
+          return {
+            pass: false,
+            feedback: '[unreviewed] Review system unavailable. External message blocked for safety.',
+            issueCategories: ['INFRASTRUCTURE'],
+            _auditViolations: auditViolations,
+            _outcome: 'block-failclosed',
+          };
+        }
       }
-      // Row 11, 13, 15: fail-open for internal
+      // Row 11, 13, 15: fail-open for internal (or explicitly failOpen external)
       this.logAudit(sessionId, context, 'pass-failopen', auditViolations, `${llmVerdict}: fail-open`);
       return {
         pass: true,
