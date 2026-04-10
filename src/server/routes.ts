@@ -2991,6 +2991,73 @@ export function createRoutes(ctx: RouteContext): Router {
     res.json({ slug, enabled: body.enabled, message: `Job ${body.enabled ? 'enabled' : 'disabled'}` });
   });
 
+  // ── Reset Job State ───────────────────────────────────────────
+  //
+  // Clears stale pending/failure state for a job. Useful when a session dies
+  // without reporting back, leaving lastResult stuck on 'pending' forever.
+
+  router.post('/jobs/:slug/reset-state', (req, res) => {
+    const { slug } = req.params;
+
+    if (!/^[a-z0-9-]+$/.test(slug)) {
+      res.status(400).json({ error: 'Invalid job slug' });
+      return;
+    }
+    if (!ctx.scheduler) {
+      res.status(503).json({ error: 'Scheduler not running' });
+      return;
+    }
+
+    const job = ctx.scheduler.getJobs().find(j => j.slug === slug);
+    if (!job) {
+      res.status(404).json({ error: `Job not found: ${slug}` });
+      return;
+    }
+
+    const existing = ctx.state.getJobState(slug);
+    const previousResult = existing?.lastResult ?? 'none';
+
+    const resetState: import('../core/types.js').JobState = {
+      slug,
+      lastRun: existing?.lastRun,
+      lastResult: 'failure',
+      lastError: `Manually reset from '${previousResult}' state`,
+      lastHandoff: existing?.lastHandoff,
+      nextScheduled: existing?.nextScheduled,
+      consecutiveFailures: 0,
+    };
+    ctx.state.saveJobState(resetState);
+
+    ctx.state.appendEvent({
+      type: 'job_state_reset',
+      summary: `Job "${slug}" state manually reset from '${previousResult}'`,
+      timestamp: new Date().toISOString(),
+      metadata: { slug, previousResult },
+    });
+
+    // Security log
+    try {
+      const securityEntry = JSON.stringify({
+        timestamp: new Date().toISOString(),
+        action: 'job-reset-state',
+        slug,
+        previousResult,
+        source: req.body?.source ?? 'api',
+        ip: req.ip,
+      });
+      fs.appendFileSync(path.join(ctx.config.stateDir, 'security.jsonl'), securityEntry + '\n');
+    } catch {
+      // Security logging failure is non-fatal
+    }
+
+    res.json({
+      slug,
+      previousResult,
+      newResult: 'failure',
+      message: `Job state reset from '${previousResult}' to 'failure'. Job can now be re-triggered.`,
+    });
+  });
+
   // ── Job Events (SSE) ──────────────────────────────────────────
   //
   // Server-Sent Events stream for real-time job state changes.
