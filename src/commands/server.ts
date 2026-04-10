@@ -8,7 +8,7 @@
  *   topic message → find/spawn session → inject message → session replies via [telegram:N]
  */
 
-import { execFileSync, execSync } from 'node:child_process';
+import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -1426,6 +1426,36 @@ async function ensureAgentUpdatesTopic(
 }
 
 /**
+ * Find npm's CLI entry point (npm-cli.js) so we can run npm via
+ * `execFileSync(process.execPath, [npmCli, ...args])` — no shell required.
+ * This avoids "/bin/sh ENOENT" failures in minimal/containerized environments.
+ */
+function findNpmCli(): string {
+  // npm ships alongside node — look for it relative to process.execPath
+  const nodeDir = path.dirname(process.execPath);
+
+  // Standard layout: node is in bin/, npm-cli.js is in lib/node_modules/npm/bin/npm-cli.js
+  const libNpmCli = path.resolve(nodeDir, '..', 'lib', 'node_modules', 'npm', 'bin', 'npm-cli.js');
+  if (fs.existsSync(libNpmCli)) return libNpmCli;
+
+  // Homebrew on macOS: node in /opt/homebrew/bin, npm-cli in /opt/homebrew/lib/node_modules/npm/bin/npm-cli.js
+  // (same layout, but verify explicitly for clarity)
+  for (const candidate of [
+    '/opt/homebrew/lib/node_modules/npm/bin/npm-cli.js',
+    '/usr/local/lib/node_modules/npm/bin/npm-cli.js',
+    '/usr/lib/node_modules/npm/bin/npm-cli.js',
+  ]) {
+    if (fs.existsSync(candidate)) return candidate;
+  }
+
+  // Last resort: use the npm shell wrapper (requires shell, but at least we tried)
+  const npmBin = path.join(nodeDir, 'npm');
+  if (fs.existsSync(npmBin)) return npmBin;
+
+  throw new Error('Cannot find npm CLI — native module rebuild unavailable');
+}
+
+/**
  * Pre-flight check: ensure better-sqlite3 native bindings are compiled for the current Node.js version.
  *
  * Both TopicMemory and SemanticMemory use better-sqlite3. When Telegram is not configured,
@@ -1475,18 +1505,21 @@ async function ensureSqliteBindings(): Promise<boolean> {
       } else {
         // Fallback: npm rebuild in the directory containing better-sqlite3.
         // Shadow installs have their own node_modules — try that first, then global.
+        // IMPORTANT: Use execFileSync (no shell) instead of execSync to avoid
+        // "/bin/sh ENOENT" failures in minimal/containerized environments.
+        const npmCli = findNpmCli();
         const instarDir = new URL('../../..', import.meta.url).pathname;
         const shadowBs3 = path.join(instarDir, 'node_modules', 'better-sqlite3');
         if (fs.existsSync(shadowBs3)) {
-          execSync('npm rebuild better-sqlite3', {
+          execFileSync(process.execPath, [npmCli, 'rebuild', 'better-sqlite3'], {
             cwd: instarDir,
             encoding: 'utf-8',
             timeout: 60000,
             stdio: 'pipe',
           });
         } else {
-          const globalInstarDir = execSync('npm root -g', { encoding: 'utf-8', timeout: 10000 }).trim() + '/instar';
-          execSync('npm rebuild better-sqlite3', {
+          const globalInstarDir = execFileSync(process.execPath, [npmCli, 'root', '-g'], { encoding: 'utf-8', timeout: 10000 }).toString().trim() + '/instar';
+          execFileSync(process.execPath, [npmCli, 'rebuild', 'better-sqlite3'], {
             cwd: globalInstarDir,
             encoding: 'utf-8',
             timeout: 60000,
@@ -2581,8 +2614,9 @@ export async function startServer(options: StartOptions): Promise<void> {
           if (fs.existsSync(fixScript)) {
             execFileSync(process.execPath, [fixScript], { encoding: 'utf-8', timeout: 60000, stdio: 'pipe' });
           } else {
-            const globalInstarDir = execSync('npm root -g', { encoding: 'utf-8', timeout: 10000 }).trim() + '/instar';
-            execSync('npm rebuild better-sqlite3', {
+            const npmCli = findNpmCli();
+            const globalInstarDir = execFileSync(process.execPath, [npmCli, 'root', '-g'], { encoding: 'utf-8', timeout: 10000 }).toString().trim() + '/instar';
+            execFileSync(process.execPath, [npmCli, 'rebuild', 'better-sqlite3'], {
               cwd: globalInstarDir,
               encoding: 'utf-8',
               timeout: 60000,
