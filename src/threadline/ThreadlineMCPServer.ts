@@ -422,10 +422,11 @@ export class ThreadlineMCPServer {
           }
 
           const response: Record<string, unknown> = {
-            // `delivered` was previously a lie — we did not wait for the
-            // recipient to actually handle the message. We now report the
-            // true outcome from the recipient (or "accepted" if unknown).
-            delivered: Boolean(result.deliveryOutcome && !result.deliveryOutcome.startsWith('error')),
+            // `delivered` reflects whether the recipient actually accepted
+            // the message. It's true unless the recipient reported an
+            // error outcome. When no outcome info is available we default
+            // to true (success path) — result.success is already checked above.
+            delivered: !(result.deliveryOutcome?.startsWith('error')),
             outcome: result.deliveryOutcome ?? 'accepted',
             deliveryPath: result.deliveryPath,
             threadId: result.threadId,

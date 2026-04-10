@@ -5052,6 +5052,8 @@ export async function startServer(options: StartOptions): Promise<void> {
     const threadlineRouter = new ThreadlineRouter(
       messageRouter, spawnManager, threadResumeMap, messageStore,
       { localAgent: config.projectName, localMachine: os.hostname() },
+      null, // autonomyGate
+      messageDelivery, // PR-4: live-session injection path
     );
 
     // Listener Session Manager — warm session for fast relay responses (Phase 2)

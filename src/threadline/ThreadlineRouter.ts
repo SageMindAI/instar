@@ -18,6 +18,7 @@ import crypto from 'node:crypto';
 import type { MessageRouter } from '../messaging/MessageRouter.js';
 import type { SpawnRequestManager, SpawnResult } from '../messaging/SpawnRequestManager.js';
 import type { MessageStore } from '../messaging/MessageStore.js';
+import type { IMessageDelivery } from '../messaging/types.js';
 import type { MessageEnvelope, AgentMessage } from '../messaging/types.js';
 import type { ThreadResumeMap, ThreadResumeEntry, ThreadState } from './ThreadResumeMap.js';
 import type { AutonomyGate } from './AutonomyGate.js';
@@ -65,6 +66,10 @@ export interface ThreadlineHandleResult {
   spawned?: boolean;
   /** Whether an existing session was resumed */
   resumed?: boolean;
+  /** Whether the message was injected directly into a live session
+   *  (PR-4: avoids the overhead of spawning/resuming when a session is
+   *  already running for this thread). */
+  injected?: boolean;
   /** The tmux session name handling this thread */
   sessionName?: string;
   /** Error message if handling failed */
@@ -104,6 +109,10 @@ export class ThreadlineRouter {
   private readonly messageStore: MessageStore;
   private readonly config: ThreadlineRouterConfig;
   private readonly autonomyGate: AutonomyGate | null;
+  /** Optional live-session injection delivery (PR-4). When set, the router
+   *  will try to inject inbound messages directly into an already-running
+   *  session for the thread before falling back to spawn/resume. */
+  private readonly messageDelivery: IMessageDelivery | null;
 
   /** Track in-flight spawn requests to prevent concurrent spawns for the same thread */
   private readonly pendingSpawns = new Set<string>();
@@ -115,6 +124,7 @@ export class ThreadlineRouter {
     messageStore: MessageStore,
     config: Partial<ThreadlineRouterConfig> & Pick<ThreadlineRouterConfig, 'localAgent' | 'localMachine'>,
     autonomyGate?: AutonomyGate | null,
+    messageDelivery?: IMessageDelivery | null,
   ) {
     this.messageRouter = messageRouter;
     this.spawnManager = spawnManager;
@@ -125,6 +135,7 @@ export class ThreadlineRouter {
       ...config,
     };
     this.autonomyGate = autonomyGate ?? null;
+    this.messageDelivery = messageDelivery ?? null;
   }
 
   /**
@@ -198,6 +209,16 @@ export class ThreadlineRouter {
 
       // Check for existing resume entry
       const existingEntry = this.threadResumeMap.get(threadId);
+
+      // PR-4: If we have a live-session delivery path AND the thread has a
+      // resume entry pointing at a sessionName that is currently alive, try
+      // to inject the message directly into the running session instead of
+      // spawning a fresh Claude process. Fall through to resume/spawn on
+      // failure.
+      if (existingEntry && this.messageDelivery) {
+        const injected = await this.tryInjectIntoLiveSession(threadId, existingEntry, envelope);
+        if (injected) return injected;
+      }
 
       if (existingEntry) {
         return await this.resumeThread(threadId, existingEntry, envelope, relayContext);
@@ -404,6 +425,50 @@ export class ThreadlineRouter {
       spawned: true,
       sessionName: newEntry.sessionName,
     };
+  }
+
+  // ── Private: Inject into live session (PR-4) ────────────────
+
+  /**
+   * Attempt to deliver an inbound message directly into an already-running
+   * session for this thread, avoiding the spawn/resume path entirely.
+   * Returns a successful ThreadlineHandleResult on success, or null to
+   * signal the caller should fall back to resume/spawn.
+   */
+  private async tryInjectIntoLiveSession(
+    threadId: string,
+    entry: ThreadResumeEntry,
+    envelope: MessageEnvelope,
+  ): Promise<ThreadlineHandleResult | null> {
+    if (!this.messageDelivery) return null;
+    if (!entry.sessionName) return null;
+
+    try {
+      const result = await this.messageDelivery.deliverToSession(entry.sessionName, envelope);
+      if (!result.success) {
+        console.log(`[ThreadlineRouter] Live-session injection failed for thread ${threadId} (${entry.sessionName}): ${result.failureReason}. Falling back to resume/spawn.`);
+        return null;
+      }
+
+      // Injection succeeded — update the resume map entry
+      this.threadResumeMap.save(threadId, {
+        ...entry,
+        state: 'active',
+        lastAccessedAt: new Date().toISOString(),
+        messageCount: entry.messageCount + 1,
+      });
+
+      console.log(`[ThreadlineRouter] Injected message into live session ${entry.sessionName} for thread ${threadId}`);
+      return {
+        handled: true,
+        threadId,
+        injected: true,
+        sessionName: entry.sessionName,
+      };
+    } catch (err) {
+      console.warn(`[ThreadlineRouter] Live-session injection threw for thread ${threadId}:`, err);
+      return null;
+    }
   }
 
   // ── Private: Build thread history context ───────────────────

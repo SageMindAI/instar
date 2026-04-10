@@ -229,6 +229,103 @@ describe('ThreadlineRouter', () => {
     cleanupFakeJsonl();
   });
 
+  // ── Live-session injection (PR-4) ────────────────────────────
+
+  describe('live-session injection', () => {
+    it('injects into live session when messageDelivery is provided and succeeds', async () => {
+      const threadId = crypto.randomUUID();
+      threadResumeMap.save(threadId, makeEntry({ uuid: existingUuid, sessionName: 'live-sess' }));
+
+      const mockDelivery = {
+        deliverToSession: vi.fn().mockResolvedValue({ success: true, phase: 'delivered', shouldRetry: false }),
+        checkInjectionSafety: vi.fn(),
+        formatInline: vi.fn(),
+        formatPointer: vi.fn(),
+      };
+
+      const injectingRouter = new ThreadlineRouter(
+        mockRouter as any,
+        mockSpawnManager as any,
+        threadResumeMap,
+        mockStore as any,
+        { localAgent: 'local-agent', localMachine: 'local-machine' },
+        null,
+        mockDelivery as any,
+      );
+
+      const envelope = makeEnvelope({ threadId });
+      const result = await injectingRouter.handleInboundMessage(envelope);
+
+      expect(result.handled).toBe(true);
+      expect(result.injected).toBe(true);
+      expect(result.resumed).toBeUndefined();
+      expect(result.spawned).toBeUndefined();
+      expect(mockDelivery.deliverToSession).toHaveBeenCalledWith('live-sess', envelope);
+      expect(mockSpawnManager.evaluate).not.toHaveBeenCalled();
+    });
+
+    it('falls back to resume when injection fails', async () => {
+      const threadId = crypto.randomUUID();
+      threadResumeMap.save(threadId, makeEntry({ uuid: existingUuid, sessionName: 'dead-sess' }));
+
+      const mockDelivery = {
+        deliverToSession: vi.fn().mockResolvedValue({
+          success: false, phase: 'queued', failureReason: 'Session not alive', shouldRetry: true,
+        }),
+        checkInjectionSafety: vi.fn(),
+        formatInline: vi.fn(),
+        formatPointer: vi.fn(),
+      };
+
+      const injectingRouter = new ThreadlineRouter(
+        mockRouter as any,
+        mockSpawnManager as any,
+        threadResumeMap,
+        mockStore as any,
+        { localAgent: 'local-agent', localMachine: 'local-machine' },
+        null,
+        mockDelivery as any,
+      );
+
+      const envelope = makeEnvelope({ threadId });
+      const result = await injectingRouter.handleInboundMessage(envelope);
+
+      expect(result.handled).toBe(true);
+      expect(result.injected).toBeUndefined();
+      expect(result.resumed).toBe(true);
+      expect(mockDelivery.deliverToSession).toHaveBeenCalled();
+      expect(mockSpawnManager.evaluate).toHaveBeenCalled();
+    });
+
+    it('falls back to spawn when no resume entry exists even with messageDelivery', async () => {
+      const threadId = crypto.randomUUID();
+
+      const mockDelivery = {
+        deliverToSession: vi.fn(),
+        checkInjectionSafety: vi.fn(),
+        formatInline: vi.fn(),
+        formatPointer: vi.fn(),
+      };
+
+      const injectingRouter = new ThreadlineRouter(
+        mockRouter as any,
+        mockSpawnManager as any,
+        threadResumeMap,
+        mockStore as any,
+        { localAgent: 'local-agent', localMachine: 'local-machine' },
+        null,
+        mockDelivery as any,
+      );
+
+      const envelope = makeEnvelope({ threadId });
+      const result = await injectingRouter.handleInboundMessage(envelope);
+
+      expect(result.handled).toBe(true);
+      expect(result.spawned).toBe(true);
+      expect(mockDelivery.deliverToSession).not.toHaveBeenCalled();
+    });
+  });
+
   // ── Messages without threadId ────────────────────────────────
   // PR-2: First-contact messages without a threadId used to be dropped
   // (handled: false). They are now minted a new UUID and routed through

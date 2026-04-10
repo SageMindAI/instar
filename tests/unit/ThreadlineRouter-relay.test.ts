@@ -287,12 +287,16 @@ describe('ThreadlineRouter — Relay Integration', () => {
       expect(prompt).toContain('Hello from remote'); // Message body still present
     });
 
-    it('returns handled: false for messages without threadId', async () => {
+    it('mints a threadId for messages arriving without one (PR-2)', async () => {
       const envelope = createEnvelope({ threadId: undefined as any });
       (envelope.message as any).threadId = undefined;
 
       const result = await router.handleInboundMessage(envelope);
-      expect(result.handled).toBe(false);
+      // PR-2: first-contact messages used to be dropped with handled:false.
+      // They are now minted a new threadId and routed normally.
+      expect(result.handled).toBe(true);
+      expect(result.threadId).toBeDefined();
+      expect(envelope.message.threadId).toBe(result.threadId);
     });
 
     it('returns handled: false for self-messages', async () => {
