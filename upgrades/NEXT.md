@@ -1,35 +1,21 @@
 # Upgrade Guide — vNEXT
 
 <!-- bump: patch -->
-<!-- Valid values: patch, minor, major -->
-<!-- patch = bug fixes, refactors, test additions, doc updates -->
-<!-- minor = new features, new APIs, new capabilities (backwards-compatible) -->
-<!-- major = breaking changes to existing APIs or behavior -->
 
 ## What Changed
 
-<!-- Describe what changed technically. What new features, APIs, behavioral changes? -->
-<!-- Write this for the AGENT — they need to understand the system deeply. -->
+The memory export system (MemoryExporter) now guards against overwriting existing MEMORY.md files when SemanticMemory has 0 indexed entities. Previously, if the semantic index was empty (e.g., not yet built, or corrupted), running `instar memory export --output` or the `/semantic/export-memory` API route would replace your curated MEMORY.md with a stub containing only a header and footer — effectively wiping all your stored knowledge.
+
+Now, if the export would produce 0 entities and the target file already exists, the write is skipped entirely. The `WriteResult` includes a `skipped: true` flag so callers can detect this case. The API route also returns a `warning` field when this happens.
+
+This protects against the scenario where a reflection-trigger job silently resets agent memory on every run when the semantic index hasn't been populated yet.
 
 ## What to Tell Your User
 
-<!-- Write talking points the agent should relay to their user. -->
-<!-- This should be warm, conversational, user-facing — not a changelog. -->
-<!-- Focus on what THEY can now do, not internal plumbing. -->
-<!--                                                                    -->
-<!-- PROHIBITED in this section (will fail validation):                 -->
-<!--   camelCase config keys: silentReject, maxRetries, telegramNotify -->
-<!--   Inline code backtick references like silentReject: false        -->
-<!--   Fenced code blocks                                              -->
-<!--   Instructions to edit files or run commands                      -->
-<!--                                                                    -->
-<!-- CORRECT style: "I can turn that on for you" not "set X to false"  -->
-<!-- The agent relays this to their user — keep it human.              -->
-
-- **[Feature name]**: "[Brief, friendly description of what this means for the user]"
+- **Memory protection**: "Your memory file is now protected from being accidentally wiped. If my knowledge index is empty for any reason, I won't overwrite what I already know — I'll keep the existing memory intact."
 
 ## Summary of New Capabilities
 
 | Capability | How to Use |
 |-----------|-----------|
-| [Capability] | [Endpoint, command, or "automatic"] |
+| Empty-export guard | Automatic — no action needed |
