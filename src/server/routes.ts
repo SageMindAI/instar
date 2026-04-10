@@ -8546,7 +8546,10 @@ export function createRoutes(ctx: RouteContext): Router {
     }
 
     const msgId = `msg-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-    const effectiveThreadId = threadId ?? msgId;
+    // Mint a stable UUID threadId when caller didn't provide one so
+    // first-contact messages aren't dropped on the recipient side. Both
+    // sender and recipient will agree on this id going forward.
+    const effectiveThreadId = threadId ?? randomUUID();
 
     // ── Try local delivery first (same-machine agents) ──────────────
     // Read known-agents.json for local agent info. If the target is local,

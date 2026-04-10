@@ -230,18 +230,25 @@ describe('ThreadlineRouter', () => {
   });
 
   // ── Messages without threadId ────────────────────────────────
+  // PR-2: First-contact messages without a threadId used to be dropped
+  // (handled: false). They are now minted a new UUID and routed through
+  // the normal spawn flow so the recipient actually sees them.
 
-  describe('messages without threadId', () => {
-    it('returns handled: false for messages without threadId', async () => {
+  describe('messages without threadId (first contact)', () => {
+    it('mints a new threadId and spawns a new session', async () => {
       const envelope = makeEnvelope({ threadId: undefined });
       const result = await router.handleInboundMessage(envelope);
-      expect(result.handled).toBe(false);
+      expect(result.handled).toBe(true);
+      expect(result.spawned).toBe(true);
+      expect(result.threadId).toBeDefined();
+      expect(result.threadId).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i);
+      expect(envelope.message.threadId).toBe(result.threadId);
     });
 
-    it('does not call spawnManager for non-threaded messages', async () => {
+    it('calls spawnManager for first-contact messages', async () => {
       const envelope = makeEnvelope({ threadId: undefined });
       await router.handleInboundMessage(envelope);
-      expect(mockSpawnManager.evaluate).not.toHaveBeenCalled();
+      expect(mockSpawnManager.evaluate).toHaveBeenCalledOnce();
     });
   });
 

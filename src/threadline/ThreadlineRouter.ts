@@ -138,14 +138,20 @@ export class ThreadlineRouter {
   async handleInboundMessage(envelope: MessageEnvelope, relayContext?: RelayMessageContext): Promise<ThreadlineHandleResult> {
     const { message } = envelope;
 
-    // Only handle messages with a threadId that are addressed to us
-    if (!message.threadId) {
-      return { handled: false };
-    }
-
     // Only handle messages from other agents (not self-delivery)
     if (message.from.agent === this.config.localAgent) {
       return { handled: false };
+    }
+
+    // First-contact: if the sender didn't provide a threadId, mint one so
+    // both sides can agree on an identifier. Previously missing threadIds
+    // caused us to drop the message entirely (`handled: false`), which
+    // looked fine to the sender (HTTP 200) but silently abandoned the
+    // message on the recipient side.
+    if (!message.threadId) {
+      const mintedThreadId = crypto.randomUUID();
+      console.log(`[ThreadlineRouter] Minted new threadId ${mintedThreadId} for first-contact message from ${message.from.agent} (id: ${message.id})`);
+      message.threadId = mintedThreadId;
     }
 
     const threadId = message.threadId;
