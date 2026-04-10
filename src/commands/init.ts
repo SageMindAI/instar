@@ -2014,7 +2014,7 @@ AUTH=$(python3 -c "import json; print(json.load(open('.instar/config.json')).get
 ### 1. Read Events
 
 \\\`\\\`\\\`
-cat .instar/state/degradation-events.json
+cat .instar/degradations.json
 \\\`\\\`\\\`
 
 ### 2. Check Previous Digest
@@ -2755,7 +2755,7 @@ If no overdue or stale items, exit silently.`,
       expectedDurationMinutes: 1,
       model: 'haiku',
       enabled: true,
-      gate: `test -f .instar/state/degradation-events.json && python3 -c "import json; events=json.load(open('.instar/state/degradation-events.json')); exit(0 if len(events) > 0 else 1)" 2>/dev/null`,
+      gate: `test -f .instar/degradations.json && python3 -c "import json; events=json.load(open('.instar/degradations.json')); exit(0 if len(events) > 0 else 1)" 2>/dev/null`,
       execute: {
         type: 'skill',
         value: 'degradation-digest',
