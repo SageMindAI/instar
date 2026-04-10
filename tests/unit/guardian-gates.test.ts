@@ -112,9 +112,9 @@ describe('Guardian Job Gates', () => {
       project = createTestProject();
       const gate = getGateCommand(project, 'degradation-digest');
 
-      // Create empty events file
+      // Create empty events file at the path DegradationReporter actually writes
       fs.writeFileSync(
-        path.join(project.stateDir, 'state', 'degradation-events.json'),
+        path.join(project.stateDir, 'degradations.json'),
         '[]'
       );
 
@@ -126,9 +126,9 @@ describe('Guardian Job Gates', () => {
       project = createTestProject();
       const gate = getGateCommand(project, 'degradation-digest');
 
-      // Create events file with actual events
+      // Create events file at the path DegradationReporter actually writes
       fs.writeFileSync(
-        path.join(project.stateDir, 'state', 'degradation-events.json'),
+        path.join(project.stateDir, 'degradations.json'),
         JSON.stringify([{
           feature: 'telegram',
           primary: 'send message',
