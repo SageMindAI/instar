@@ -1,10 +1,11 @@
 /**
  * SendGateway — Central review point for all outbound messages.
  *
- * Three-stage pipeline:
+ * Four-stage pipeline:
  *   1. PEL — Credential/PII/auth token detection (fail-closed)
  *   2. Convergence — 7 heuristic quality checks (fail-open)
- *   3. CoherenceGate — LLM specialist reviewers (fail-open, optional)
+ *   3. GroundingValidator — Deterministic URL/entity cross-reference against canonical registry
+ *   4. CoherenceGate — LLM specialist reviewers (fail-open, optional)
  *
  * All outbound channels must register and call review() before sending.
  * Unregistered channels are blocked by default.
@@ -13,6 +14,7 @@
 import { PolicyEnforcementLayer } from './PolicyEnforcementLayer.js';
 import type { PELContext } from './PolicyEnforcementLayer.js';
 import { checkConvergence } from './ConvergenceChecker.js';
+import { CanonicalState } from './CanonicalState.js';
 import type { CoherenceGate } from './CoherenceGate.js';
 
 // ── Types ────────────────────────────────────────────────────────────
@@ -41,7 +43,7 @@ export interface ReviewRequest {
 export interface ReviewResult {
   pass: boolean;
   reason?: string;
-  blockedBy?: 'pel' | 'convergence' | 'coherence-gate' | 'unregistered';
+  blockedBy?: 'pel' | 'convergence' | 'grounding' | 'coherence-gate' | 'unregistered';
   warnings?: string[];
   durationMs: number;
 }
@@ -60,6 +62,7 @@ interface ChannelStats {
 export class SendGateway {
   private pel: PolicyEnforcementLayer;
   private coherenceGate: CoherenceGate | null;
+  private canonicalState: CanonicalState;
   private channels = new Map<string, OutboundChannel>();
   private stats = new Map<string, ChannelStats>();
   private stateDir: string;
@@ -68,6 +71,7 @@ export class SendGateway {
     this.stateDir = config.stateDir;
     this.pel = new PolicyEnforcementLayer(config.stateDir);
     this.coherenceGate = config.coherenceGate ?? null;
+    this.canonicalState = new CanonicalState({ stateDir: `${config.stateDir}/state` });
   }
 
   /** Register an outbound channel. Must be called before review() for that channel. */
@@ -182,7 +186,33 @@ export class SendGateway {
       warnings.push(`[convergence] Error: ${err instanceof Error ? err.message : String(err)}`);
     }
 
-    // ── Stage 3: CoherenceGate LLM review (fail-open, conditional) ──
+    // ── Stage 3: GroundingValidator (deterministic, external only) ──
+    // Fast check: any URL in the message that doesn't match known projects?
+    if (isExternal) {
+      try {
+        const groundingResult = this.validateGrounding(request.message);
+        if (!groundingResult.pass) {
+          channelStats.blocked++;
+          return {
+            pass: false,
+            reason: `Grounding check failed: ${groundingResult.reason}`,
+            blockedBy: 'grounding',
+            warnings: warnings.length > 0 ? warnings : undefined,
+            durationMs: Date.now() - start,
+          };
+        }
+        if (groundingResult.warnings) {
+          for (const w of groundingResult.warnings) {
+            warnings.push(`[grounding] ${w}`);
+          }
+        }
+      } catch (err) {
+        // Grounding validator errors are fail-open (it's a heuristic)
+        warnings.push(`[grounding] Error: ${err instanceof Error ? err.message : String(err)}`);
+      }
+    }
+
+    // ── Stage 4: CoherenceGate LLM review (fail-open, conditional) ──
     // Run LLM review for external messages that are either >50 chars OR contain URLs.
     // The URL check closes a gap where short messages with fabricated URLs bypassed review.
     const containsUrl = /https?:\/\/\S+/.test(request.message);
@@ -235,6 +265,81 @@ export class SendGateway {
       warnings: warnings.length > 0 ? warnings : undefined,
       durationMs: Date.now() - start,
     };
+  }
+
+  // ── GroundingValidator ─────────────────────────────────────────────
+
+  /** Well-known domains that don't need registry verification. */
+  private static WELL_KNOWN_DOMAINS = new Set([
+    'github.com', 'gitlab.com', 'npmjs.com', 'google.com', 'stackoverflow.com',
+    'youtube.com', 'twitter.com', 'x.com', 'linkedin.com', 'reddit.com',
+    'medium.com', 'substack.com', 'anthropic.com', 'openai.com', 'localhost',
+    'vercel.com', 'netlify.com', 'cloudflare.com', 'aws.amazon.com',
+    'docs.google.com', 'drive.google.com', 'notion.so', 'figma.com',
+  ]);
+
+  /**
+   * Deterministic grounding check — no LLM needed.
+   * Extracts URLs from the message and cross-references against the canonical
+   * project registry. Flags custom-domain URLs that don't match any known project.
+   */
+  private validateGrounding(message: string): { pass: boolean; reason?: string; warnings?: string[] } {
+    const urlRegex = /https?:\/\/([^\s/<>"')\]]+)/g;
+    const matches = [...message.matchAll(urlRegex)];
+    if (matches.length === 0) return { pass: true };
+
+    const projects = this.canonicalState.getProjects();
+    const knownDomains = new Set<string>();
+
+    // Build set of known domains from project registry
+    for (const project of projects) {
+      if (project.deploymentTargets) {
+        for (const target of project.deploymentTargets) {
+          try {
+            const domain = new URL(target).hostname;
+            knownDomains.add(domain);
+          } catch {
+            // Non-URL deployment target (e.g., "vercel" shorthand)
+            knownDomains.add(target);
+          }
+        }
+      }
+      if (project.gitRemote) {
+        try {
+          const domain = new URL(project.gitRemote).hostname;
+          knownDomains.add(domain);
+        } catch { /* ignore */ }
+      }
+    }
+
+    const warnings: string[] = [];
+    const unknownUrls: string[] = [];
+
+    for (const match of matches) {
+      const fullDomain = match[1].split('/')[0].split(':')[0]; // Strip port and path
+      const domain = fullDomain.replace(/^www\./, '');
+
+      // Skip well-known domains
+      if (SendGateway.WELL_KNOWN_DOMAINS.has(domain)) continue;
+      // Skip known project domains
+      if (knownDomains.has(domain)) continue;
+      // Skip subdomains of well-known domains
+      const parentDomain = domain.split('.').slice(-2).join('.');
+      if (SendGateway.WELL_KNOWN_DOMAINS.has(parentDomain)) continue;
+
+      unknownUrls.push(match[0]);
+    }
+
+    if (unknownUrls.length > 0) {
+      // If we have project registry entries to check against, unrecognized URLs are suspicious
+      if (projects.length > 0) {
+        warnings.push(`Unrecognized URL(s) not in project registry: ${unknownUrls.join(', ')}`);
+      }
+      // Don't hard-block on grounding alone — the LLM reviewers will make the final call
+      // with the canonical context. But warn so the CoherenceGate reviewers are primed.
+    }
+
+    return { pass: true, warnings: warnings.length > 0 ? warnings : undefined };
   }
 
   /** Clean up resources. */
