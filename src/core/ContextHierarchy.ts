@@ -280,19 +280,39 @@ export class ContextHierarchy {
 
   /**
    * List all context segments with their status.
+   *
+   * Returns absolute filePath and a stat error (if any) for each segment so
+   * that agents seeing unexpected zero sizes can self-diagnose path or
+   * permission mismatches instead of guessing. A single fs.statSync is used
+   * (no existsSync + statSync race window) so `exists` and `sizeBytes` always
+   * agree: if the stat succeeds, both reflect reality; if it fails, both are
+   * defaulted and `statError` explains why.
    */
-  listSegments(): Array<ContextSegment & { exists: boolean; sizeBytes: number }> {
+  listSegments(): Array<ContextSegment & {
+    exists: boolean;
+    sizeBytes: number;
+    filePath: string;
+    statError?: string;
+  }> {
     return DEFAULT_SEGMENTS.map(s => {
       const filePath = path.join(this.contextDir, s.file);
       let exists = false;
       let sizeBytes = 0;
+      let statError: string | undefined;
       try {
-        if (fs.existsSync(filePath)) {
-          exists = true;
-          sizeBytes = fs.statSync(filePath).size;
+        const stat = fs.statSync(filePath);
+        exists = true;
+        sizeBytes = stat.size;
+      } catch (err) {
+        const code = (err as NodeJS.ErrnoException).code;
+        // ENOENT = file doesn't exist, which is a normal "not yet created"
+        // state. Anything else (EACCES, EISDIR, etc.) is a real signal worth
+        // surfacing so agents can investigate.
+        if (code !== 'ENOENT') {
+          statError = `${code ?? 'UNKNOWN'}: ${(err as Error).message}`;
         }
-      } catch { /* ignore */ }
-      return { ...s, exists, sizeBytes };
+      }
+      return { ...s, exists, sizeBytes, filePath, ...(statError ? { statError } : {}) };
     });
   }
 

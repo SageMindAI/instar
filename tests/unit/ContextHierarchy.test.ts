@@ -163,6 +163,44 @@ describe('ContextHierarchy', () => {
         expect(s.sizeBytes).toBe(0);
       }
     });
+
+    it('returns absolute filePath for every segment for self-diagnosis', () => {
+      const ctx = new ContextHierarchy({ stateDir, projectDir, projectName: 'test-project' });
+      ctx.initialize();
+
+      const segments = ctx.listSegments();
+      for (const s of segments) {
+        expect(path.isAbsolute(s.filePath)).toBe(true);
+        expect(s.filePath).toBe(path.join(stateDir, 'context', s.file));
+      }
+    });
+
+    it('does not set statError for a missing (ENOENT) segment', () => {
+      const ctx = new ContextHierarchy({ stateDir, projectDir, projectName: 'test-project' });
+      // Don't initialize — ENOENT is the normal "not created yet" state.
+
+      const segments = ctx.listSegments();
+      for (const s of segments) {
+        expect(s.statError).toBeUndefined();
+      }
+    });
+
+    it('reports exists and sizeBytes consistently (no existsSync/statSync race)', () => {
+      const ctx = new ContextHierarchy({ stateDir, projectDir, projectName: 'test-project' });
+      ctx.initialize();
+
+      // Real bug signature from feedback: exists=true but sizeBytes=0 despite
+      // files having content. With the atomic-stat implementation, `exists`
+      // is only true when the stat succeeded — so size is the same stat's
+      // result, not a second call that could race or silently fail.
+      const segments = ctx.listSegments();
+      for (const s of segments) {
+        if (s.exists) {
+          const actual = fs.statSync(s.filePath).size;
+          expect(s.sizeBytes).toBe(actual);
+        }
+      }
+    });
   });
 
   describe('template content', () => {
