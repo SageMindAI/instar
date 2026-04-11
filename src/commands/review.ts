@@ -167,8 +167,10 @@ async function showHistory(baseUrl: string, authToken: string | undefined, json?
       reports: Array<{
         timestamp: string;
         status: string;
-        summary: { total: number; passed: number; failed: number };
-        duration: number;
+        stats?: { total: number; passed: number; failed: number; skipped: number; durationMs: number };
+        summary?: { total: number; passed: number; failed: number };
+        duration?: number;
+        results?: Array<{ name: string; passed: boolean }>;
       }>;
     };
 
@@ -189,7 +191,14 @@ async function showHistory(baseUrl: string, authToken: string | undefined, json?
         : r.status === 'degraded' ? pc.yellow
         : pc.red;
       const date = new Date(r.timestamp).toLocaleString();
-      console.log(`  ${pc.dim(date)}  ${statusColor(r.status.padEnd(10))}  ${pc.green(String(r.summary.passed))}/${r.summary.total} passed  ${pc.dim(`${r.duration}ms`)}`);
+      const stats = r.stats ?? (r.summary ? { total: r.summary.total, passed: r.summary.passed, failed: r.summary.failed, durationMs: r.duration ?? 0 } : { total: 0, passed: 0, failed: 0, durationMs: 0 });
+      console.log(`  ${pc.dim(date)}  ${statusColor(r.status.padEnd(10))}  ${pc.green(String(stats.passed))}/${stats.total} passed  ${pc.dim(`${stats.durationMs}ms`)}`);
+      if (stats.failed > 0 && Array.isArray(r.results)) {
+        const failedNames = r.results.filter(x => !x.passed).map(x => x.name);
+        if (failedNames.length > 0) {
+          console.log(pc.red(`      ✗ ${failedNames.join(', ')}`));
+        }
+      }
     }
     console.log();
   } catch (err) {

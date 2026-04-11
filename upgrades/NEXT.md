@@ -1,35 +1,17 @@
 # Upgrade Guide — vNEXT
 
 <!-- bump: patch -->
-<!-- Valid values: patch, minor, major -->
-<!-- patch = bug fixes, refactors, test additions, doc updates -->
-<!-- minor = new features, new APIs, new capabilities (backwards-compatible) -->
-<!-- major = breaking changes to existing APIs or behavior -->
 
 ## What Changed
 
-<!-- Describe what changed technically. What new features, APIs, behavioral changes? -->
-<!-- Write this for the AGENT — they need to understand the system deeply. -->
+`instar review --history` now shows the names of failing probes beneath each failed review entry, not just the pass/fail count. Previously, a report showing "13/16 passed" gave no indication of which probes failed, forcing agents to re-run a full review to diagnose. The CLI now reads the `results` array from each history entry (which was already returned by `/system-reviews/history`) and prints the names of probes where `passed === false` in red beneath the summary line. No server change — this is a pure display fix in `src/commands/review.ts`.
 
 ## What to Tell Your User
 
-<!-- Write talking points the agent should relay to their user. -->
-<!-- This should be warm, conversational, user-facing — not a changelog. -->
-<!-- Focus on what THEY can now do, not internal plumbing. -->
-<!--                                                                    -->
-<!-- PROHIBITED in this section (will fail validation):                 -->
-<!--   camelCase config keys: silentReject, maxRetries, telegramNotify -->
-<!--   Inline code backtick references like silentReject: false        -->
-<!--   Fenced code blocks                                              -->
-<!--   Instructions to edit files or run commands                      -->
-<!--                                                                    -->
-<!-- CORRECT style: "I can turn that on for you" not "set X to false"  -->
-<!-- The agent relays this to their user — keep it human.              -->
-
-- **[Feature name]**: "[Brief, friendly description of what this means for the user]"
+- **Faster health diagnosis**: "When I check my review history now, I can see exactly which probes are failing — no more re-running a full review just to find out what went wrong."
 
 ## Summary of New Capabilities
 
 | Capability | How to Use |
 |-----------|-----------|
-| [Capability] | [Endpoint, command, or "automatic"] |
+| Failed probe names in review history | `instar review --history` |
