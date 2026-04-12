@@ -261,6 +261,8 @@ export function loadConfig(projectDir?: string): InstarConfig {
     ],
     authToken: fileConfig.authToken as string | undefined,
     port: (fileConfig.port as number | undefined) ?? 4040,
+    anthropicApiKey: fileConfig.sessions?.anthropicApiKey as string | undefined,
+    anthropicBaseUrl: fileConfig.sessions?.anthropicBaseUrl as string | undefined,
   };
 
   const scheduler: JobSchedulerConfig = {

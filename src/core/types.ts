@@ -53,6 +53,13 @@ export interface SessionManagerConfig {
   authToken?: string;
   /** Server port — used to construct INSTAR_SERVER_URL for HTTP hooks */
   port?: number;
+  /** Anthropic API key for spawned sessions. Set to route through a local proxy
+   *  (e.g., meridian, LiteLLM) instead of using Claude Code's built-in OAuth.
+   *  Example: 'x' for meridian (any non-empty string satisfies the SDK). */
+  anthropicApiKey?: string;
+  /** Anthropic base URL for spawned sessions. Points the SDK at a local proxy.
+   *  Example: 'http://127.0.0.1:3456' for meridian. */
+  anthropicBaseUrl?: string;
 }
 
 // ── Job Scheduling ──────────────────────────────────────────────────
