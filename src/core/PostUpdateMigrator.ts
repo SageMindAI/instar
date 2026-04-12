@@ -523,7 +523,7 @@ export class PostUpdateMigrator {
       matcher: '',
       hooks: [{
         type: 'command',
-        command: 'node .instar/hooks/instar/auto-approve-permissions.js',
+        command: 'node ${CLAUDE_PROJECT_DIR}/.instar/hooks/instar/auto-approve-permissions.js',
         timeout: 5000,
       }],
     });
@@ -630,7 +630,7 @@ export class PostUpdateMigrator {
         matcher: '',
         hooks: [{
           type: 'command',
-          command: 'bash .claude/skills/autonomous/hooks/autonomous-stop-hook.sh',
+          command: 'bash ${CLAUDE_PROJECT_DIR}/.claude/skills/autonomous/hooks/autonomous-stop-hook.sh',
           timeout: 10000,
         }],
       });
@@ -655,7 +655,7 @@ export class PostUpdateMigrator {
     let patched = false;
     const commandHook = {
       type: 'command',
-      command: 'node .instar/hooks/instar/hook-event-reporter.js',
+      command: 'node ${CLAUDE_PROJECT_DIR}/.instar/hooks/instar/hook-event-reporter.js',
       timeout: 3000,
     };
 
@@ -1232,7 +1232,7 @@ The user has been talking to you (possibly for days). A generic greeting like "H
 
     const sessionStartHook = {
       type: 'command',
-      command: 'bash .instar/hooks/instar/session-start.sh',
+      command: 'bash ${CLAUDE_PROJECT_DIR}/.instar/hooks/instar/session-start.sh',
       timeout: 5,
     };
 
@@ -1263,7 +1263,7 @@ The user has been talking to you (possibly for days). A generic greeting like "H
         matcher: '',
         hooks: [{
           type: 'command',
-          command: 'bash .instar/hooks/instar/telegram-topic-context.sh',
+          command: 'bash ${CLAUDE_PROJECT_DIR}/.instar/hooks/instar/telegram-topic-context.sh',
           timeout: 5000,
         }],
       });
@@ -1284,7 +1284,7 @@ The user has been talking to you (possibly for days). A generic greeting like "H
         matcher: 'mcp__.*',
         hooks: [{
           type: 'command',
-          command: 'node .instar/hooks/instar/external-operation-gate.js',
+          command: 'node ${CLAUDE_PROJECT_DIR}/.instar/hooks/instar/external-operation-gate.js',
           blocking: true,
           timeout: 5000,
         }],
@@ -1346,7 +1346,7 @@ The user has been talking to you (possibly for days). A generic greeting like "H
           matcher: 'Skill',
           hooks: [{
             type: 'command' as never,
-            command: 'bash .instar/hooks/instar/skill-usage-telemetry.sh',
+            command: 'bash ${CLAUDE_PROJECT_DIR}/.instar/hooks/instar/skill-usage-telemetry.sh',
             timeout: 3000,
           } as never],
         });
