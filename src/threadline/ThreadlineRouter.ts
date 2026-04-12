@@ -18,7 +18,7 @@ import crypto from 'node:crypto';
 import type { MessageRouter } from '../messaging/MessageRouter.js';
 import type { SpawnRequestManager, SpawnResult } from '../messaging/SpawnRequestManager.js';
 import type { MessageStore } from '../messaging/MessageStore.js';
-import type { IMessageDelivery } from '../messaging/types.js';
+import type { IMessageDelivery, MessageThread } from '../messaging/types.js';
 import type { MessageEnvelope, AgentMessage } from '../messaging/types.js';
 import type { ThreadResumeMap, ThreadResumeEntry, ThreadState } from './ThreadResumeMap.js';
 import type { AutonomyGate } from './AutonomyGate.js';
@@ -179,6 +179,11 @@ export class ThreadlineRouter {
     try {
       this.pendingSpawns.add(threadId);
 
+      // Persist the inbound message to the MessageStore so it can be queried
+      // later via threadline_history. Without this, relay messages were only
+      // injected as session context and lost after session end.
+      await this.persistInboundMessage(envelope);
+
       // Phase 2: Check the autonomy gate before processing
       if (this.autonomyGate) {
         const gateResult = await this.autonomyGate.evaluate(envelope);
@@ -235,6 +240,39 @@ export class ThreadlineRouter {
     } finally {
       this.pendingSpawns.delete(threadId);
     }
+  }
+
+  /**
+   * Get thread messages from the MessageStore. Used by ThreadlineEndpoints
+   * and the threadline_history MCP tool to retrieve conversation history.
+   */
+  async getThreadMessages(threadId: string, limit?: number): Promise<{
+    threadId: string;
+    messages: Array<{ id: string; from: string; body: string; timestamp: string; threadId: string }>;
+    totalCount: number;
+    hasMore: boolean;
+  }> {
+    const threadData = await this.messageRouter.getThread(threadId);
+    if (!threadData || threadData.messages.length === 0) {
+      return { threadId, messages: [], totalCount: 0, hasMore: false };
+    }
+
+    const maxMessages = limit ?? 50;
+    const allMessages = threadData.messages.map(env => ({
+      id: env.message.id,
+      from: env.message.from.agent,
+      body: env.message.body,
+      timestamp: env.message.createdAt,
+      threadId: env.message.threadId ?? threadId,
+    }));
+
+    const limited = allMessages.slice(-maxMessages);
+    return {
+      threadId,
+      messages: limited,
+      totalCount: threadData.thread.messageCount,
+      hasMore: allMessages.length > maxMessages,
+    };
   }
 
   /**
@@ -468,6 +506,77 @@ export class ThreadlineRouter {
     } catch (err) {
       console.warn(`[ThreadlineRouter] Live-session injection threw for thread ${threadId}:`, err);
       return null;
+    }
+  }
+
+  // ── Private: Persist inbound message to MessageStore ─────────
+
+  /**
+   * Save an inbound relay message to the local MessageStore and update
+   * thread tracking. This makes relay messages queryable via the
+   * threadline_history MCP tool and the /messages/thread/:id endpoint.
+   */
+  private async persistInboundMessage(envelope: MessageEnvelope): Promise<void> {
+    try {
+      const { message } = envelope;
+      const threadId = message.threadId;
+      if (!threadId) return;
+
+      // Save the envelope to the message store
+      await this.messageStore.save(envelope);
+
+      // Update thread tracking (create or append to thread)
+      const now = message.createdAt || new Date().toISOString();
+      let thread = await this.messageStore.getThread(threadId);
+
+      if (!thread) {
+        thread = {
+          id: threadId,
+          subject: message.subject || 'Relay conversation',
+          participants: [{
+            agent: message.from.agent,
+            session: message.from.session || 'relay',
+            joinedAt: now,
+            lastMessageAt: now,
+          }],
+          createdAt: now,
+          lastMessageAt: now,
+          messageCount: 1,
+          status: 'active',
+          messageIds: [message.id],
+        };
+      } else {
+        thread.lastMessageAt = now;
+        thread.messageCount++;
+        if (!thread.messageIds.includes(message.id)) {
+          thread.messageIds.push(message.id);
+        }
+
+        // Un-stale the thread if it received a new message
+        if (thread.status === 'stale') {
+          thread.status = 'active';
+        }
+
+        // Add or update participant
+        const participant = thread.participants.find(
+          p => p.agent === message.from.agent,
+        );
+        if (participant) {
+          participant.lastMessageAt = now;
+        } else {
+          thread.participants.push({
+            agent: message.from.agent,
+            session: message.from.session || 'relay',
+            joinedAt: now,
+            lastMessageAt: now,
+          });
+        }
+      }
+
+      await this.messageStore.saveThread(thread);
+    } catch (err) {
+      // Non-fatal: persistence failure should not block message handling
+      console.warn(`[ThreadlineRouter] Failed to persist inbound message: ${err instanceof Error ? err.message : err}`);
     }
   }
 

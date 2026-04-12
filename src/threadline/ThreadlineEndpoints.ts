@@ -427,16 +427,31 @@ export function createThreadlineRoutes(
 
   // ── Messages: Thread (AUTHENTICATED) ───────────────────────────
 
-  router.get('/threadline/messages/thread/:id', threadlineAuth, (_req: Request, res: Response) => {
-    // Thread retrieval — returns messages in this thread
-    // For now, this returns a placeholder. Full implementation depends on
-    // MessageStore integration which is outside Phase 3 scope.
+  router.get('/threadline/messages/thread/:id', threadlineAuth, async (_req: Request, res: Response) => {
     const threadId = _req.params.id;
-    res.json({
-      threadId,
-      messages: [],
-      messageCount: 0,
-    });
+    const limit = parseInt(_req.query.limit as string, 10) || 50;
+
+    if (!threadlineRouter) {
+      res.json({ threadId, messages: [], messageCount: 0 });
+      return;
+    }
+
+    try {
+      const result = await threadlineRouter.getThreadMessages(threadId, limit);
+      res.json({
+        threadId: result.threadId,
+        messages: result.messages,
+        messageCount: result.totalCount,
+        hasMore: result.hasMore,
+      });
+    } catch (err) {
+      res.status(500).json(makeError(
+        ERROR_CODES.TL_INTERNAL_ERROR,
+        `Thread retrieval failed: ${err instanceof Error ? err.message : 'Unknown error'}`,
+        true,
+        5,
+      ));
+    }
   });
 
   // ── Blobs: Fetch (AUTHENTICATED) ──────────────────────────────

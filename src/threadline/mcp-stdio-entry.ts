@@ -153,6 +153,71 @@ async function sendMessageViaHttp(
   }
 }
 
+// ── Thread history retrieval via HTTP (talks to the running agent server) ──
+
+/**
+ * Retrieve thread history via the agent server's messaging endpoint.
+ * The server stores messages in its MessageStore and tracks threads;
+ * this function queries that data through the /messages/thread/:id API.
+ */
+async function getThreadHistoryViaHttp(
+  threadId: string,
+  limit: number,
+  before: string | undefined,
+  serverPort: number,
+  agentToken: string,
+): Promise<ThreadHistoryResult> {
+  try {
+    const url = `http://localhost:${serverPort}/messages/thread/${encodeURIComponent(threadId)}`;
+    const response = await fetch(url, {
+      headers: {
+        'Authorization': `Bearer ${agentToken}`,
+      },
+    });
+
+    if (!response.ok) {
+      return { threadId, messages: [], totalCount: 0, hasMore: false };
+    }
+
+    const data = await response.json() as {
+      thread?: { messageCount?: number; subject?: string };
+      messages?: Array<{
+        message: { id: string; from: { agent: string }; body: string; createdAt: string; threadId?: string };
+      }>;
+    };
+
+    const rawMessages = data.messages ?? [];
+
+    // Apply 'before' filter if provided
+    let filtered = before
+      ? rawMessages.filter(env => env.message.createdAt < before)
+      : rawMessages;
+
+    // Sort chronologically (oldest first)
+    filtered.sort((a, b) => a.message.createdAt.localeCompare(b.message.createdAt));
+
+    const totalCount = data.thread?.messageCount ?? filtered.length;
+    const hasMore = filtered.length > limit;
+    const limited = filtered.slice(-limit);
+
+    return {
+      threadId,
+      messages: limited.map(env => ({
+        id: env.message.id,
+        from: env.message.from.agent,
+        body: env.message.body,
+        timestamp: env.message.createdAt,
+        threadId: env.message.threadId ?? threadId,
+      })),
+      totalCount,
+      hasMore,
+    };
+  } catch {
+    // Server unreachable — return empty rather than failing the tool
+    return { threadId, messages: [], totalCount: 0, hasMore: false };
+  }
+}
+
 // ── Registry Client Setup ────────────────────────────────────────────
 
 async function setupRegistryClient(
@@ -248,8 +313,8 @@ async function main(): Promise<void> {
       trustManager,
       auth: null, // No auth for stdio
       sendMessage: (params) => sendMessageViaHttp(params, serverPort, agentToken),
-      getThreadHistory: (threadId, _limit) =>
-        Promise.resolve({ threadId, messages: [], totalCount: 0, hasMore: false } as ThreadHistoryResult),
+      getThreadHistory: (threadId, limit, before) =>
+        getThreadHistoryViaHttp(threadId, limit, before, serverPort, agentToken),
       registry: registryClient,
     },
   );
