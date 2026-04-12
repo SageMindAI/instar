@@ -61,6 +61,49 @@ export interface AutoDispatcherStatus {
   lastError: string | null;
 }
 
+/**
+ * Build a human-readable notification for dispatches that are waiting on the
+ * user's approval. The old message was cryptic — just the count and IDs — so
+ * users had no idea what they were approving. This version names each one in
+ * plain language, shows a content preview, and tells the user how to respond.
+ *
+ * Exported for unit testing.
+ */
+export function formatApprovalNotification(dispatches: Dispatch[]): string {
+  if (dispatches.length === 0) return '';
+
+  const TYPE_LABEL: Record<string, string> = {
+    behavioral: 'behavior guideline',
+    security: 'security update',
+    strategy: 'strategy note',
+    lesson: 'lesson',
+    action: 'action',
+    configuration: 'configuration change',
+  };
+
+  const PREVIEW_LIMIT = 220;
+
+  const describe = (d: Dispatch): string => {
+    const label = TYPE_LABEL[d.type] || d.type;
+    const raw = (d.content || '').trim().replace(/\s+/g, ' ');
+    const preview = raw.length > PREVIEW_LIMIT
+      ? `${raw.slice(0, PREVIEW_LIMIT).trimEnd()}…`
+      : raw;
+    const priorityNote = d.priority && d.priority !== 'normal' ? `, ${d.priority} priority` : '';
+    return `• "${d.title}" — ${label}${priorityNote}\n  ${preview || '(no content)'}\n  ID: ${d.dispatchId}`;
+  };
+
+  const header = dispatches.length === 1
+    ? `I have a new guideline waiting for your approval before I apply it:`
+    : `I have ${dispatches.length} new guidelines waiting for your approval before I apply them:`;
+
+  const items = dispatches.map(describe).join('\n\n');
+
+  const footer = `Just tell me which ones to approve or reject and I'll handle it.`;
+
+  return `${header}\n\n${items}\n\n${footer}`;
+}
+
 export class AutoDispatcher {
   private dispatches: DispatchManager;
   private executor: DispatchExecutor;
@@ -576,12 +619,7 @@ export class AutoDispatcher {
         });
       }
 
-      const typeLabels = [...new Set(needsApproval.map(d => d.type))].join('/');
-      const ids = needsApproval.map(d => d.dispatchId).join(', ');
-      await this.notify(
-        `I received ${needsApproval.length} ${typeLabels} dispatch(es) that need your approval ` +
-        `before I can apply them. IDs: ${ids}`
-      );
+      await this.notify(formatApprovalNotification(needsApproval));
     }
   }
 
