@@ -40,6 +40,7 @@ import { UpgradeGuideProcessor } from '../core/UpgradeGuideProcessor.js';
 import { EvolutionManager } from '../core/EvolutionManager.js';
 import { TopicMemory } from '../memory/TopicMemory.js';
 import { SemanticMemory } from '../memory/SemanticMemory.js';
+import { WorkingMemoryAssembler } from '../memory/WorkingMemoryAssembler.js';
 import { QuotaTracker } from '../monitoring/QuotaTracker.js';
 import { AccountSwitcher } from '../monitoring/AccountSwitcher.js';
 import { QuotaNotifier } from '../monitoring/QuotaNotifier.js';
@@ -3150,6 +3151,14 @@ export async function startServer(options: StartOptions): Promise<void> {
       });
     }
 
+    // Initialize WorkingMemoryAssembler — token-budgeted context assembly for session-start hooks.
+    // Degrades gracefully: works with whatever memory systems are available.
+    const workingMemory = new WorkingMemoryAssembler({
+      semanticMemory,
+      // episodicMemory — will wire once EpisodicMemory is initialized above
+    });
+    console.log(pc.green(`  WorkingMemoryAssembler: ready (semantic: ${semanticMemory ? 'yes' : 'no'})`));
+
     // Fast startup purge — remove session records for dead tmux sessions BEFORE
     // monitoring starts. Prevents the death spiral where stale sessions overwhelm
     // the health endpoint (synchronous tmux has-session calls) and cause the
@@ -5193,7 +5202,7 @@ export async function startServer(options: StartOptions): Promise<void> {
       }, { description: 'Feature discovery state and behavioral contract summary' });
     }
 
-    const server = new AgentServer({ config, sessionManager, state, scheduler, telegram, relationships, feedback, feedbackAnomalyDetector, dispatches, updateChecker, autoUpdater, autoDispatcher, quotaTracker, quotaManager, publisher, viewer, tunnel, evolution, watchdog, topicMemory, triageNurse, projectMapper, coherenceGate: scopeVerifier, contextHierarchy, canonicalState, operationGate, sentinel, adaptiveTrust, memoryMonitor, orphanReaper, coherenceMonitor, commitmentTracker, semanticMemory, activitySentinel, messageRouter, summarySentinel, spawnManager, systemReviewer, capabilityMapper, selfKnowledgeTree, coverageAuditor, topicResumeMap: _topicResumeMap ?? undefined, autonomyManager, trustElevationTracker, autonomousEvolution, coordinator: coordinator.enabled ? coordinator : undefined, localSigningKeyPem, whatsapp: whatsappAdapter, slack: slackAdapter, imessage: imessageAdapter, whatsappBusinessBackend, messageBridge, hookEventReceiver, worktreeMonitor, subagentTracker, instructionsVerifier, handshakeManager: threadlineHandshake, threadlineRouter, threadlineRelayClient, listenerManager: listenerManager ?? undefined, responseReviewGate, telemetryHeartbeat, pasteManager, featureRegistry, discoveryEvaluator, unifiedTrust, liveConfig });
+    const server = new AgentServer({ config, sessionManager, state, scheduler, telegram, relationships, feedback, feedbackAnomalyDetector, dispatches, updateChecker, autoUpdater, autoDispatcher, quotaTracker, quotaManager, publisher, viewer, tunnel, evolution, watchdog, topicMemory, triageNurse, projectMapper, coherenceGate: scopeVerifier, contextHierarchy, canonicalState, operationGate, sentinel, adaptiveTrust, memoryMonitor, orphanReaper, coherenceMonitor, commitmentTracker, semanticMemory, activitySentinel, messageRouter, summarySentinel, spawnManager, systemReviewer, capabilityMapper, selfKnowledgeTree, coverageAuditor, topicResumeMap: _topicResumeMap ?? undefined, autonomyManager, trustElevationTracker, autonomousEvolution, coordinator: coordinator.enabled ? coordinator : undefined, localSigningKeyPem, whatsapp: whatsappAdapter, slack: slackAdapter, imessage: imessageAdapter, whatsappBusinessBackend, messageBridge, hookEventReceiver, worktreeMonitor, subagentTracker, instructionsVerifier, handshakeManager: threadlineHandshake, threadlineRouter, threadlineRelayClient, listenerManager: listenerManager ?? undefined, responseReviewGate, telemetryHeartbeat, pasteManager, featureRegistry, discoveryEvaluator, unifiedTrust, liveConfig, workingMemory });
     await server.start();
 
     // Connect DegradationReporter downstream systems now that everything is initialized.
