@@ -74,14 +74,14 @@ The user's latest message:
 
 **[VERIFIED]** `src/scheduler/JobScheduler.ts`
 
-1. **Cron trigger** (lines 209-218): `new Cron(job.schedule, () => this.triggerJob(job.slug, 'scheduled'))`
-2. **Pre-flight checks** (lines 260-332):
-   - Paused check (266-269)
-   - Machine scope filter (272-281)
-   - Multi-machine claim check via JobClaimManager (285-294)
-   - Quota check via `canRunJob()` (296-305)
-   - Gate command pre-screening (308-312)
-   - Session capacity check → enqueue if at limit (315-320)
+1. **Cron trigger** (lines 231-234): `new Cron(job.schedule, () => this.triggerJob(job.slug, 'scheduled'))`
+2. **Pre-flight checks** (lines 296-364):
+   - Paused check (302-304)
+   - Machine scope filter (308-316)
+   - Multi-machine claim check via JobClaimManager (319-330)
+   - Resource gate via `canRunJob()` (333-348) — returns `boolean | CanRunJobResult`; records actual gating reason (`quota`, `memory-pressure`, etc.) via `normalizeCanRunResult()`
+   - Gate command pre-screening (350-356)
+   - Session capacity check → enqueue if at limit (358-364)
 3. **Session spawn** (lines 463-562):
    - Build prompt via `buildPrompt(job)` (line 464)
    - Write `active-job.json` BEFORE spawn (472-483)
