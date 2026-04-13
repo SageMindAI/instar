@@ -1270,7 +1270,41 @@ function wireIMessageRouting(
     const sender = msg.channel?.identifier;
     if (!sender) return;
 
-    const text = msg.content;
+    // Build the text with attachment references inlined. iMessage stores the
+    // attachment placeholder character (\uFFFC) in the text where the photo sits,
+    // but doesn't include the path. We replace placeholders with explicit
+    // [image:/path] tags (matching the Telegram pattern) so Claude can read the
+    // files via the Read tool. Attachments are auto-hardlinked into
+    // .instar/imessage/attachments/ by the user-context sync script, avoiding
+    // the need for FDA on node.
+    let text = msg.content;
+    const attachments = (msg.metadata?.attachments as Array<{
+      filename?: string;
+      mimeType?: string;
+      path?: string;
+    }>) ?? [];
+    if (attachments.length > 0) {
+      // If text has no placeholders but has attachments, append refs at the end.
+      // Otherwise replace each \uFFFC with an [image:/path] tag sequentially.
+      const tags = attachments.map((a) => {
+        if (!a.path) return '[attachment path unavailable]';
+        // For images/PDFs/etc., use [image:...] so Claude's existing handling applies.
+        // The path will be the hardlinked one if the sync script ran; otherwise
+        // the TCC-protected original (which Claude may or may not be able to read).
+        const isImage = (a.mimeType || '').startsWith('image/');
+        const kind = isImage ? 'image' : 'file';
+        return `[${kind}:${a.path}]`;
+      });
+      if (text.includes('\uFFFC')) {
+        // Replace each placeholder with the next tag
+        let i = 0;
+        text = text.replace(/\uFFFC/g, () => tags[i++] ?? '[image:missing]');
+      } else {
+        // No inline placeholders — append tags at the end
+        text = (text ? text + ' ' : '') + tags.join(' ');
+      }
+    }
+
     const senderName = (msg.metadata?.senderName as string) ?? undefined;
     const senderNorm = sender.toLowerCase();
 
