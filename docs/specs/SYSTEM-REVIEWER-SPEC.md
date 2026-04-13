@@ -620,6 +620,18 @@ GET /system-reviews/latest
   Response: ReviewReport | null
 ```
 
+**Discoverability aliases** (no auth required — these mirror the auth-gated endpoints for agents that probe common URL shapes):
+
+```
+GET /health/probes
+  Response: { timestamp, status, stats, probes: ProbeResult[], skipped }
+  Note: Returns all probe results (pass and fail). Alias for agents that naturally try /health/* paths.
+
+GET /system-review
+  Response: ReviewReport | null
+  Note: Singular alias for /system-reviews/latest. Matches the URL shape agents commonly try first.
+```
+
 And via CLI:
 
 ```bash
@@ -708,6 +720,28 @@ components.systemReview = {
   lastCheck: lastReview.timestamp,
 };
 ```
+
+The `/health` endpoint's `systemReview` section also includes enriched failure data so agents can drill into problems without a second API call:
+
+```json
+"systemReview": {
+  "status": "degraded",
+  "lastReview": { "passed": 13, "failed": 3, "skipped": 0 },
+  "probesRegistered": 16,
+  "failedProbes": [
+    {
+      "probeId": "scheduler-heartbeat",
+      "name": "Scheduler Heartbeat",
+      "tier": 1,
+      "error": "Last tick was 14 minutes ago (threshold: 5 min)",
+      "remediation": "Check .instar/jobs.json and restart the server"
+    }
+  ],
+  "detailsUrl": "/system-reviews/latest"
+}
+```
+
+`failedProbes` is an empty array when all probes pass. `detailsUrl` always points to the full review report.
 
 ### With CoherenceMonitor
 
