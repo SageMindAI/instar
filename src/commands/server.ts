@@ -2664,7 +2664,7 @@ export async function startServer(options: StartOptions): Promise<void> {
 
         const jsonlPath = path.join(config.stateDir, 'telegram-messages.jsonl');
         if (fs.existsSync(jsonlPath)) {
-          const imported = topicMemory.importFromJsonl(jsonlPath);
+          const imported = await topicMemory.importFromJsonl(jsonlPath);
           if (imported > 0) {
             console.log(pc.green(`  TopicMemory: imported ${imported} messages from JSONL`));
           }
