@@ -526,7 +526,13 @@ export class SessionManager extends EventEmitter {
         '-e', `INSTAR_SESSION_ID=${sessionId}`, // Expose instar session ID to hook events
         '-e', `INSTAR_SERVER_URL=http://localhost:${this.config.port}`,
         '-e', `INSTAR_AUTH_TOKEN=${this.config.authToken}`,
-        '-e', 'ANTHROPIC_API_KEY=', // Clear stale/invalid API keys — agents use Claude subscription
+        // OAuth tokens (sk-ant-oat01-...) go in CLAUDE_CODE_OAUTH_TOKEN to enable
+        // interactive mode auth via subscription. API keys (sk-ant-api03-...) go in
+        // ANTHROPIC_API_KEY for direct API billing.
+        ...((this.config.anthropicApiKey ?? '').startsWith('sk-ant-oat')
+          ? ['-e', `CLAUDE_CODE_OAUTH_TOKEN=${this.config.anthropicApiKey}`, '-e', 'ANTHROPIC_API_KEY=']
+          : ['-e', `ANTHROPIC_API_KEY=${this.config.anthropicApiKey ?? ''}`, '-e', 'CLAUDE_CODE_OAUTH_TOKEN=']),
+        '-e', `ANTHROPIC_BASE_URL=${this.config.anthropicBaseUrl ?? ''}`,
         // Isolate database credentials — spawned sessions must never inherit production
         // database URLs from the parent shell. This prevents accidental schema changes
         // or data operations against the wrong database. (Learned from Portal incident 2026-02-22)
@@ -1115,7 +1121,13 @@ export class SessionManager extends EventEmitter {
         '-e', `INSTAR_SESSION_ID=${interactiveSessionId}`, // Expose instar session ID to hook events
         '-e', `INSTAR_SERVER_URL=http://localhost:${this.config.port}`,
         '-e', `INSTAR_AUTH_TOKEN=${this.config.authToken}`,
-        '-e', 'ANTHROPIC_API_KEY=', // Clear stale/invalid API keys — agents use Claude subscription
+        // OAuth tokens (sk-ant-oat01-...) go in CLAUDE_CODE_OAUTH_TOKEN to enable
+        // interactive mode auth via subscription. API keys (sk-ant-api03-...) go in
+        // ANTHROPIC_API_KEY for direct API billing.
+        ...((this.config.anthropicApiKey ?? '').startsWith('sk-ant-oat')
+          ? ['-e', `CLAUDE_CODE_OAUTH_TOKEN=${this.config.anthropicApiKey}`, '-e', 'ANTHROPIC_API_KEY=']
+          : ['-e', `ANTHROPIC_API_KEY=${this.config.anthropicApiKey ?? ''}`, '-e', 'CLAUDE_CODE_OAUTH_TOKEN=']),
+        '-e', `ANTHROPIC_BASE_URL=${this.config.anthropicBaseUrl ?? ''}`,
         // Isolate database credentials — spawned sessions must never inherit production
         // database URLs from the parent shell. (Learned from Portal incident 2026-02-22)
         '-e', 'DATABASE_URL=',
