@@ -82,6 +82,7 @@ import type { WorktreeMonitor } from '../monitoring/WorktreeMonitor.js';
 import type { SubagentTracker } from '../monitoring/SubagentTracker.js';
 import type { InstructionsVerifier } from '../monitoring/InstructionsVerifier.js';
 import type { CoherenceGate } from '../core/CoherenceGate.js';
+import type { MessagingToneGate } from '../core/MessagingToneGate.js';
 import type { PasteManager } from '../paste/PasteManager.js';
 import type { WebSocketManager } from './WebSocketManager.js';
 import { TruncationDetector } from '../paste/TruncationDetector.js';
@@ -147,6 +148,10 @@ export interface RouteContext {
   threadlineRelayClient: import('../threadline/client/ThreadlineClient.js').ThreadlineClient | null;
   listenerManager: import('../threadline/ListenerSessionManager.js').ListenerSessionManager | null;
   responseReviewGate: CoherenceGate | null;
+  /** Scoped tone gate for outbound agent-to-user messaging routes.
+   *  Uses the shared IntelligenceProvider (Claude CLI subscription or Anthropic API).
+   *  Catches CLI commands, file paths, config syntax leaking to users. */
+  messagingToneGate: MessagingToneGate | null;
   telemetryHeartbeat: import('../monitoring/TelemetryHeartbeat.js').TelemetryHeartbeat | null;
   pasteManager: PasteManager | null;
   wsManager: WebSocketManager | null;
@@ -178,6 +183,38 @@ export function createRoutes(ctx: RouteContext): Router {
 
   // Truncation detector for Telegram messages (Drop Zone integration)
   const truncationDetector = new TruncationDetector();
+
+  // ── Messaging tone gate ──────────────────────────────────────────
+  //
+  // Invoked before forwarding agent-authored messages to a user. Runs the
+  // ConversationalToneReviewer (single Haiku-class call, ~500ms) to catch CLI
+  // commands, file paths, config keys, and other technical leakage that the
+  // agent's internal memory discipline missed.
+  //
+  // Returns true if the message was blocked (response already sent as 422).
+  // Returns false if safe to proceed (pass, fail-open, or gate unavailable).
+  async function checkMessagingTone(
+    text: string,
+    channel: string,
+    res: import('express').Response,
+  ): Promise<boolean> {
+    if (!ctx.messagingToneGate) return false; // No gate configured — pass through
+    try {
+      const result = await ctx.messagingToneGate.review(text, { channel });
+      if (!result.pass) {
+        res.status(422).json({
+          error: 'tone-gate-blocked',
+          issue: result.issue,
+          suggestion: result.suggestion,
+          latencyMs: result.latencyMs,
+        });
+        return true;
+      }
+    } catch {
+      // Fail-open — MessagingToneGate already has fail-open semantics, but belt-and-suspenders
+    }
+    return false;
+  }
 
   // ── Discovery ───────────────────────────────────────────────────
   //
@@ -3314,8 +3351,11 @@ export function createRoutes(ctx: RouteContext): Router {
       return;
     }
 
+    // Tone gate — skip for proxy messages (PresenceProxy etc. are system-generated)
+    const isProxy = metadata?.isProxy === true;
+    if (!isProxy && await checkMessagingTone(text, 'telegram', res)) return;
+
     try {
-      const isProxy = metadata?.isProxy === true;
       await ctx.telegram.sendToTopic(topicId, text, { skipStallClear: isProxy });
       // Clear injection tracker — but NOT for proxy messages (PresenceProxy)
       // Proxy messages should not reset stall detection timers
@@ -3323,6 +3363,55 @@ export function createRoutes(ctx: RouteContext): Router {
         ctx.sessionManager.clearInjectionTracker(topicId);
       }
       res.json({ ok: true, topicId });
+    } catch (err) {
+      res.status(500).json({ error: err instanceof Error ? err.message : String(err) });
+    }
+  });
+
+  // POST /telegram/post-update — route an update/announcement message to the
+  // Agent Updates topic, deterministically.
+  //
+  // The caller cannot specify a topic. The topic is resolved server-side from
+  // `agent-updates-topic` state. This closes off an entire class of bugs where
+  // agents sent update messages to whatever topic happened to spawn their
+  // session (typically the most recently active Telegram topic).
+  //
+  // If the Updates topic is not configured, the endpoint returns 400 — never
+  // a silent fallback to Attention or any other topic. Update messages MUST
+  // end up in the Updates topic or not be sent at all.
+  router.post('/telegram/post-update', async (req, res) => {
+    if (!ctx.telegram) {
+      res.status(503).json({ error: 'Telegram not configured' });
+      return;
+    }
+
+    const updatesTopicId = ctx.state.get<number>('agent-updates-topic');
+    if (!updatesTopicId || typeof updatesTopicId !== 'number') {
+      res.status(400).json({
+        error: 'Agent Updates topic is not configured',
+        hint: 'The Updates topic is provisioned automatically at server startup when Telegram is configured. Check server logs for "Failed to ensure Agent Updates topic" errors. Update messages are not routed to any fallback topic by design.',
+      });
+      return;
+    }
+
+    const { text } = req.body;
+    if (!text || typeof text !== 'string') {
+      res.status(400).json({ error: '"text" field required' });
+      return;
+    }
+    if (text.length > 4096) {
+      res.status(400).json({ error: '"text" must be 4096 characters or fewer' });
+      return;
+    }
+
+    if (await checkMessagingTone(text, 'telegram', res)) return;
+
+    try {
+      await ctx.telegram.sendToTopic(updatesTopicId, text);
+      // Note: intentionally do NOT clear the injection tracker for the Updates
+      // topic. Update posts are proactive broadcasts, not replies to a stuck
+      // session — resetting stall timers here would mask real hangs elsewhere.
+      res.json({ ok: true, topicId: updatesTopicId });
     } catch (err) {
       res.status(500).json({ error: err instanceof Error ? err.message : String(err) });
     }
@@ -3395,6 +3484,8 @@ export function createRoutes(ctx: RouteContext): Router {
       res.status(400).json({ error: '"text" field required' });
       return;
     }
+
+    if (await checkMessagingTone(text, 'slack', res)) return;
 
     try {
       const ts = await ctx.slack.sendToChannel(channelId, text, { thread_ts });
@@ -3690,6 +3781,8 @@ export function createRoutes(ctx: RouteContext): Router {
       return;
     }
 
+    if (await checkMessagingTone(text, 'whatsapp', res)) return;
+
     try {
       await ctx.whatsapp.send({
         content: text,
@@ -3726,7 +3819,7 @@ export function createRoutes(ctx: RouteContext): Router {
   // ── Outbound Safety: validate-before-send endpoint ──
   // Called by imessage-reply.sh BEFORE sending. Issues a single-use token
   // that binds validation to the actual send (TOCTOU mitigation).
-  router.post('/imessage/validate-send/:recipient', (req, res) => {
+  router.post('/imessage/validate-send/:recipient', async (req, res) => {
     if (!ctx.imessage) {
       res.status(503).json({ error: 'iMessage not configured' });
       return;
@@ -3736,6 +3829,12 @@ export function createRoutes(ctx: RouteContext): Router {
     if (!recipient) {
       res.status(400).json({ error: 'recipient parameter required' });
       return;
+    }
+
+    // Tone gate — if the client passes `text`, check it here before issuing a send token.
+    const text = req.body?.text;
+    if (typeof text === 'string' && text.length > 0) {
+      if (await checkMessagingTone(text, 'imessage', res)) return;
     }
 
     const result = ctx.imessage.validateSend(decodeURIComponent(recipient));
@@ -3783,6 +3882,9 @@ export function createRoutes(ctx: RouteContext): Router {
       res.status(400).json({ error: '"text" field required' });
       return;
     }
+
+    // Note: tone gate is not applied here — this is a post-send confirmation
+    // endpoint. Gating happens pre-send in /imessage/validate-send.
 
     // Validate send token if provided (TOCTOU binding)
     if (sendToken) {

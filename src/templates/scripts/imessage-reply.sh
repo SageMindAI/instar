@@ -76,9 +76,22 @@ VALIDATE_BODY=$(echo "$VALIDATE_RESPONSE" | head -n -1)
 VALIDATE_CODE=$(echo "$VALIDATE_RESPONSE" | tail -n 1)
 
 if [ "$VALIDATE_CODE" != "200" ]; then
-  # Validation failed — DO NOT SEND
-  REASON=$(echo "$VALIDATE_BODY" | python3 -c 'import sys,json; print(json.load(sys.stdin).get("reason","unknown"))' 2>/dev/null || echo "unknown")
-  echo "BLOCKED: $REASON" >&2
+  # Validation failed — DO NOT SEND.
+  # Body may be either:
+  #   { "reason": "..." }  from validateSend (authz, rate limits, TOCTOU)
+  #   { "issue": "...", "suggestion": "..." }  from the tone gate
+  REASON=$(echo "$VALIDATE_BODY" | python3 -c 'import sys,json; d=json.load(sys.stdin); print(d.get("reason") or d.get("issue") or "unknown")' 2>/dev/null || echo "unknown")
+  SUGGESTION=$(echo "$VALIDATE_BODY" | python3 -c 'import sys,json; print(json.load(sys.stdin).get("suggestion",""))' 2>/dev/null || echo "")
+  if [ "$VALIDATE_CODE" = "422" ]; then
+    echo "BLOCKED by tone gate — message not sent to user." >&2
+    echo "  Issue: $REASON" >&2
+    if [ -n "$SUGGESTION" ]; then
+      echo "  Suggestion: $SUGGESTION" >&2
+    fi
+    echo "  Revise the message (remove CLI commands, file paths, config syntax, API endpoints) and retry." >&2
+  else
+    echo "BLOCKED: $REASON" >&2
+  fi
 
   # Log blocked attempt locally as backup
   echo "{\"blocked\":true,\"recipient\":\"${RECIPIENT}\",\"reason\":\"${REASON}\",\"ts\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\"}" >> .instar/imessage-outbound-local.jsonl 2>/dev/null

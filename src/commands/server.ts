@@ -5424,6 +5424,19 @@ export async function startServer(options: StartOptions): Promise<void> {
       console.warn(pc.yellow(`  Threadline: failed to bootstrap — ${err instanceof Error ? err.message : String(err)}`));
     }
 
+    // Messaging Tone Gate — always-on tone check on outbound messaging routes.
+    // Uses the shared IntelligenceProvider (Claude CLI subscription by default,
+    // Anthropic API if key is set). No opt-in. Catches CLI commands, file paths,
+    // config syntax, and other technical leakage in agent-to-user messages.
+    let messagingToneGate: import('../core/MessagingToneGate.js').MessagingToneGate | undefined;
+    if (sharedIntelligence) {
+      const { MessagingToneGate } = await import('../core/MessagingToneGate.js');
+      messagingToneGate = new MessagingToneGate(sharedIntelligence);
+      console.log(pc.green('  Messaging tone gate: active (Haiku via shared IntelligenceProvider)'));
+    } else {
+      console.log(pc.yellow('  Messaging tone gate: inactive (no IntelligenceProvider available)'));
+    }
+
     // Response Review Pipeline (Coherence Gate) — evaluates agent responses before delivery
     let responseReviewGate: import('../core/CoherenceGate.js').CoherenceGate | undefined;
     if (config.responseReview?.enabled) {
@@ -5518,7 +5531,7 @@ export async function startServer(options: StartOptions): Promise<void> {
       }, { description: 'Feature discovery state and behavioral contract summary' });
     }
 
-    const server = new AgentServer({ config, sessionManager, state, scheduler, telegram, relationships, feedback, feedbackAnomalyDetector, dispatches, updateChecker, autoUpdater, autoDispatcher, quotaTracker, quotaManager, publisher, viewer, tunnel, evolution, watchdog, topicMemory, triageNurse, projectMapper, coherenceGate: scopeVerifier, contextHierarchy, canonicalState, operationGate, sentinel, adaptiveTrust, memoryMonitor, orphanReaper, coherenceMonitor, commitmentTracker, semanticMemory, activitySentinel, messageRouter, summarySentinel, spawnManager, systemReviewer, capabilityMapper, selfKnowledgeTree, coverageAuditor, topicResumeMap: _topicResumeMap ?? undefined, autonomyManager, trustElevationTracker, autonomousEvolution, coordinator: coordinator.enabled ? coordinator : undefined, localSigningKeyPem, whatsapp: whatsappAdapter, slack: slackAdapter, imessage: imessageAdapter, whatsappBusinessBackend, messageBridge, hookEventReceiver, worktreeMonitor, subagentTracker, instructionsVerifier, handshakeManager: threadlineHandshake, threadlineRouter, threadlineRelayClient, threadlineReplyWaiters, listenerManager: listenerManager ?? undefined, responseReviewGate, telemetryHeartbeat, pasteManager, featureRegistry, discoveryEvaluator, unifiedTrust, liveConfig });
+    const server = new AgentServer({ config, sessionManager, state, scheduler, telegram, relationships, feedback, feedbackAnomalyDetector, dispatches, updateChecker, autoUpdater, autoDispatcher, quotaTracker, quotaManager, publisher, viewer, tunnel, evolution, watchdog, topicMemory, triageNurse, projectMapper, coherenceGate: scopeVerifier, contextHierarchy, canonicalState, operationGate, sentinel, adaptiveTrust, memoryMonitor, orphanReaper, coherenceMonitor, commitmentTracker, semanticMemory, activitySentinel, messageRouter, summarySentinel, spawnManager, systemReviewer, capabilityMapper, selfKnowledgeTree, coverageAuditor, topicResumeMap: _topicResumeMap ?? undefined, autonomyManager, trustElevationTracker, autonomousEvolution, coordinator: coordinator.enabled ? coordinator : undefined, localSigningKeyPem, whatsapp: whatsappAdapter, slack: slackAdapter, imessage: imessageAdapter, whatsappBusinessBackend, messageBridge, hookEventReceiver, worktreeMonitor, subagentTracker, instructionsVerifier, handshakeManager: threadlineHandshake, threadlineRouter, threadlineRelayClient, threadlineReplyWaiters, listenerManager: listenerManager ?? undefined, responseReviewGate, messagingToneGate, telemetryHeartbeat, pasteManager, featureRegistry, discoveryEvaluator, unifiedTrust, liveConfig });
     await server.start();
 
     // Connect DegradationReporter downstream systems now that everything is initialized.

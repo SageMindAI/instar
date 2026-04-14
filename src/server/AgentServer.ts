@@ -118,6 +118,7 @@ export class AgentServer {
     threadlineReplyWaiters?: Map<string, { resolve: (reply: string) => void; threadId: string; senderAgent: string; timer: ReturnType<typeof setTimeout> }>;
     listenerManager?: import('../threadline/ListenerSessionManager.js').ListenerSessionManager;
     responseReviewGate?: import('../core/CoherenceGate.js').CoherenceGate;
+    messagingToneGate?: import('../core/MessagingToneGate.js').MessagingToneGate;
     telemetryHeartbeat?: import('../monitoring/TelemetryHeartbeat.js').TelemetryHeartbeat;
     pasteManager?: import('../paste/PasteManager.js').PasteManager;
     soulManager?: import('../core/SoulManager.js').SoulManager;
@@ -307,6 +308,7 @@ export class AgentServer {
       threadlineRelayClient: options.threadlineRelayClient ?? null,
       listenerManager: options.listenerManager ?? null,
       responseReviewGate: options.responseReviewGate ?? null,
+      messagingToneGate: options.messagingToneGate ?? null,
       telemetryHeartbeat: options.telemetryHeartbeat ?? null,
       pasteManager: options.pasteManager ?? null,
       wsManager: null, // Set after WebSocket manager is initialized

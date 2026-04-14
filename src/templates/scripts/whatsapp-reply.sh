@@ -62,6 +62,16 @@ BODY=$(echo "$RESPONSE" | sed '$d')
 
 if [ "$HTTP_CODE" = "200" ]; then
   echo "Sent $(echo "$MSG" | wc -c | tr -d ' ') chars to $JID"
+elif [ "$HTTP_CODE" = "422" ]; then
+  ISSUE=$(echo "$BODY" | python3 -c 'import sys,json; print(json.load(sys.stdin).get("issue","unknown"))' 2>/dev/null || echo "unknown")
+  SUGGESTION=$(echo "$BODY" | python3 -c 'import sys,json; print(json.load(sys.stdin).get("suggestion",""))' 2>/dev/null || echo "")
+  echo "BLOCKED by tone gate — message not sent to user." >&2
+  echo "  Issue: $ISSUE" >&2
+  if [ -n "$SUGGESTION" ]; then
+    echo "  Suggestion: $SUGGESTION" >&2
+  fi
+  echo "  Revise the message (remove CLI commands, file paths, config syntax, API endpoints) and retry." >&2
+  exit 1
 else
   echo "Failed (HTTP $HTTP_CODE): $BODY" >&2
   exit 1
