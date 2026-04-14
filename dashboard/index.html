@@ -185,6 +185,16 @@
       color: var(--text-dim);
     }
 
+    .session-subtitle {
+      font-size: 11px;
+      color: var(--text-dim);
+      margin-bottom: 4px;
+      font-family: ui-monospace, SFMono-Regular, monospace;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
     .session-meta .model-badge {
       padding: 1px 6px;
       border-radius: 4px;
@@ -3029,11 +3039,22 @@
         const platformIcon = platform === 'telegram' ? '✈️' : platform === 'slack' ? '💬' : platform === 'whatsapp' ? '📱' : '🖥️';
         const platformLabel = platform.charAt(0).toUpperCase() + platform.slice(1);
 
+        // Build secondary label: when platformName is present, show the raw
+        // tmux name / id underneath so both the human-readable channel name
+        // and the tmux handle are visible at a glance.
+        const primaryLabel = session.platformName || session.name;
+        const secondaryLabel = session.platformName && session.platformName !== session.name
+          ? (platform === 'slack' ? `#${session.platformName}` : session.tmuxSession)
+          : '';
+        const nameTooltip = session.platformName
+          ? `${platformLabel}${platform === 'slack' ? ` #${session.platformName}` : ''} — tmux: ${session.tmuxSession}`
+          : `tmux: ${session.tmuxSession}`;
         el.innerHTML = `
           <div class="session-name-row">
-            <div class="session-name">${escapeHtml(session.platformName || session.name)}</div>
+            <div class="session-name" title="${escapeHtml(nameTooltip)}">${escapeHtml(primaryLabel)}</div>
             <button class="session-close-btn" data-tmux="${escapeHtml(session.tmuxSession)}" data-name="${escapeHtml(session.name)}" onclick="event.stopPropagation();closeSession(this.dataset.tmux,this.dataset.name)" title="Close session">&times;</button>
           </div>
+          ${secondaryLabel ? `<div class="session-subtitle" title="${escapeHtml(nameTooltip)}">${escapeHtml(secondaryLabel)}</div>` : ''}
           <div class="session-meta">
             <span class="type-badge ${sType}">${sType}</span>
             <span class="model-badge ${model}">${model}</span>

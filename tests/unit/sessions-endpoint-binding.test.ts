@@ -13,18 +13,22 @@ const ROUTES_SRC = path.join(process.cwd(), 'src/server/routes.ts');
 describe('/sessions endpoint — binding enrichment', () => {
   const source = fs.readFileSync(ROUTES_SRC, 'utf-8');
 
-  it('sessions response includes a binding field', () => {
-    // Look for the /sessions handler and assert it constructs a binding field.
-    // We keep the check loose: the word "binding" must appear in the route file
-    // near a sessions-listing code block.
-    const sessionsRouteIdx = source.search(/['"]\/sessions['"]|app\.get\(['"]\/sessions/);
+  it('sessions response includes platform + channel/topic naming fields', () => {
+    // Find the /sessions handler; assert it enriches sessions with platform info
+    // (platform, platformId, platformName) so the dashboard can label sessions
+    // by their Slack channel or Telegram topic.
+    const sessionsRouteIdx = source.indexOf("router.get('/sessions'");
     expect(sessionsRouteIdx).toBeGreaterThan(-1);
     const routeBlock = source.slice(sessionsRouteIdx, sessionsRouteIdx + 6000);
-    expect(routeBlock).toMatch(/binding/);
+    expect(routeBlock).toContain('platformName');
+    expect(routeBlock).toMatch(/platform\s*=\s*['"]slack['"]|platform\s*=\s*['"]telegram['"]/);
   });
 
-  it('binding looks up Slack channel name from the adapter registry', () => {
-    // The enrichment must call getChannelRegistry or a similar resolver
-    expect(source).toMatch(/getChannelRegistry|getChannelForSession|channelName/);
+  it('platformName resolves via Slack channel registry', () => {
+    // The enrichment must call getChannelRegistry (or a direct resolver) to
+    // surface the Slack channel name.
+    const sessionsRouteIdx = source.indexOf("router.get('/sessions'");
+    const routeBlock = source.slice(sessionsRouteIdx, sessionsRouteIdx + 6000);
+    expect(routeBlock).toMatch(/getChannelRegistry|channelName/);
   });
 });
