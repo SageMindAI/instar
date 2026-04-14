@@ -53,6 +53,10 @@ export interface SessionManagerConfig {
   authToken?: string;
   /** Server port — used to construct INSTAR_SERVER_URL for HTTP hooks */
   port?: number;
+  /** Anthropic API key for spawned sessions (e.g., 'x' for meridian proxy) */
+  anthropicApiKey?: string;
+  /** Anthropic base URL for spawned sessions (e.g., 'http://127.0.0.1:3456' for meridian) */
+  anthropicBaseUrl?: string;
 }
 
 // ── Job Scheduling ──────────────────────────────────────────────────
