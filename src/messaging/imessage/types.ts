@@ -86,6 +86,45 @@ export interface IMessageConfig {
 
   /** Promise follow-through timeout in minutes (default: 10) */
   promiseTimeoutMinutes?: number;
+
+  /**
+   * Send a brief text message when a message is received, before spawning a session.
+   * Closes the feedback loop within seconds without cluttering the conversation.
+   */
+  immediateAck?: {
+    /** Enable immediate acknowledgment (default: false) */
+    enabled: boolean;
+    /** Text message to send, e.g. "Got it, thinking..." (default: "Got it, thinking...") */
+    message?: string;
+    /** Cooldown in seconds — don't send again within this window (default: 30) */
+    cooldownSeconds?: number;
+  };
+}
+
+// ── JSON-RPC Protocol ──
+
+export interface JsonRpcRequest {
+  jsonrpc: '2.0';
+  id: number;
+  method: string;
+  params?: Record<string, unknown>;
+}
+
+export interface JsonRpcResponse {
+  jsonrpc: '2.0';
+  id: number;
+  result?: unknown;
+  error?: {
+    code: number;
+    message: string;
+    data?: unknown;
+  };
+}
+
+export interface JsonRpcNotification {
+  jsonrpc: '2.0';
+  method: string;
+  params?: Record<string, unknown>;
 }
 
 // ── iMessage Domain Types ──
