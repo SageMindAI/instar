@@ -4,38 +4,22 @@
 
 ## What Changed
 
-Two fixes for volatile state that didn't survive restarts in the Threadline REST adapter and relay offline queue:
+Fixed a silent failure in post-update migration: when Node.js is upgraded in place (e.g., via `brew upgrade node`) while an Instar server is still running, `process.execPath` can point at a binary path that no longer exists on disk. The subsequent spawn fails with ENOENT and post-update migration skips silently, leaving agent configuration stale after auto-updates.
 
-1. **REST thread history now persists to disk.** `ThreadlineRESTServer` previously held thread history in memory only, so restarts lost all conversation history even when the client-side MessageStore had messages on disk. The server now hydrates from `~/.threadline/thread-history.json` on startup and persists debounced (1s) on incoming messages and thread deletions. Writes are atomic (temp file + rename) and size-bounded by the existing `maxMessageHistoryPerThread` cap. New config: `historyPath` (default `~/.threadline/thread-history.json`) and `persistHistory` (default `true`, set `false` for tests/ephemeral servers).
-
-2. **Offline queue default TTL extended from 1h to 24h.** `InMemoryOfflineQueue`'s 1-hour default was shorter than typical offline/restart windows for agents, so messages to offline recipients expired before reconnection. Configurable via `OfflineQueueConfig.defaultTtlMs` if you need different behavior.
-
-No API breakage. Existing servers/queues using defaults just get more durable behavior.
+`UpdateChecker.postUpdateMigration` now guards `process.execPath` with an `existsSync` check and falls back to `node` on PATH when the resolved exec path has been deleted.
 
 ## What to Tell Your User
 
-- **Conversation history survives restarts**: "Your thread history will stick around now even if I get restarted — no more losing context from earlier in our conversation."
-- **Messages wait longer for offline agents**: "If you message another agent who's offline, the message will wait up to a day for them to come back online instead of expiring after an hour."
+- **More reliable self-updates**: "If your system's Node was upgraded while I was running, my next auto-update will still apply its migrations correctly instead of silently skipping them."
 
 ## Summary of New Capabilities
 
 | Capability | How to Use |
 |-----------|-----------|
-| Persistent REST thread history | Automatic (opt-out via `persistHistory: false`) |
-| 24h offline message retention | Automatic (override via `defaultTtlMs`) |
+| Resilient post-update migration across in-place Node upgrades | automatic |
 
 ## Evidence
 
-Reproduction before fix:
-1. Start `npx @anthropic-ai/threadline serve --port 18800`
-2. Receive messages on a thread → `GET /threads/{id}` returns them
-3. Restart the server
-4. `GET /threads/{id}` returns 404 — history lost
+Reproduction: Homebrew users who ran `brew upgrade node` between Instar server starts reported repeated `UpdateChecker.postUpdateMigration` degradation events with reason `spawn /opt/homebrew/Cellar/node@22/22.22.2/bin/node ENOENT`. Root cause traced to `src/core/UpdateChecker.ts:282` where `cmd = process.execPath` was spawned unconditionally.
 
-After fix:
-1. Same steps 1–2
-2. Within 1s, `~/.threadline/thread-history.json` contains the thread
-3. Restart the server
-4. `GET /threads/{id}` returns the same messages — hydrated from disk
-
-Unit tests (40/40 passing in `OfflineQueue.test.ts` and `RESTServerE2E.test.ts`) cover the default config values and existing REST flows; persistence is best-effort (wrapped in try/catch) so disk failures don't crash the server.
+Verified fix: Before — `execFile(process.execPath, [shadowCliJs, 'migrate'])` rejects with ENOENT when the Cellar path is gone; degradation reporter fires; migration skipped. After — `fs.existsSync(process.execPath)` returns false, `cmd` falls back to `'node'`, spawn resolves via PATH, migration runs. Unit tests for UpdateChecker (13) continue to pass.
