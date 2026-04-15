@@ -3757,6 +3757,22 @@ export async function startServer(options: StartOptions): Promise<void> {
           captureSessionOutput: (name, lines) => {
             return sessionManager.captureOutput(name, lines);
           },
+          getRecentTopicMessages: (topicId, limit) => {
+            // Used by context-exhaustion recovery to capture any in-flight agent
+            // reply that lands after the session is killed, so the fresh session
+            // can avoid duplicating it. TopicMemory is the authoritative source
+            // once the adapter has written the reply to the store.
+            if (!topicMemory || !topicMemory.isReady()) return [];
+            try {
+              return topicMemory.getRecentMessages(topicId, limit).map(m => ({
+                text: m.text,
+                fromUser: m.fromUser,
+                timestamp: m.timestamp,
+              }));
+            } catch {
+              return [];
+            }
+          },
           respawnSessionFresh: async (topicId, _sessionName, recoveryPrompt) => {
             // Fresh respawn for context exhaustion — explicitly clear resume UUID
             // so the new session starts clean with history, not --resume.
@@ -5502,6 +5518,12 @@ export async function startServer(options: StartOptions): Promise<void> {
       console.log(pc.yellow('  Messaging tone gate: inactive (no IntelligenceProvider available)'));
     }
 
+    // Outbound dedup gate — deterministic near-duplicate detection on every
+    // outbound agent message. Catches respawn races and idempotency gaps.
+    const { OutboundDedupGate } = await import('../core/OutboundDedupGate.js');
+    const outboundDedupGate = new OutboundDedupGate();
+    console.log(pc.green('  Outbound dedup gate: active (word-3gram Jaccard, threshold 0.7, 5min window)'));
+
     // Response Review Pipeline (Coherence Gate) — evaluates agent responses before delivery.
     // Prefers the shared IntelligenceProvider (subscription-compatible) so the gate works
     // even without ANTHROPIC_API_KEY. Falls back to direct Anthropic API if a key is set
@@ -5603,7 +5625,7 @@ export async function startServer(options: StartOptions): Promise<void> {
       }, { description: 'Feature discovery state and behavioral contract summary' });
     }
 
-    const server = new AgentServer({ config, sessionManager, state, scheduler, telegram, relationships, feedback, feedbackAnomalyDetector, dispatches, updateChecker, autoUpdater, autoDispatcher, quotaTracker, quotaManager, publisher, viewer, tunnel, evolution, watchdog, topicMemory, triageNurse, projectMapper, coherenceGate: scopeVerifier, contextHierarchy, canonicalState, operationGate, sentinel, adaptiveTrust, memoryMonitor, orphanReaper, coherenceMonitor, commitmentTracker, semanticMemory, activitySentinel, messageRouter, summarySentinel, spawnManager, systemReviewer, capabilityMapper, selfKnowledgeTree, coverageAuditor, topicResumeMap: _topicResumeMap ?? undefined, autonomyManager, trustElevationTracker, autonomousEvolution, coordinator: coordinator.enabled ? coordinator : undefined, localSigningKeyPem, whatsapp: whatsappAdapter, slack: slackAdapter, imessage: imessageAdapter, whatsappBusinessBackend, messageBridge, hookEventReceiver, worktreeMonitor, subagentTracker, instructionsVerifier, handshakeManager: threadlineHandshake, threadlineRouter, threadlineRelayClient, threadlineReplyWaiters, listenerManager: listenerManager ?? undefined, responseReviewGate, messagingToneGate, telemetryHeartbeat, pasteManager, featureRegistry, discoveryEvaluator, unifiedTrust, liveConfig });
+    const server = new AgentServer({ config, sessionManager, state, scheduler, telegram, relationships, feedback, feedbackAnomalyDetector, dispatches, updateChecker, autoUpdater, autoDispatcher, quotaTracker, quotaManager, publisher, viewer, tunnel, evolution, watchdog, topicMemory, triageNurse, projectMapper, coherenceGate: scopeVerifier, contextHierarchy, canonicalState, operationGate, sentinel, adaptiveTrust, memoryMonitor, orphanReaper, coherenceMonitor, commitmentTracker, semanticMemory, activitySentinel, messageRouter, summarySentinel, spawnManager, systemReviewer, capabilityMapper, selfKnowledgeTree, coverageAuditor, topicResumeMap: _topicResumeMap ?? undefined, autonomyManager, trustElevationTracker, autonomousEvolution, coordinator: coordinator.enabled ? coordinator : undefined, localSigningKeyPem, whatsapp: whatsappAdapter, slack: slackAdapter, imessage: imessageAdapter, whatsappBusinessBackend, messageBridge, hookEventReceiver, worktreeMonitor, subagentTracker, instructionsVerifier, handshakeManager: threadlineHandshake, threadlineRouter, threadlineRelayClient, threadlineReplyWaiters, listenerManager: listenerManager ?? undefined, responseReviewGate, messagingToneGate, outboundDedupGate, telemetryHeartbeat, pasteManager, featureRegistry, discoveryEvaluator, unifiedTrust, liveConfig });
     await server.start();
 
     // Connect DegradationReporter downstream systems now that everything is initialized.

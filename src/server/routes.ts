@@ -83,6 +83,7 @@ import type { SubagentTracker } from '../monitoring/SubagentTracker.js';
 import type { InstructionsVerifier } from '../monitoring/InstructionsVerifier.js';
 import type { CoherenceGate } from '../core/CoherenceGate.js';
 import type { MessagingToneGate } from '../core/MessagingToneGate.js';
+import { isJunkPayload } from '../core/junk-payload.js';
 import type { PasteManager } from '../paste/PasteManager.js';
 import type { WebSocketManager } from './WebSocketManager.js';
 import { TruncationDetector } from '../paste/TruncationDetector.js';
@@ -152,6 +153,11 @@ export interface RouteContext {
    *  Uses the shared IntelligenceProvider (Claude CLI subscription or Anthropic API).
    *  Catches CLI commands, file paths, config syntax leaking to users. */
   messagingToneGate: MessagingToneGate | null;
+  /** Deterministic dedup gate. Blocks near-duplicate outbound messages in
+   *  the same conversation — universal safety net against respawn races,
+   *  idempotency gaps, and other lifecycle hazards. No LLM call, runs on
+   *  every outbound message. */
+  outboundDedupGate: import('../core/OutboundDedupGate.js').OutboundDedupGate | null;
   telemetryHeartbeat: import('../monitoring/TelemetryHeartbeat.js').TelemetryHeartbeat | null;
   pasteManager: PasteManager | null;
   wsManager: WebSocketManager | null;
@@ -197,10 +203,26 @@ export function createRoutes(ctx: RouteContext): Router {
     text: string,
     channel: string,
     res: import('express').Response,
+    options?: { topicId?: number },
   ): Promise<boolean> {
     if (!ctx.messagingToneGate) return false; // No gate configured — pass through
     try {
-      const result = await ctx.messagingToneGate.review(text, { channel });
+      // Fetch recent conversation context so the gate can judge appropriateness.
+      // Only wired for telegram today (TopicMemory is keyed on topicId). Other
+      // channels can add their own context source as needed.
+      let recentMessages: import('../core/MessagingToneGate.js').ToneReviewContextMessage[] | undefined;
+      if (options?.topicId && ctx.topicMemory) {
+        try {
+          const rows = ctx.topicMemory.getRecentMessages(options.topicId, 6);
+          recentMessages = rows.map((m) => ({
+            role: m.fromUser ? ('user' as const) : ('agent' as const),
+            text: m.text,
+          }));
+        } catch {
+          // Non-fatal — gate runs without context
+        }
+      }
+      const result = await ctx.messagingToneGate.review(text, { channel, recentMessages });
       if (!result.pass) {
         res.status(422).json({
           error: 'tone-gate-blocked',
@@ -212,6 +234,80 @@ export function createRoutes(ctx: RouteContext): Router {
       }
     } catch {
       // Fail-open — MessagingToneGate already has fail-open semantics, but belt-and-suspenders
+    }
+    return false;
+  }
+
+  /**
+   * Junk-payload guard. Refuses trivially-short, debug-looking strings
+   * ("test", "asdf", "hi", "ping", etc.) from reaching the user. Catches
+   * leaked sanity-check calls and stray debug output from session code paths
+   * that didn't mean to publish to the user.
+   *
+   * Returns true if blocked (response already sent). False if safe to proceed.
+   *
+   * Bypass with metadata.allowDebugText = true for intentional short replies.
+   */
+  function checkJunkPayload(
+    text: string,
+    res: import('express').Response,
+    options: { force?: boolean },
+  ): boolean {
+    if (options.force) return false;
+    const result = isJunkPayload(text);
+    if (result.junk) {
+      res.status(422).json({
+        error: 'junk-payload-blocked',
+        issue: `Message looks like a debug/sanity-check payload (${result.reason}).`,
+        suggestion:
+          'If this is an intentional short reply, retry with metadata.allowDebugText = true. ' +
+          'Otherwise, investigate the code path that emitted this — it likely leaked from a test or validation check.',
+      });
+      return true;
+    }
+    return false;
+  }
+
+  /**
+   * Outbound dedup gate. Catches near-duplicate agent messages in the same
+   * conversation to prevent double-replies from respawn races and similar
+   * lifecycle hazards. Universal safety net — runs for every outbound
+   * messaging route.
+   *
+   * Returns true if blocked (response already sent). False if safe to proceed.
+   *
+   * Callers can pass `metadata.allowDuplicate = true` to bypass this check for
+   * intentional re-sends (e.g., user explicitly asked "say that again").
+   */
+  async function checkOutboundDedup(
+    text: string,
+    res: import('express').Response,
+    options: { topicId?: number; force?: boolean },
+  ): Promise<boolean> {
+    if (options.force) return false;
+    if (!ctx.outboundDedupGate) return false; // Gate not wired — pass through
+    if (!options.topicId || !ctx.topicMemory) return false;
+    try {
+      const rows = ctx.topicMemory.getRecentMessages(options.topicId, 10);
+      const recent = rows
+        .filter((m) => !m.fromUser && m.text)
+        .map((m) => ({ text: m.text, timestamp: new Date(m.timestamp).getTime() }));
+      const result = ctx.outboundDedupGate.check({ text, recent });
+      if (result.duplicate) {
+        res.status(422).json({
+          error: 'outbound-dedup-blocked',
+          issue: 'Near-duplicate of a recent outbound message in this conversation',
+          similarity: result.similarity,
+          matchedText: result.matchedText,
+          suggestion:
+            'If this duplication is intentional, retry with metadata.allowDuplicate = true. ' +
+            'Otherwise investigate why the same answer is being generated twice (typical cause: ' +
+            'session respawn race, retry without idempotency key).',
+        });
+        return true;
+      }
+    } catch {
+      // Fail-open — gate errors never block delivery
     }
     return false;
   }
@@ -3353,7 +3449,19 @@ export function createRoutes(ctx: RouteContext): Router {
 
     // Tone gate — skip for proxy messages (PresenceProxy etc. are system-generated)
     const isProxy = metadata?.isProxy === true;
-    if (!isProxy && await checkMessagingTone(text, 'telegram', res)) return;
+
+    // Junk-payload guard — catches leaked debug/sanity-check strings.
+    // Runs first (no I/O) so obvious junk never pays for tone/dedup checks.
+    const allowDebugText = metadata?.allowDebugText === true;
+    if (!isProxy && checkJunkPayload(text, res, { force: allowDebugText })) return;
+
+    if (!isProxy && await checkMessagingTone(text, 'telegram', res, { topicId })) return;
+
+    // Outbound dedup gate — catches near-duplicate agent messages from respawn
+    // races and similar lifecycle hazards. Callers can bypass with
+    // metadata.allowDuplicate=true for intentional re-sends.
+    const allowDuplicate = metadata?.allowDuplicate === true;
+    if (!isProxy && await checkOutboundDedup(text, res, { topicId, force: allowDuplicate })) return;
 
     try {
       await ctx.telegram.sendToTopic(topicId, text, { skipStallClear: isProxy });
@@ -3404,7 +3512,7 @@ export function createRoutes(ctx: RouteContext): Router {
       return;
     }
 
-    if (await checkMessagingTone(text, 'telegram', res)) return;
+    if (await checkMessagingTone(text, 'telegram', res, { topicId: updatesTopicId })) return;
 
     try {
       await ctx.telegram.sendToTopic(updatesTopicId, text);

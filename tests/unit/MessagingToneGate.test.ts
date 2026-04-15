@@ -180,6 +180,80 @@ describe('MessagingToneGate', () => {
       const boundaryMatches = capturedPrompt.match(/<<<MSG_BOUNDARY_[a-f0-9]+>>>/g);
       expect(boundaryMatches).toHaveLength(2);
     });
+
+    it('includes recent conversation context when provided', async () => {
+      let capturedPrompt = '';
+      const provider = mockProvider((p) => {
+        capturedPrompt = p;
+        return JSON.stringify({ pass: true, issue: '', suggestion: '' });
+      });
+      const gate = new MessagingToneGate(provider);
+
+      await gate.review('Here is my answer.', {
+        channel: 'telegram',
+        recentMessages: [
+          { role: 'user', text: 'explain what happened' },
+          { role: 'agent', text: 'looking into it' },
+        ],
+      });
+
+      expect(capturedPrompt).toContain('RECENT CONVERSATION');
+      expect(capturedPrompt).toContain('USER: explain what happened');
+      expect(capturedPrompt).toContain('AGENT: looking into it');
+    });
+
+    it('marks no prior context when recentMessages is omitted', async () => {
+      let capturedPrompt = '';
+      const provider = mockProvider((p) => {
+        capturedPrompt = p;
+        return JSON.stringify({ pass: true, issue: '', suggestion: '' });
+      });
+      const gate = new MessagingToneGate(provider);
+
+      await gate.review('Hello', { channel: 'telegram' });
+
+      expect(capturedPrompt).toContain('(no prior context available)');
+    });
+
+    it('truncates very long recent messages to keep prompt size bounded', async () => {
+      let capturedPrompt = '';
+      const provider = mockProvider((p) => {
+        capturedPrompt = p;
+        return JSON.stringify({ pass: true, issue: '', suggestion: '' });
+      });
+      const gate = new MessagingToneGate(provider);
+
+      const longText = 'a'.repeat(2000);
+      await gate.review('Reply', {
+        channel: 'telegram',
+        recentMessages: [{ role: 'user', text: longText }],
+      });
+
+      // Truncated to 500 chars + ellipsis
+      expect(capturedPrompt).toContain('a'.repeat(500) + '…');
+      expect(capturedPrompt).not.toContain('a'.repeat(501));
+    });
+
+    it('keeps only the last 6 messages when more are provided', async () => {
+      let capturedPrompt = '';
+      const provider = mockProvider((p) => {
+        capturedPrompt = p;
+        return JSON.stringify({ pass: true, issue: '', suggestion: '' });
+      });
+      const gate = new MessagingToneGate(provider);
+
+      const messages = Array.from({ length: 10 }, (_, i) => ({
+        role: 'user' as const,
+        text: `message-${i}`,
+      }));
+      await gate.review('Reply', { channel: 'telegram', recentMessages: messages });
+
+      // Should include the last 6 (message-4 through message-9) and NOT message-0 through message-3
+      expect(capturedPrompt).toContain('message-9');
+      expect(capturedPrompt).toContain('message-4');
+      expect(capturedPrompt).not.toContain('message-3');
+      expect(capturedPrompt).not.toContain('message-0');
+    });
   });
 
   describe('parse robustness', () => {

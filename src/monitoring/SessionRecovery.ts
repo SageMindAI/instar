@@ -71,6 +71,16 @@ export interface SessionRecoveryDeps {
   captureSessionOutput?: (sessionName: string, lines: number) => string | null;
   /** Respawn a session fresh (no --resume) for context exhaustion recovery */
   respawnSessionFresh?: (topicId: number, sessionName?: string, recoveryPrompt?: string) => Promise<void>;
+  /**
+   * Get recent messages for a topic (used by context-exhaustion recovery to
+   * capture any in-flight agent reply that lands between detection and respawn,
+   * so the fresh session can avoid duplicating it).
+   */
+  getRecentTopicMessages?: (topicId: number, limit: number) => Array<{
+    text: string;
+    fromUser: boolean;
+    timestamp: string | number | Date;
+  }>;
 }
 
 // ============================================================================
@@ -303,16 +313,33 @@ export class SessionRecovery extends EventEmitter {
 
     this.emit('recovery:context_exhaustion', { topicId, sessionName, matchedPattern, attemptNumber });
 
+    // Record detection moment so we can identify any in-flight agent reply that
+    // lands AFTER this point — the dying session may have generated a reply that
+    // hasn't been written to topic history yet at respawn time.
+    const detectedAt = Date.now();
+
     // Kill the session — it's stuck at the "conversation too long" prompt
     this.deps.killSession(sessionName);
 
-    await new Promise(resolve => setTimeout(resolve, 3000));
+    // Grace period: poll topic history for any in-flight agent reply from the
+    // dying session. If one lands, capture its text so the fresh session can
+    // avoid duplicating it. The previous 3s static sleep left a race window
+    // where a reply landing at T+4s would never be known to the fresh session.
+    const inFlightReply = await this.waitForInFlightReply(topicId, detectedAt);
 
-    const recoveryPrompt = sanitizeForPrompt(
+    const baseRecoveryPrompt =
       `[RECOVERY] Your previous session hit the context window limit — the conversation became too long ` +
       `for Claude to process. The session was killed and restarted FRESH with thread history. ` +
       `You are NOT resuming the old conversation — this is a clean start with the recent message history ` +
-      `loaded as context. Continue helping the user from where the conversation left off.`
+      `loaded as context. Continue helping the user from where the conversation left off.`;
+
+    const recoveryPrompt = sanitizeForPrompt(
+      inFlightReply
+        ? `${baseRecoveryPrompt}\n\n` +
+          `IMPORTANT: Your previous session had ALREADY SENT this reply to the user before it was restarted — ` +
+          `do NOT repeat any part of it. Acknowledge the restart to the user, then continue from where the reply left off:\n\n` +
+          `<previous_reply>\n${inFlightReply}\n</previous_reply>`
+        : baseRecoveryPrompt
     );
 
     // Use respawnSessionFresh if available (no --resume), otherwise fall back to normal respawn
@@ -324,7 +351,9 @@ export class SessionRecovery extends EventEmitter {
         recovered: true,
         failureType: 'context_exhaustion',
         attemptNumber,
-        message: `Recovered from context exhaustion (pattern: "${matchedPattern}", attempt ${attemptNumber}) — fresh session spawned`,
+        message: inFlightReply
+          ? `Recovered from context exhaustion with in-flight reply captured (pattern: "${matchedPattern}", attempt ${attemptNumber}) — fresh session knows what was already sent`
+          : `Recovered from context exhaustion (pattern: "${matchedPattern}", attempt ${attemptNumber}) — fresh session spawned`,
       };
     } catch (err: any) { // @silent-fallback-ok — recovery code; returning recovered:false IS the degradation signal
       return {
@@ -334,6 +363,48 @@ export class SessionRecovery extends EventEmitter {
         message: `Context exhaustion recovery respawn failed: ${err.message}`,
       };
     }
+  }
+
+  /**
+   * After a context-exhausted session is killed, an in-flight reply it was
+   * generating may still land in topic history a few seconds later. This
+   * helper polls history for a new agent message with a timestamp after
+   * detection, returning its text if found (or null if nothing landed in
+   * the grace window).
+   *
+   * Purpose: pass the captured reply into the recovery prompt so the fresh
+   * session does not re-answer a question the dying session already answered.
+   * Without this, the fresh session's bootstrap snapshot is a view of history
+   * that predates the dying reply, and the fresh session duplicates output.
+   *
+   * Grace window: 7s. Empirically, in-flight replies land 2-6s after detection;
+   * 7s covers the common case without adding much latency when nothing arrives.
+   * Breaks early the moment a reply is seen.
+   */
+  private async waitForInFlightReply(topicId: number, detectedAt: number): Promise<string | null> {
+    if (!this.deps.getRecentTopicMessages) {
+      // No topic-history source — fall back to the legacy 3s static delay
+      // to preserve previous behavior and give the kill + filesystem time to settle.
+      await new Promise(resolve => setTimeout(resolve, 3000));
+      return null;
+    }
+
+    const graceMs = 7000;
+    const pollMs = 500;
+    const start = Date.now();
+    while (Date.now() - start < graceMs) {
+      await new Promise(resolve => setTimeout(resolve, pollMs));
+      try {
+        const recent = this.deps.getRecentTopicMessages(topicId, 5);
+        for (const m of recent) {
+          const ts = new Date(m.timestamp).getTime();
+          if (!m.fromUser && ts > detectedAt && m.text && m.text.trim().length > 0) {
+            return m.text;
+          }
+        }
+      } catch { /* best effort — continue polling */ }
+    }
+    return null;
   }
 
   private async recoverFromCrash(

@@ -49,7 +49,9 @@ function makeTmpDir(): string {
 
 async function runWithTimers<T>(fn: () => Promise<T>): Promise<T> {
   const promise = fn();
-  await vi.advanceTimersByTimeAsync(5000);
+  // Advance past the 7s grace window used by context-exhaustion recovery's
+  // in-flight reply capture plus the 3s legacy fallback sleep.
+  await vi.advanceTimersByTimeAsync(10000);
   return promise;
 }
 
@@ -344,6 +346,141 @@ describe('SessionRecovery — context exhaustion', () => {
     const stats = recovery.getStats(0);
     expect(stats.attempts.contextExhaustion).toBe(1);
     expect(stats.successes.contextExhaustion).toBe(1);
+  });
+
+  // ==========================================================================
+  // In-flight reply capture — prevents the fresh session from duplicating
+  // a reply that the dying session had already sent but hadn't yet committed
+  // to topic history at respawn time.
+  //
+  // Reproduction of the 2026-04-15 bug where new me re-answered an "older
+  // path" question because the snapshot taken at T+3s didn't include the old
+  // me's reply that landed at T+5s.
+  // ==========================================================================
+
+  it('captures an in-flight reply that lands during the grace window and puts it in the recovery prompt', async () => {
+    const captureSessionOutput = vi.fn(() => 'conversation too long');
+    const respawnSessionFresh = vi.fn(async () => {});
+
+    // Simulate the dying session's reply landing in topic history at T+4s
+    // (after kill, during grace window, before respawn).
+    const detectedAt = Date.now();
+    let callCount = 0;
+    const getRecentTopicMessages = vi.fn((_topicId: number, _limit: number) => {
+      callCount++;
+      // First 3 polls return only user messages (reply hasn't committed yet)
+      // After that, the in-flight reply appears
+      if (callCount < 3) {
+        return [
+          { text: 'user asked a question', fromUser: true, timestamp: detectedAt - 1000 },
+        ];
+      }
+      return [
+        { text: 'user asked a question', fromUser: true, timestamp: detectedAt - 1000 },
+        {
+          text: 'in-flight agent reply that was mid-generation when context exhausted',
+          fromUser: false,
+          timestamp: detectedAt + 4000,
+        },
+      ];
+    });
+
+    deps = createMockDeps({
+      isSessionAlive: vi.fn(() => true),
+      captureSessionOutput,
+      respawnSessionFresh,
+      getRecentTopicMessages,
+    });
+    recovery = new SessionRecovery({ enabled: true, projectDir: tmpDir }, deps);
+
+    const result = await runWithTimers(() => recovery.checkAndRecover(1, 'stuck-session'));
+
+    expect(result.recovered).toBe(true);
+    expect(result.message).toContain('in-flight reply captured');
+
+    // The recovery prompt passed to respawn must contain the captured reply
+    expect(respawnSessionFresh).toHaveBeenCalled();
+    const promptArg = (respawnSessionFresh.mock.calls[0] as any[])[2] as string;
+    expect(promptArg).toContain('in-flight agent reply that was mid-generation');
+    expect(promptArg).toContain('ALREADY SENT');
+    expect(promptArg).toContain('do NOT repeat');
+  });
+
+  it('recovers normally when no in-flight reply lands during grace window', async () => {
+    const captureSessionOutput = vi.fn(() => 'conversation too long');
+    const respawnSessionFresh = vi.fn(async () => {});
+
+    // getRecentTopicMessages always returns only an old user message — no new agent reply
+    const detectedAt = Date.now();
+    const getRecentTopicMessages = vi.fn(() => [
+      { text: 'user question', fromUser: true, timestamp: detectedAt - 2000 },
+    ]);
+
+    deps = createMockDeps({
+      isSessionAlive: vi.fn(() => true),
+      captureSessionOutput,
+      respawnSessionFresh,
+      getRecentTopicMessages,
+    });
+    recovery = new SessionRecovery({ enabled: true, projectDir: tmpDir }, deps);
+
+    const result = await runWithTimers(() => recovery.checkAndRecover(1, 'stuck-session'));
+
+    expect(result.recovered).toBe(true);
+    expect(result.message).not.toContain('in-flight reply captured');
+
+    const promptArg = (respawnSessionFresh.mock.calls[0] as any[])[2] as string;
+    expect(promptArg).not.toContain('ALREADY SENT');
+    expect(promptArg).toContain('context window limit');
+  });
+
+  it('ignores agent messages older than the detection timestamp (pre-existing replies)', async () => {
+    // Regression guard: we must only capture replies that land AFTER the
+    // exhaustion was detected. A reply the user sees in history from 10
+    // seconds before the failure is not "in-flight."
+    const captureSessionOutput = vi.fn(() => 'conversation too long');
+    const respawnSessionFresh = vi.fn(async () => {});
+
+    const detectedAt = Date.now();
+    const getRecentTopicMessages = vi.fn(() => [
+      { text: 'old agent reply from before the failure', fromUser: false, timestamp: detectedAt - 10000 },
+    ]);
+
+    deps = createMockDeps({
+      isSessionAlive: vi.fn(() => true),
+      captureSessionOutput,
+      respawnSessionFresh,
+      getRecentTopicMessages,
+    });
+    recovery = new SessionRecovery({ enabled: true, projectDir: tmpDir }, deps);
+
+    const result = await runWithTimers(() => recovery.checkAndRecover(1, 'stuck-session'));
+
+    expect(result.recovered).toBe(true);
+    expect(result.message).not.toContain('in-flight reply captured');
+
+    const promptArg = (respawnSessionFresh.mock.calls[0] as any[])[2] as string;
+    expect(promptArg).not.toContain('old agent reply');
+  });
+
+  it('falls back to a 3s static delay when getRecentTopicMessages is not wired', async () => {
+    // Preserves prior behavior when the dep is absent (e.g., pre-wire servers).
+    const captureSessionOutput = vi.fn(() => 'conversation too long');
+    const respawnSessionFresh = vi.fn(async () => {});
+
+    deps = createMockDeps({
+      isSessionAlive: vi.fn(() => true),
+      captureSessionOutput,
+      respawnSessionFresh,
+      // getRecentTopicMessages intentionally omitted
+    });
+    recovery = new SessionRecovery({ enabled: true, projectDir: tmpDir }, deps);
+
+    const result = await runWithTimers(() => recovery.checkAndRecover(1, 'stuck-session'));
+
+    expect(result.recovered).toBe(true);
+    // Without the dep, it still works — just no in-flight capture
+    expect(result.message).not.toContain('in-flight reply captured');
   });
 });
 
