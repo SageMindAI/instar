@@ -606,7 +606,7 @@ The relay maintains minimal state:
 |-------|---------------------|---------------------|----------|
 | Active WebSocket connections | In-memory | In-memory | Duration of connection |
 | Presence registry (who's online) | In-memory | Durable Object | Connection lifetime + 60s grace |
-| Offline message queue | Upstash Redis (serverless) | Managed Redis cluster | Configurable TTL (default: 1 hour) |
+| Offline message queue | Upstash Redis (serverless) | Managed Redis cluster | Configurable TTL (default: 24 hours) |
 | Rate limit counters | In-memory | In-memory | Rolling window (1 minute) |
 | Abuse ban list | In-memory (optional Redis) | Durable Object / Redis | Configurable (default: 24 hours) |
 
@@ -620,9 +620,9 @@ When a message arrives for an agent that is not currently connected:
 
 ```
 Agent A sends message → Relay checks presence → Agent B offline
-  → Relay stores encrypted envelope in Redis (TTL: 1 hour)
+  → Relay stores encrypted envelope in Redis (TTL: 24 hours)
   → Redis key: tl:queue:{recipientFingerprint}:{messageId}
-  → Relay sends { type: "ack", status: "queued", ttl: 3600 } to Agent A
+  → Relay sends { type: "ack", status: "queued", ttl: 86400 } to Agent A
 
 Agent B connects within TTL:
   → Relay reads all queued messages from Redis, delivers in order
@@ -639,7 +639,7 @@ TTL expires without Agent B connecting:
 - Per-recipient TOTAL queue limit: 500 messages across all senders. This prevents Sybil amplification — where an attacker creates many identities to fill a target's queue.
 - Total payload limit: 10MB per recipient queue.
 
-**Why 1 hour default**: Threadline conversations are interactive. If an agent is offline for more than an hour, the conversation context has likely shifted. Long-term message persistence is the sending agent's responsibility (via thread history storage).
+**Why 24 hour default**: Agents are often offline across sleep cycles, restarts, and maintenance windows. A 1-hour window expired before typical reconnection, causing silent message loss. 24 hours covers common offline windows while remaining bounded. Long-term message persistence beyond the TTL is the sending agent's responsibility (via thread history storage — now persisted to disk by `ThreadlineRESTServer`).
 
 ### 5.4. Rate Limiting
 
@@ -879,7 +879,7 @@ The A2A bridge is the relay's highest-risk surface — it accepts unauthenticate
 | **Agent enumeration** | Discovery returns only `public` agents. Rate-limited. No wildcard queries. |
 | **Sybil attack (fake agents)** | Rate limiting per agent. Trust evaluation is the receiving agent's responsibility. |
 | **DoS on relay** | Per-IP connection limits, per-agent rate limits, abuse detection. Phase 5: Cloudflare DDoS protection at edge. |
-| **Offline queue poisoning** | Per-sender (100) and per-recipient total (500) queue limits, 10MB cap. TTL (1 hour). Sybil amplification mitigated by per-recipient total cap. |
+| **Offline queue poisoning** | Per-sender (100) and per-recipient total (500) queue limits, 10MB cap. TTL (24 hours). Sybil amplification mitigated by per-recipient total cap. |
 
 ### 7.2. Trust Model
 
