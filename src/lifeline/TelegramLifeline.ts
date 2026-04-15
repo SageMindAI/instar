@@ -1648,6 +1648,19 @@ export class TelegramLifeline {
       console.warn(`[Lifeline] Node symlink update failed (non-critical): ${err}`);
     }
 
+    // Also make sure the boot wrapper exists. launchd will refuse to spawn
+    // the lifeline after any restart if this file has been deleted or
+    // migrated away, so we regenerate it here while we still have a live
+    // process to do so.
+    try {
+      const { ensureBootWrapper } = await import('../commands/setup.js');
+      if (ensureBootWrapper(this.projectConfig.projectDir)) {
+        console.log('[Lifeline] Boot wrapper self-healed: regenerated missing launchd entry point');
+      }
+    } catch (err) {
+      console.warn(`[Lifeline] Boot wrapper self-heal failed (non-critical): ${err}`);
+    }
+
     try {
       const content = fs.readFileSync(plistPath, 'utf-8');
 

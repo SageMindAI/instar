@@ -122,6 +122,13 @@ export class MultiMachineCoordinator extends EventEmitter {
 
     this._enabled = true;
     this._identity = this.identityManager.loadIdentity();
+
+    // Self-heal: if the registry is missing our own machine, re-register it
+    // before any updateRole call. Without this, a registry wiped by a sync
+    // corruption, disk glitch, or manual cleanup hard-crashes the server
+    // on boot because updateRole throws on unknown machineIds.
+    this.identityManager.ensureSelfRegistered(this._identity, 'standby');
+
     this.securityLog.initialize();
 
     // Create HeartbeatManager with our machine ID

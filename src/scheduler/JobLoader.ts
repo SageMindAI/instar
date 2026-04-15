@@ -30,10 +30,18 @@ const GROUNDING_EXEMPT_SLUGS: ReadonlySet<string> = new Set([
 /**
  * Load and validate job definitions from a JSON file.
  * Throws on invalid structure — fail loud at startup, not at runtime.
+ *
+ * Missing file is NOT fatal: treated as "no jobs configured" so a
+ * fresh or partially-initialized agent still boots. The scheduler
+ * handles an empty list correctly.
  */
 export function loadJobs(jobsFile: string): JobDefinition[] {
   if (!fs.existsSync(jobsFile)) {
-    throw new Error(`Jobs file not found: ${jobsFile}`);
+    console.warn(
+      `[JobLoader] Jobs file not found: ${jobsFile} — treating as empty job list. ` +
+      `Create the file to configure recurring jobs.`
+    );
+    return [];
   }
 
   let raw: unknown;

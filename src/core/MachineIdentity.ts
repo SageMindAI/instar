@@ -278,6 +278,24 @@ export class MachineIdentityManager {
   }
 
   /**
+   * Ensure this machine has a registry entry, registering it with the given
+   * role if missing. Safe to call on every startup — it's a no-op when the
+   * machine is already present. Without this, a registry wiped by sync
+   * corruption or a manual cleanup would brick the coordinator on boot,
+   * since `updateRole` hard-throws on unknown machines.
+   */
+  ensureSelfRegistered(identity: MachineIdentity, role: MachineRole = 'standby'): boolean {
+    const registry = this.loadRegistry();
+    if (registry.machines[identity.machineId]) return false;
+
+    console.warn(
+      `[MachineIdentity] Machine ${identity.machineId} (${identity.name}) missing from registry — self-registering with role "${role}".`
+    );
+    this.registerMachine(identity, role);
+    return true;
+  }
+
+  /**
    * Register a machine in the registry.
    */
   registerMachine(identity: MachineIdentity, role: MachineRole = 'standby'): void {

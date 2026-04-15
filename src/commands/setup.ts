@@ -814,7 +814,7 @@ function escapeXml(str: string): string {
  * Using node directly as the plist entry point bypasses this because
  * user-installed binaries (homebrew, nvm) are not subject to TCC restrictions.
  */
-function installBootWrapper(projectDir: string): { sh: string; js: string } {
+export function installBootWrapper(projectDir: string): { sh: string; js: string } {
   const stateDir = path.join(projectDir, '.instar');
   const shPath = path.join(stateDir, 'instar-boot.sh');
 
@@ -1077,6 +1077,38 @@ child.on('error', (err) => {
   fs.writeFileSync(shPath, bashWrapper, { mode: 0o755 });
   fs.writeFileSync(jsPath, jsWrapper, { mode: 0o755 });
   return { sh: shPath, js: jsPath };
+}
+
+/**
+ * Ensure the boot wrapper exists on disk, regenerating it if missing.
+ *
+ * The boot wrapper is what launchd exec's — if it's gone, launchd can't
+ * bring the agent back after any restart. The wrapper itself can't
+ * regenerate itself (chicken-and-egg), but any running process that
+ * descends from it can, which closes the loop for future restarts.
+ *
+ * Returns `true` if a wrapper was written (was missing), `false` if
+ * it was already present and nothing was done.
+ */
+export function ensureBootWrapper(projectDir: string): boolean {
+  const stateDir = path.join(projectDir, '.instar');
+  let usesCjs = false;
+  try {
+    const pkgJson = JSON.parse(fs.readFileSync(path.join(projectDir, 'package.json'), 'utf-8'));
+    usesCjs = pkgJson.type === 'module';
+  } catch { /* no package.json — use .js */ }
+  const jsExt = usesCjs ? '.cjs' : '.js';
+  const jsPath = path.join(stateDir, `instar-boot${jsExt}`);
+  const shPath = path.join(stateDir, 'instar-boot.sh');
+
+  if (fs.existsSync(jsPath) && fs.existsSync(shPath)) return false;
+
+  console.warn(
+    `[setup] Boot wrapper(s) missing under ${stateDir} — regenerating. ` +
+    `If the agent had been restarted by launchd in this state, it would have been permanently dead.`
+  );
+  installBootWrapper(projectDir);
+  return true;
 }
 
 function installMacOSLaunchAgent(projectName: string, projectDir: string, hasTelegram: boolean): boolean {

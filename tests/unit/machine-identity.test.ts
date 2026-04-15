@@ -418,6 +418,44 @@ describe('MachineIdentityManager', () => {
     });
   });
 
+  describe('ensureSelfRegistered', () => {
+    it('self-registers when machine missing from registry (registry wiped scenario)', async () => {
+      // Generate identity (this also registers it once), then simulate a wiped registry
+      const identity = await manager.generateIdentity();
+      fs.rmSync(path.join(instarDir, 'machines'), { recursive: true, force: true });
+
+      const registered = manager.ensureSelfRegistered(identity, 'awake');
+      expect(registered).toBe(true);
+
+      const registry = manager.loadRegistry();
+      expect(registry.machines[identity.machineId]).toBeDefined();
+      expect(registry.machines[identity.machineId].role).toBe('awake');
+      expect(registry.machines[identity.machineId].name).toBe(identity.name);
+    });
+
+    it('is a no-op when machine already registered', async () => {
+      const identity = await manager.generateIdentity();
+      const before = manager.loadRegistry().machines[identity.machineId];
+
+      const registered = manager.ensureSelfRegistered(identity, 'awake');
+      expect(registered).toBe(false);
+
+      const after = manager.loadRegistry().machines[identity.machineId];
+      // pairedAt should be preserved — we didn't re-register
+      expect(after.pairedAt).toBe(before.pairedAt);
+    });
+
+    it('allows subsequent updateRole calls after self-registration', async () => {
+      const identity = await manager.generateIdentity();
+      fs.rmSync(path.join(instarDir, 'machines'), { recursive: true, force: true });
+
+      manager.ensureSelfRegistered(identity, 'standby');
+      // This would previously throw with MACHINE_NOT_FOUND
+      expect(() => manager.updateRole(identity.machineId, 'awake')).not.toThrow();
+      expect(manager.loadRegistry().machines[identity.machineId].role).toBe('awake');
+    });
+  });
+
   describe('touchMachine', () => {
     it('updates lastSeen without changing role', async () => {
       const identity = await manager.generateIdentity();

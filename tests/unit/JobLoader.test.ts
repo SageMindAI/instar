@@ -66,9 +66,12 @@ describe('JobLoader', () => {
       expect(jobs[1].enabled).toBe(false);
     });
 
-    it('throws for missing file', () => {
-      expect(() => loadJobs('/nonexistent/jobs.json'))
-        .toThrow('Jobs file not found');
+    it('returns empty list for missing file (does not throw)', () => {
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      const jobs = loadJobs('/nonexistent/jobs.json');
+      expect(jobs).toEqual([]);
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining('Jobs file not found'));
+      warn.mockRestore();
     });
 
     it('throws for non-array JSON', () => {
