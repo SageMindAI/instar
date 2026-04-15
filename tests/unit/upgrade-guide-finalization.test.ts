@@ -117,6 +117,12 @@ automatically created and maintained alongside existing vector indexes.
     // Copy the actual script into our temp project so it resolves paths correctly
     const scriptContent = fs.readFileSync(scriptPath, 'utf-8');
     fs.writeFileSync(path.join(scriptsDir, 'check-upgrade-guide.js'), scriptContent);
+    // Copy the validator module the script imports from
+    const validatorPath = path.resolve(__dirname, '../../scripts/upgrade-guide-validator.mjs');
+    fs.writeFileSync(
+      path.join(scriptsDir, 'upgrade-guide-validator.mjs'),
+      fs.readFileSync(validatorPath, 'utf-8'),
+    );
   });
 
   afterEach(() => {

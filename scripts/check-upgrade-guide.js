@@ -31,6 +31,12 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import {
+  REQUIRED_SECTIONS,
+  NEXT_TEMPLATE,
+  validateGuideContent,
+  parseBumpType,
+} from './upgrade-guide-validator.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, '..');
@@ -42,125 +48,13 @@ const nextPath = path.join(ROOT, 'upgrades', 'NEXT.md');
 const guideExists = fs.existsSync(guidePath);
 const nextExists = fs.existsSync(nextPath);
 
-// Required sections for a well-formed guide
-const REQUIRED_SECTIONS = [
-  '## What Changed',
-  '## What to Tell Your User',
-  '## Summary of New Capabilities',
-];
-
-const MIN_LENGTH = 200;
-
-// Template for a fresh NEXT.md after finalization
-const NEXT_TEMPLATE = `# Upgrade Guide — vNEXT
-
-<!-- bump: patch -->
-<!-- Valid values: patch, minor, major -->
-<!-- patch = bug fixes, refactors, test additions, doc updates -->
-<!-- minor = new features, new APIs, new capabilities (backwards-compatible) -->
-<!-- major = breaking changes to existing APIs or behavior -->
-
-## What Changed
-
-<!-- Describe what changed technically. What new features, APIs, behavioral changes? -->
-<!-- Write this for the AGENT — they need to understand the system deeply. -->
-
-## What to Tell Your User
-
-<!-- Write talking points the agent should relay to their user. -->
-<!-- This should be warm, conversational, user-facing — not a changelog. -->
-<!-- Focus on what THEY can now do, not internal plumbing. -->
-<!--                                                                    -->
-<!-- PROHIBITED in this section (will fail validation):                 -->
-<!--   camelCase config keys: silentReject, maxRetries, telegramNotify -->
-<!--   Inline code backtick references like silentReject: false        -->
-<!--   Fenced code blocks                                              -->
-<!--   Instructions to edit files or run commands                      -->
-<!--                                                                    -->
-<!-- CORRECT style: "I can turn that on for you" not "set X to false"  -->
-<!-- The agent relays this to their user — keep it human.              -->
-
-- **[Feature name]**: "[Brief, friendly description of what this means for the user]"
-
-## Summary of New Capabilities
-
-| Capability | How to Use |
-|-----------|-----------|
-| [Capability] | [Endpoint, command, or "automatic"] |
-`;
-
 /**
- * Validate a guide file and return any issues found.
+ * Validate a guide file. Thin wrapper around validateGuideContent that handles
+ * the file read.
  */
 function validateGuide(filePath) {
   const content = fs.readFileSync(filePath, 'utf-8');
-  const issues = [];
-
-  for (const section of REQUIRED_SECTIONS) {
-    if (!content.includes(section)) {
-      issues.push(`missing "${section}" section`);
-    }
-  }
-
-  if (content.length < MIN_LENGTH) {
-    issues.push(`guide is too short (${content.length} chars, minimum ${MIN_LENGTH}) — probably incomplete`);
-  }
-
-  // Check for template placeholders that were never filled in
-  if (content.includes('<!-- Describe what changed')) {
-    issues.push(`"What Changed" section still contains template placeholder — fill it in`);
-  }
-  if (content.includes('[Feature name]') || content.includes('[Brief, friendly description')) {
-    issues.push(`"What to Tell Your User" section still contains template placeholder — fill it in`);
-  }
-  if (content.includes('[Capability]') && content.includes('[Endpoint, command')) {
-    issues.push(`"Summary of New Capabilities" section still contains template placeholder — fill it in`);
-  }
-
-  // Validate "What to Tell Your User" section for technical leakage.
-  // This section is relayed verbatim to users — it must be conversational, not a config reference.
-  const userSectionMatch = content.match(/## What to Tell Your User([\s\S]*?)(?:##|$)/);
-  if (userSectionMatch) {
-    const userSection = userSectionMatch[1];
-
-    // Detect camelCase config key references (e.g. silentReject, maxRetries, telegramNotify)
-    const camelCaseConfigKey = /\b[a-z]+[A-Z][a-zA-Z]+\s*(?::|=)/.test(userSection);
-    if (camelCaseConfigKey) {
-      issues.push(
-        `"What to Tell Your User" contains a camelCase config key reference (e.g. "silentReject: false"). ` +
-        `Users should never be told to edit config directly. ` +
-        `Rephrase conversationally: "I can turn that on for you" not "set silentReject: false".`
-      );
-    }
-
-    // Detect inline code blocks — config syntax, CLI commands, file paths
-    const hasInlineCode = /`[^`]+`/.test(userSection);
-    if (hasInlineCode) {
-      issues.push(
-        `"What to Tell Your User" contains inline code (\`...\`). ` +
-        `Remove code formatting — user-facing language should be plain and conversational.`
-      );
-    }
-
-    // Detect fenced code blocks
-    if (/```/.test(userSection)) {
-      issues.push(
-        `"What to Tell Your User" contains a fenced code block. ` +
-        `This section is for user-facing narrative — move technical examples to "What Changed".`
-      );
-    }
-  }
-
-  return issues;
-}
-
-/**
- * Parse the declared bump type from a guide's <!-- bump: TYPE --> comment.
- * Returns 'patch' | 'minor' | 'major' | null.
- */
-function parseBumpType(content) {
-  const match = /<!--\s*bump:\s*(patch|minor|major)\s*-->/.exec(content);
-  return match ? match[1] : null;
+  return validateGuideContent(content);
 }
 
 /**
