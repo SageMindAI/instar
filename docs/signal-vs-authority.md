@@ -60,15 +60,15 @@ An authority is not qualified if:
 
 Authorities must log their decisions in a structured form: which signals they received, what the conversation context was, which rule they applied, and what the outcome was. This is how over-blocks and under-blocks become detectable instead of just frustrating.
 
-## Existing violations (as of 2026-04-15)
+## Violations found and resolved (2026-04-15)
 
-These are tracked for rework in the Track 2 audit:
+These violations were identified in the initial audit and resolved together in `c204b68`:
 
-- **`OutboundDedupGate`** — a deterministic similarity detector that holds 422-block authority on `/telegram/reply/:topicId`. It's a textbook violator: brittle logic, hard-coded threshold, hard-coded window, direct block response. The rework: it becomes a signal (`{ similarity: 0.82, matchedPriorAt: <ts> }`) passed into the outbound authority, which decides based on the full picture.
-- **`junk-payload` guard** — a literal-token matcher holding 422-block authority on the same route. Same pattern. Same rework: signal, not blocker.
-- **`MessagingToneGate`** — nominally an authority (LLM-backed), but its block reasoning has been observed to cite rules not in its prompt. An authority that can't stay disciplined to its own ruleset becomes another over-block hazard. The rework: structured "why I blocked" logs with rule citations traceable back to the prompt, plus a short-tail over-block audit.
+- **`OutboundDedupGate`** *(resolved)* — was wired as a direct 422-block authority in `server/routes.ts`. Rework: it is now a pure signal (`signals.duplicate`) passed into `checkOutboundMessage()`. The tone gate decides based on the full picture.
+- **`junk-payload` guard** *(resolved)* — was a literal-token matcher with direct 422-block authority on the same route. Rework: `isJunkPayload()` is now a pure signal (`signals.junk`) fed into the same authority.
+- **`MessagingToneGate` reasoning drift** *(resolved)* — the gate was observed citing rules not in its own prompt. Rework: `ToneReviewResult.rule` is now constrained to enumerated IDs (B1..B9); any citation outside that set fails-open with `invalidRule: true` rather than silently blocking on an invented rule.
 
-Each of these reworks ships separately through `/instar-dev`, each with its own side-effects artifact.
+All three reworks shipped together in a single `/instar-dev` pass (side-effects artifact: `upgrades/side-effects/outbound-signal-authority-rework.md`).
 
 ## When this principle does NOT apply
 

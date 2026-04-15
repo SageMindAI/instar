@@ -17,9 +17,9 @@
 
 | Location | Decides | Style | Classification | Notes |
 |---|---|---|---|---|
-| `server/routes.ts` — `checkMessagingTone()` calling `MessagingToneGate.review()` | Whether an outbound message contains seven enumerated leak patterns | LLM-backed | **Audit** | Authority in principle; observed drift on 2026-04-15 where the gate cited rules not in its own prompt. Needs structured reasoning enforcement + over-block audit tail. |
-| `server/routes.ts` — `checkJunkPayload()` → `isJunkPayload()` | Whether an outbound message is a debug token | Deterministic (literal tokens) | **VIOLATOR** | Brittle detector holding direct 422-block authority in the agent-runtime domain. Must be reshaped as a signal feeding the tone gate. |
-| `server/routes.ts` — `checkOutboundDedup()` → `OutboundDedupGate.check()` | Whether an outbound message is a near-duplicate of recent | Deterministic (Jaccard 3-gram similarity) | **VIOLATOR** | Same pattern. Must be reshaped as a signal feeding the tone gate. |
+| `server/routes.ts` — `checkOutboundMessage()` calling `MessagingToneGate.review()` | Whether an outbound message contains enumerated leak patterns (B1–B9 rule set) | LLM-backed | **Authority — OK** | Sole outbound authority. Receives structured signals from junk and dedup detectors plus recent conversation. `ToneReviewResult.rule` now constrained to B1..B9; citations outside the set fail-open with `invalidRule=true` (2026-04-15 rework). |
+| `core/junk-payload.ts` — `isJunkPayload()` (signal only) | Whether an outbound message looks like a debug token | Deterministic (literal tokens) | **Signal — OK** | Was a direct 422-block violator; reworked 2026-04-15 into a pure signal (`signals.junk`) fed into `checkOutboundMessage()`. No independent block authority. |
+| `core/OutboundDedupGate.ts` — `check()` (signal only) | Whether an outbound message is a near-duplicate of a recent one | Deterministic (Jaccard 3-gram similarity) | **Signal — OK** | Was a direct 422-block violator; reworked 2026-04-15 into a pure signal (`signals.duplicate`) fed into `checkOutboundMessage()`. No independent block authority. |
 
 ## 2. Inbound message filtering (user → agent)
 
@@ -95,7 +95,7 @@
 | Location | Decides | Style | Classification |
 |---|---|---|---|
 | `scheduler/SkipLedger.ts` — `shouldSkip()` | Already executed this idempotency key? | Deterministic (ledger + TTL) | **Authority — OK** (transport-layer idempotency, not judgment) |
-| `core/OutboundDedupGate.ts` — `check()` as a pure module | Near-duplicate check | Deterministic (Jaccard) | **Signal when used as signal; Violator when wired as direct 422 authority** — the module itself is fine; it's the routing in `server/routes.ts` that's in violation. |
+| `core/OutboundDedupGate.ts` — `check()` as a pure module | Near-duplicate check | Deterministic (Jaccard) | **Signal — OK** — the module emits a structured signal; `server/routes.ts` wires it as a signal into `checkOutboundMessage()` (reworked 2026-04-15). |
 
 ## 11. Monitoring & alerting
 
@@ -130,13 +130,17 @@
 
 ---
 
-## Violator summary (requires rework)
+## Violator summary
 
-| # | Decision point | Domain | Rework |
+**No active violators** (as of 2026-04-15 rework — `c204b68`).
+
+The three violations identified in the initial audit were resolved together in a single commit:
+
+| # | Decision point | Domain | Resolution |
 |---|---|---|---|
-| 1 | `server/routes.ts` junk-payload 422 path | Outbound messaging | Strip 422-block authority from `checkJunkPayload()`. `isJunkPayload()` becomes a pure signal module. The signal is passed into the outbound authority (`MessagingToneGate.review(text, { channel, recentMessages, signals: { junk: {...} } })`). The tone gate decides. Covered in T2.4. |
-| 2 | `server/routes.ts` dedup 422 path | Outbound messaging | Same pattern. Strip 422-block authority from `checkOutboundDedup()`. The dedup check remains a pure signal module; its output flows into the tone gate's signals parameter. The tone gate decides. Covered in T2.4. |
-| 3 | `MessagingToneGate` reasoning drift | Outbound messaging | Not a principle violation per se (LLM-backed authority, constrained domain), but its reasoning has been observed to cite rules not in the prompt. Rework: structured "why I blocked" log; rule-id field constrained to the seven literal patterns; over-block audit tail. Covered in T2.5. |
+| 1 | `server/routes.ts` junk-payload direct-block | Outbound messaging | **FIXED 2026-04-15.** `isJunkPayload()` is now a pure signal module. Output flows into `checkOutboundMessage()` as `signals.junk`; the tone gate decides. |
+| 2 | `server/routes.ts` dedup direct-block | Outbound messaging | **FIXED 2026-04-15.** `OutboundDedupGate.check()` is now a pure signal module. Output flows into `checkOutboundMessage()` as `signals.duplicate`; the tone gate decides. |
+| 3 | `MessagingToneGate` reasoning drift | Outbound messaging | **FIXED 2026-04-15.** `ToneReviewResult.rule` now constrained to enumerated B1..B9 IDs. Citations outside the set fail-open with `invalidRule=true` rather than silently blocking on an invented rule. |
 
 ## Audit-flagged (review, not yet confirmed violators)
 
@@ -156,8 +160,8 @@
 ## Summary metrics
 
 - **Total decision points catalogued:** ~45 (consolidated from the initial sweep of 55–65 by merging sub-decisions inside the same class).
-- **Violators:** 2 (both in the outbound-messaging path).
-- **Audit-flagged:** 2 (tone gate reasoning drift; coherence specialists).
-- **Explicitly OK:** 41 (distributed across all other categories).
+- **Violators:** 0 (three outbound-path violations resolved in `c204b68`, 2026-04-15).
+- **Audit-flagged:** 1 (coherence gate specialist reviewers — reasoning-traceability check pending).
+- **Explicitly OK:** 44 (includes the three reclassified outbound points).
 
-The instar codebase is largely already compliant with the signal-vs-authority principle. The failure mode that triggered this audit (2026-04-15 compaction/respawn cascade) was concentrated in a recent wave of additions to the outbound path. That's an important finding: the instar core predates this principle but was already designed well. The recent drift is what needs to be fixed.
+The instar codebase is largely compliant with the signal-vs-authority principle. The 2026-04-15 rework resolved all three known violators in a single pass. The audit-flagged coherence specialists share the same structural pattern as the tone gate pre-fix; they should get the same rule-citation constraint when that work is scoped.
