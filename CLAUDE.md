@@ -26,7 +26,10 @@ src/
                   # UpdateChecker, RelationshipManager, SleepWakeDetector, types
   scheduler/      # Cron-based job scheduling with quota awareness
   monitoring/     # Health checks, QuotaTracker (threshold-based load shedding),
-                  # CrashLoopPauser (auto-pause runaway jobs)
+                  # CrashLoopPauser (auto-pause runaway jobs),
+                  # CompactionSentinel (verified compaction recovery lifecycle —
+                  # dedupe across triggers, JSONL-growth verification, retry with
+                  # backoff, zombie-kill veto while recovery is in flight)
   messaging/      # TelegramAdapter (long-polling, JSONL history)
   users/          # Multi-user identity resolution and permissions
   server/         # HTTP server, routes, middleware (auth, CORS)
