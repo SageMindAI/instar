@@ -158,6 +158,11 @@ export interface RouteContext {
    *  idempotency gaps, and other lifecycle hazards. No LLM call, runs on
    *  every outbound message. */
   outboundDedupGate: import('../core/OutboundDedupGate.js').OutboundDedupGate | null;
+  /** Per-agent integrated-being awareness layer. Every session can append
+   *  significant events (commitments, agreements, decisions); sessions read
+   *  recent entries at turn-start via the shared-state-inject hook so the
+   *  agent stays coherent across its parts. See docs/integrated-being.md. */
+  sharedStateLedger: import('../core/SharedStateLedger.js').SharedStateLedger | null;
   telemetryHeartbeat: import('../monitoring/TelemetryHeartbeat.js').TelemetryHeartbeat | null;
   pasteManager: PasteManager | null;
   wsManager: WebSocketManager | null;
@@ -8947,7 +8952,10 @@ export function createRoutes(ctx: RouteContext): Router {
     // Read known-agents.json for local agent info. If the target is local,
     // deliver directly via their /messages/relay-agent endpoint, bypassing
     // the relay entirely. This avoids stale relay WebSocket issues.
-    try {
+    // Skip local delivery entirely when targetAgent is a raw fingerprint —
+    // name-based lookup would never match and could resolve the wrong agent.
+    const isRawFingerprint = /^[0-9a-f]{32}$/i.test(targetAgent);
+    if (!isRawFingerprint) try {
       const knownAgentsPath = path.join(ctx.config.stateDir, 'threadline', 'known-agents.json');
       if (fs.existsSync(knownAgentsPath)) {
         const knownData = JSON.parse(fs.readFileSync(knownAgentsPath, 'utf-8'));
@@ -9945,6 +9953,99 @@ export function createRoutes(ctx: RouteContext): Router {
         error: err instanceof Error ? err.message : 'Unknown error',
       });
     }
+  });
+
+  // ── Shared-State Ledger ──────────────────────────────────────────
+  //
+  // Per-agent integrated-being awareness layer. Sessions append significant
+  // events; the turn-start hook reads recent entries so the agent stays
+  // coherent across its parts. See SharedStateLedger.ts for the security
+  // boundary rationale (derived facts only, never raw cross-thread contents).
+
+  router.post('/shared-state/append', (req, res) => {
+    if (!ctx.sharedStateLedger) {
+      res.status(503).json({ error: 'Shared-state ledger not configured' });
+      return;
+    }
+    const { sessionId, kind, subject, summary, party } = req.body ?? {};
+    if (typeof sessionId !== 'string' || !sessionId) {
+      res.status(400).json({ error: '"sessionId" required' });
+      return;
+    }
+    const validKinds = new Set([
+      'commitment',
+      'agreement',
+      'thread-opened',
+      'thread-closed',
+      'decision',
+      'note',
+    ]);
+    if (typeof kind !== 'string' || !validKinds.has(kind)) {
+      res.status(400).json({
+        error: `"kind" must be one of: ${Array.from(validKinds).join(', ')}`,
+      });
+      return;
+    }
+    if (typeof subject !== 'string' || !subject.trim()) {
+      res.status(400).json({ error: '"subject" required (non-empty string)' });
+      return;
+    }
+    if (summary !== undefined && typeof summary !== 'string') {
+      res.status(400).json({ error: '"summary" must be a string if provided' });
+      return;
+    }
+    if (party !== undefined && typeof party !== 'string') {
+      res.status(400).json({ error: '"party" must be a string if provided' });
+      return;
+    }
+    try {
+      const entry = ctx.sharedStateLedger.append({
+        sessionId,
+        kind: kind as import('../core/SharedStateLedger.js').SharedStateEntryKind,
+        subject,
+        summary,
+        party,
+      });
+      res.status(201).json({ ok: true, entry });
+    } catch (err) {
+      res.status(500).json({
+        error: err instanceof Error ? err.message : 'append failed',
+      });
+    }
+  });
+
+  router.get('/shared-state/recent', (req, res) => {
+    if (!ctx.sharedStateLedger) {
+      res.status(503).json({ error: 'Shared-state ledger not configured' });
+      return;
+    }
+    const limitRaw = req.query.limit;
+    let limit = 20;
+    if (typeof limitRaw === 'string') {
+      const parsed = parseInt(limitRaw, 10);
+      if (isNaN(parsed) || parsed < 1 || parsed > 200) {
+        res.status(400).json({ error: 'limit must be an integer 1..200' });
+        return;
+      }
+      limit = parsed;
+    }
+    const entries = ctx.sharedStateLedger.recent(limit);
+    res.json({ entries, count: entries.length });
+  });
+
+  router.get('/shared-state/render', (req, res) => {
+    if (!ctx.sharedStateLedger) {
+      res.status(503).json({ error: 'Shared-state ledger not configured' });
+      return;
+    }
+    const limitRaw = req.query.limit;
+    let limit = 20;
+    if (typeof limitRaw === 'string') {
+      const parsed = parseInt(limitRaw, 10);
+      if (!isNaN(parsed) && parsed >= 1 && parsed <= 200) limit = parsed;
+    }
+    const text = ctx.sharedStateLedger.renderForInjection(limit);
+    res.type('text/plain').send(text);
   });
 
   return router;

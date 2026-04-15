@@ -281,6 +281,22 @@ except Exception:
 " 2>/dev/null
 fi
 
+# Shared-State Ledger — integrated-being awareness across sessions.
+# Injects recent entries written by any session on this agent so the current
+# session sees what other parts of the agent have been doing (commitments
+# made, agreements reached, threads opened). Derived facts only — raw
+# cross-thread message contents stay sandboxed at the threadline layer.
+# See src/core/SharedStateLedger.ts.
+SHARED_STATE=$(curl -s --max-time 3 -H "Authorization: Bearer ${AUTH_TOKEN}" \
+  "http://localhost:${PORT}/shared-state/render?limit=15" 2>/dev/null)
+if [ -n "$SHARED_STATE" ] && ! echo "$SHARED_STATE" | grep -q "no recent entries"; then
+  echo ""
+  echo "=== INTEGRATED-BEING — RECENT CROSS-SESSION ACTIVITY ==="
+  echo "$SHARED_STATE"
+  echo "=== END INTEGRATED-BEING ==="
+  echo ""
+fi
+
 # Feature Discovery — evaluate context for feature surfacing recommendation
 # Only runs when: server is alive, evaluator is initialized, autonomy profile is not passive.
 # Fail-open: errors/timeouts produce no output, session continues normally.

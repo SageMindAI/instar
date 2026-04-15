@@ -15,6 +15,8 @@ dist/
 .instar/state/
 .instar/logs/
 .instar/instar-dev-traces/
+.instar/shared-state.jsonl
+.instar/shared-state.jsonl.*
 
 # OS
 .DS_Store
