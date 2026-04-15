@@ -278,8 +278,12 @@ export class UpdateChecker {
         let baseArgs: string[] = [];
         const shadowCliJs = path.join(shadowDir, 'node_modules', 'instar', 'dist', 'cli.js');
         if (fs.existsSync(shadowCliJs)) {
-          // Run the exact installed cli.js with the current Node.js runtime
-          cmd = process.execPath;
+          // Run the exact installed cli.js with the current Node.js runtime.
+          // Guard: process.execPath can point at a deleted binary when Node was
+          // upgraded while this process was still running (common on Homebrew —
+          // Cellar/node@22/22.22.2/bin/node vanishes after `brew upgrade node`).
+          // Fall back to 'node' on PATH when the resolved execPath is gone.
+          cmd = fs.existsSync(process.execPath) ? process.execPath : 'node';
           baseArgs = [shadowCliJs];
         }
 
