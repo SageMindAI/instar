@@ -1,53 +1,41 @@
 # Upgrade Guide — vNEXT
 
 <!-- bump: patch -->
-<!-- Valid values: patch, minor, major -->
-<!-- patch = bug fixes, refactors, test additions, doc updates -->
-<!-- minor = new features, new APIs, new capabilities (backwards-compatible) -->
-<!-- major = breaking changes to existing APIs or behavior -->
 
 ## What Changed
 
-<!-- Describe what changed technically. What new features, APIs, behavioral changes? -->
-<!-- Write this for the AGENT — they need to understand the system deeply. -->
+Two fixes for volatile state that didn't survive restarts in the Threadline REST adapter and relay offline queue:
+
+1. **REST thread history now persists to disk.** `ThreadlineRESTServer` previously held thread history in memory only, so restarts lost all conversation history even when the client-side MessageStore had messages on disk. The server now hydrates from `~/.threadline/thread-history.json` on startup and persists debounced (1s) on incoming messages and thread deletions. Writes are atomic (temp file + rename) and size-bounded by the existing `maxMessageHistoryPerThread` cap. New config: `historyPath` (default `~/.threadline/thread-history.json`) and `persistHistory` (default `true`, set `false` for tests/ephemeral servers).
+
+2. **Offline queue default TTL extended from 1h to 24h.** `InMemoryOfflineQueue`'s 1-hour default was shorter than typical offline/restart windows for agents, so messages to offline recipients expired before reconnection. Configurable via `OfflineQueueConfig.defaultTtlMs` if you need different behavior.
+
+No API breakage. Existing servers/queues using defaults just get more durable behavior.
 
 ## What to Tell Your User
 
-<!-- Write talking points the agent should relay to their user. -->
-<!-- This should be warm, conversational, user-facing — not a changelog. -->
-<!-- Focus on what THEY can now do, not internal plumbing. -->
-<!--                                                                    -->
-<!-- PROHIBITED in this section (will fail validation):                 -->
-<!--   camelCase config keys: silentReject, maxRetries, telegramNotify -->
-<!--   Inline code backtick references like silentReject: false        -->
-<!--   Fenced code blocks                                              -->
-<!--   Instructions to edit files or run commands                      -->
-<!--                                                                    -->
-<!-- CORRECT style: "I can turn that on for you" not "set X to false"  -->
-<!-- The agent relays this to their user — keep it human.              -->
-
-- **[Feature name]**: "[Brief, friendly description of what this means for the user]"
+- **Conversation history survives restarts**: "Your thread history will stick around now even if I get restarted — no more losing context from earlier in our conversation."
+- **Messages wait longer for offline agents**: "If you message another agent who's offline, the message will wait up to a day for them to come back online instead of expiring after an hour."
 
 ## Summary of New Capabilities
 
 | Capability | How to Use |
 |-----------|-----------|
-| [Capability] | [Endpoint, command, or "automatic"] |
+| Persistent REST thread history | Automatic (opt-out via `persistHistory: false`) |
+| 24h offline message retention | Automatic (override via `defaultTtlMs`) |
 
 ## Evidence
 
-<!-- REQUIRED if this release claims to fix a bug. -->
-<!-- Unit tests passing is NOT evidence. Provide ONE of: -->
-<!--   (a) Reproduction steps + observed before/after on a live system. -->
-<!--       Include log excerpts, observed command output, or behavior -->
-<!--       description. Make it specific enough that a future reader can -->
-<!--       re-run it and see the same thing. -->
-<!--   (b) "Not reproducible in dev — [concrete reason]" if the failure -->
-<!--       mode truly can't be exercised locally (race conditions, -->
-<!--       event-driven paths requiring external signals, etc). -->
-<!--                                                                 -->
-<!-- If this release doesn't claim a bug fix (pure feature / refactor), -->
-<!-- leave this section blank or delete it — it's only enforced when -->
-<!-- "What Changed" describes a fix. -->
+Reproduction before fix:
+1. Start `npx @anthropic-ai/threadline serve --port 18800`
+2. Receive messages on a thread → `GET /threads/{id}` returns them
+3. Restart the server
+4. `GET /threads/{id}` returns 404 — history lost
 
-[Describe reproduction + verified fix, OR "Not reproducible in dev — [concrete reason]"]
+After fix:
+1. Same steps 1–2
+2. Within 1s, `~/.threadline/thread-history.json` contains the thread
+3. Restart the server
+4. `GET /threads/{id}` returns the same messages — hydrated from disk
+
+Unit tests (40/40 passing in `OfflineQueue.test.ts` and `RESTServerE2E.test.ts`) cover the default config values and existing REST flows; persistence is best-effort (wrapped in try/catch) so disk failures don't crash the server.
