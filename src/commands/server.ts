@@ -4400,7 +4400,6 @@ export async function startServer(options: StartOptions): Promise<void> {
       const slackRecover = async (sessionName: string, triggerLabel: string): Promise<boolean> => {
         const channelId = _slack.getChannelForSession(sessionName);
         if (!channelId) return false;
-        const syntheticId = slackChannelToSyntheticId(channelId);
         const slackLogPath = path.join(config.stateDir, 'slack-messages.jsonl');
         let lastUserMsg: { text?: string } | null = null;
         try {
@@ -4418,14 +4417,7 @@ export async function startServer(options: StartOptions): Promise<void> {
         } catch { /* no log */ }
         if (!lastUserMsg) return false;
         console.log(`[CompactionResume] (${triggerLabel}) Slack channel ${channelId} has unanswered message — recovering`);
-        if (triageOrchestrator) {
-          try {
-            await triageOrchestrator.activate(syntheticId, sessionName, 'watchdog', COMPACTION_RESUME_PROMPT, Date.now());
-            return true;
-          } catch (err) {
-            console.warn(`[CompactionResume] Slack orchestrator failed, falling back to direct inject:`, err);
-          }
-        }
+        // Direct injection — bypass triage (see comment on recoverCompactedSession).
         const ok = sessionManager.injectMessage(sessionName, COMPACTION_RESUME_PROMPT);
         if (ok) {
           console.log(`[CompactionResume] (${triggerLabel}) Slack direct re-inject OK for channel ${channelId}`);
