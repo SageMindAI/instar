@@ -4220,31 +4220,57 @@ export async function startServer(options: StartOptions): Promise<void> {
       return false;
     };
 
-    // Trigger 1: PreCompact hook event — wired unconditionally now.
+    // ── CompactionSentinel ────────────────────────────────────────────
+    // Owns the full recovery lifecycle: detect → inject → verify (jsonl
+    // growth) → retry on failure → finalize. Replaces the fire-and-forget
+    // calls that used to live here. Dedupes across the three triggers and
+    // vetoes zombie cleanup while a recovery is in flight.
+    const { CompactionSentinel } = await import('../monitoring/CompactionSentinel.js');
+    const compactionSentinel = new CompactionSentinel(
+      {
+        recoverFn: recoverCompactedSession,
+        projectDir: config.projectDir,
+      },
+      // Defaults are production-sensible; override here only if needed.
+      {},
+    );
+    sessionManager.setActiveRecoveryChecker(
+      session => compactionSentinel.isRecoveryActive(session.tmuxSession),
+    );
+    console.log(pc.green('  CompactionSentinel enabled (verified recovery lifecycle)'));
+
+    // Trigger 1: PreCompact hook event — report to sentinel.
     hookEventReceiver.on('PreCompact', () => {
       // Delay to let compaction + recovery hooks finish
       setTimeout(() => {
         if (!telegram) return;
         const topicSessions = telegram.getAllTopicSessions();
         for (const [, sessionName] of topicSessions) {
-          recoverCompactedSession(sessionName, 'PreCompact').catch(() => { /* best-effort */ });
+          compactionSentinel.report(sessionName, 'PreCompact');
         }
       }, 10_000);
     });
     console.log(pc.green('  Compaction auto-resume wired (PreCompact hook event)'));
 
-    // Trigger 2: Watchdog 'compaction-idle' polling — wired unconditionally.
+    // Trigger 2: Watchdog 'compaction-idle' polling — report to sentinel.
     if (watchdog) {
       watchdog.on('compaction-idle', (sessionName: string) => {
-        recoverCompactedSession(sessionName, 'watchdog-poll').catch(() => { /* best-effort */ });
+        compactionSentinel.report(sessionName, 'watchdog-poll');
       });
       console.log(pc.green('  Compaction auto-resume wired (watchdog poll)'));
     }
 
-    // Trigger 3: stash the recovery function on globalThis so the HTTP route
-    // (registered later in AgentServer) and the compaction-recovery.sh hook
-    // can invoke it via POST /internal/compaction-resume.
-    (globalThis as Record<string, unknown>).__instarCompactionRecover = recoverCompactedSession;
+    // Trigger 3: stash a function on globalThis so the HTTP route (registered
+    // later in AgentServer) and the compaction-recovery.sh hook can invoke it
+    // via POST /internal/compaction-resume. Routes into the sentinel so the
+    // dedupe/verify/retry lifecycle applies to this path too.
+    (globalThis as Record<string, unknown>).__instarCompactionRecover = (
+      sessionName: string,
+      triggerLabel: string,
+    ) => {
+      compactionSentinel.report(sessionName, triggerLabel || 'recovery-hook');
+      return Promise.resolve(true);
+    };
 
     // Subagent Tracker — monitors subagent lifecycle via hook events
     const { SubagentTracker } = await import('../monitoring/SubagentTracker.js');

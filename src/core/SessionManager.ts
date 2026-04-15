@@ -121,6 +121,9 @@ export class SessionManager extends EventEmitter {
   /** Optional callback to check if a session has active subagents (prevents false zombie kills) */
   private subagentChecker?: (session: Session) => boolean;
 
+  /** Optional callback: is this session currently in active compaction recovery? If so, skip zombie kill. */
+  private activeRecoveryChecker?: (session: Session) => boolean;
+
   /** Prompt Gate InputDetector — monitors terminal output for interactive prompts */
   private promptDetector?: InputDetector;
 
@@ -167,6 +170,16 @@ export class SessionManager extends EventEmitter {
    */
   setSubagentChecker(checker: (session: Session) => boolean): void {
     this.subagentChecker = checker;
+  }
+
+  /**
+   * Register a predicate that vetoes zombie cleanup when a compaction recovery
+   * is in flight. When it returns true, the idle-prompt killer skips the
+   * session and resets its idle clock so cleanup won't race the recovery
+   * window. Wired by CompactionSentinel at server startup.
+   */
+  setActiveRecoveryChecker(checker: (session: Session) => boolean): void {
+    this.activeRecoveryChecker = checker;
   }
 
   /**
@@ -420,6 +433,13 @@ export class SessionManager extends EventEmitter {
             } else {
               const idleMs = now - this.idlePromptSince.get(session.id)!;
               if (idleMs > IDLE_PROMPT_KILL_MINUTES * 60_000) {
+                // Veto: active compaction recovery in flight — skip kill and
+                // reset the idle clock so we don't race the recovery window.
+                if (this.activeRecoveryChecker && this.activeRecoveryChecker(session)) {
+                  console.log(`[SessionManager] Skipping zombie kill for "${session.name}" — compaction recovery in flight.`);
+                  this.idlePromptSince.delete(session.id);
+                  continue;
+                }
                 // Check for unanswered injection before killing
                 const pendingInjection = this.pendingInjections.get(session.tmuxSession);
                 if (pendingInjection) {
