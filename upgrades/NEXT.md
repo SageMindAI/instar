@@ -1,35 +1,37 @@
 # Upgrade Guide — vNEXT
 
 <!-- bump: patch -->
-<!-- Valid values: patch, minor, major -->
-<!-- patch = bug fixes, refactors, test additions, doc updates -->
-<!-- minor = new features, new APIs, new capabilities (backwards-compatible) -->
-<!-- major = breaking changes to existing APIs or behavior -->
 
 ## What Changed
 
-<!-- Describe what changed technically. What new features, APIs, behavioral changes? -->
-<!-- Write this for the AGENT — they need to understand the system deeply. -->
+**Telegram polling diagnostics + transient 401 retry.**
+
+Previously, `TelegramAdapter.poll()` set `this.polling = false` permanently on
+ANY 401 response — including transient auth blips — with no retry and no signal
+to the probe layer. Health probes reported "polling not active" with no WHY,
+and operators had to dig through logs to discover whether the token was actually
+revoked or had just hiccuped.
+
+This release adds:
+- **Single 30s retry on first 401** before declaring fatal. Genuine token
+  revocation still stops polling; transient 401s recover automatically.
+- **Diagnostic state on the adapter**: `lastError`, `consecutivePollErrors`,
+  `fatalReason` (`'401' | 'network' | null`), `stoppedAt`. Exposed via
+  `TelegramAdapter.getStatus()`.
+- **MessagingProbe** now surfaces these fields. The `instar.messaging.connected`
+  probe description includes the fatal reason or last error, and remediation
+  steps for a 401 now point operators at @BotFather rather than generic advice.
+
+Reset of all diagnostic fields happens in `start()` so re-starts begin clean.
 
 ## What to Tell Your User
 
-<!-- Write talking points the agent should relay to their user. -->
-<!-- This should be warm, conversational, user-facing — not a changelog. -->
-<!-- Focus on what THEY can now do, not internal plumbing. -->
-<!--                                                                    -->
-<!-- PROHIBITED in this section (will fail validation):                 -->
-<!--   camelCase config keys: silentReject, maxRetries, telegramNotify -->
-<!--   Inline code backtick references like silentReject: false        -->
-<!--   Fenced code blocks                                              -->
-<!--   Instructions to edit files or run commands                      -->
-<!--                                                                    -->
-<!-- CORRECT style: "I can turn that on for you" not "set X to false"  -->
-<!-- The agent relays this to their user — keep it human.              -->
-
-- **[Feature name]**: "[Brief, friendly description of what this means for the user]"
+- **Better visibility when Telegram messaging stops**: "If my Telegram connection ever drops, I can now tell you exactly why instead of just saying it's down."
+- **Resilience to brief auth hiccups**: "A momentary blip in the Telegram service won't permanently knock me offline anymore — I'll retry once before giving up."
 
 ## Summary of New Capabilities
 
 | Capability | How to Use |
 |-----------|-----------|
-| [Capability] | [Endpoint, command, or "automatic"] |
+| Telegram polling diagnostics | Automatic — visible in health probe output |
+| Transient 401 retry | Automatic — single 30s retry before declaring fatal |
