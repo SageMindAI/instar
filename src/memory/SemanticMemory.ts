@@ -145,30 +145,19 @@ export class SemanticMemory {
 
     this.db = constructor(this.config.dbPath) as Database;
 
-    // Integrity check — auto-recover from corruption (JSONL is source of truth)
+    // Integrity check — auto-recover from corruption (JSONL is source of truth).
+    // Corrupt DBs are quarantined (renamed) not deleted, and a marker file is written
+    // so operators can notice the recovery after the fact.
     if (fs.existsSync(this.config.dbPath) && fs.statSync(this.config.dbPath).size > 0) {
       try {
         const result = this.db!.pragma('integrity_check') as Array<{ integrity_check: string }>;
         if (result[0]?.integrity_check !== 'ok') {
-          console.warn(`[SemanticMemory] Database corrupt (${result[0]?.integrity_check}) — deleting and rebuilding`);
-          this.db!.close();
-          this.db = null;
-          fs.unlinkSync(this.config.dbPath);
-          for (const ext of ['-wal', '-shm']) {
-            try { fs.unlinkSync(this.config.dbPath + ext); } catch { /* may not exist */ }
-          }
+          this.quarantineCorruptDb(`integrity_check=${result[0]?.integrity_check}`);
           this.db = constructor(this.config.dbPath) as Database;
           this._needsRebuild = true;
         }
       } catch (err) {
-        // If even the integrity check fails, the db is severely corrupted
-        console.warn(`[SemanticMemory] Database unreadable — deleting and rebuilding:`, err);
-        try { this.db?.close(); } catch { /* ignore */ }
-        this.db = null;
-        try { fs.unlinkSync(this.config.dbPath); } catch { /* ignore */ }
-        for (const ext of ['-wal', '-shm']) {
-          try { fs.unlinkSync(this.config.dbPath + ext); } catch { /* may not exist */ }
-        }
+        this.quarantineCorruptDb(`pragma threw: ${(err as Error).message}`);
         this.db = constructor(this.config.dbPath) as Database;
         this._needsRebuild = true;
       }
@@ -216,6 +205,55 @@ export class SemanticMemory {
   private ensureOpen(): Database {
     if (!this.db) throw new Error('Database not open. Call open() first.');
     return this.db;
+  }
+
+  /**
+   * Move a corrupt DB aside (rename, not delete) and drop a marker file so
+   * operators can notice the auto-recovery. JSONL is source of truth, but
+   * keeping the corrupt file enables forensic analysis (did WAL tear? disk full?).
+   */
+  private quarantineCorruptDb(reason: string): void {
+    const ts = Date.now();
+    const dir = path.dirname(this.config.dbPath);
+    const base = path.basename(this.config.dbPath);
+    const corruptPath = `${this.config.dbPath}.corrupt.${ts}`;
+    const markerPath = path.join(dir, `${base}.corrupt-recovery.${ts}.marker.json`);
+
+    console.warn(`[SemanticMemory] Database corrupt (${reason}) — quarantining to ${corruptPath} and rebuilding`);
+
+    try { this.db?.close(); } catch { /* ignore */ }
+    this.db = null;
+
+    try {
+      if (fs.existsSync(this.config.dbPath)) {
+        fs.renameSync(this.config.dbPath, corruptPath);
+      }
+    } catch (err) {
+      // If rename fails (cross-device, permissions), fall back to delete so the rebuild can proceed.
+      console.warn(`[SemanticMemory] Could not quarantine corrupt DB (${(err as Error).message}) — falling back to delete`);
+      try { fs.unlinkSync(this.config.dbPath); } catch { /* already gone */ }
+    }
+
+    // WAL/SHM are always removed — they're tied to the now-quarantined main file
+    // and keeping them around would confuse a fresh DB opened at the same path.
+    for (const ext of ['-wal', '-shm']) {
+      try { fs.unlinkSync(this.config.dbPath + ext); } catch { /* may not exist */ }
+    }
+
+    // Drop a marker file so operators / monitoring can detect the auto-recovery
+    // without tailing server logs. Safe to overwrite; safe to ignore if disk full.
+    try {
+      const marker = {
+        event: 'semantic_memory.auto_recovery',
+        timestamp: new Date(ts).toISOString(),
+        dbPath: this.config.dbPath,
+        quarantinedTo: fs.existsSync(corruptPath) ? corruptPath : null,
+        reason,
+      };
+      fs.writeFileSync(markerPath, JSON.stringify(marker, null, 2));
+    } catch {
+      // @silent-fallback-ok: marker is a hint for operators; recovery itself already succeeded
+    }
   }
 
   // ─── JSONL Append Log ─────────────────────────────────────────
