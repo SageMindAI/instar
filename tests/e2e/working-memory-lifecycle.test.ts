@@ -30,6 +30,7 @@ import request from 'supertest';
 import { AgentServer } from '../../src/server/AgentServer.js';
 import { SemanticMemory } from '../../src/memory/SemanticMemory.js';
 import { EpisodicMemory } from '../../src/memory/EpisodicMemory.js';
+import { TopicMemory } from '../../src/memory/TopicMemory.js';
 import { WorkingMemoryAssembler } from '../../src/memory/WorkingMemoryAssembler.js';
 import { createMockSessionManager } from '../helpers/setup.js';
 import { StateManager } from '../../src/core/StateManager.js';
@@ -145,6 +146,20 @@ describe('Working Memory E2E lifecycle', () => {
       episodicMemory,
     });
 
+    // Create TopicMemory so the assembled-mode fallback on /topic/context
+    // can be exercised end-to-end (Phase 7).
+    const topicMemory = new TopicMemory(stateDir);
+    await topicMemory.open();
+    topicMemory.insertMessage({
+      messageId: 1,
+      topicId: 42,
+      text: 'Discussion about memory architecture',
+      fromUser: true,
+      timestamp: new Date().toISOString(),
+      sessionName: null,
+    });
+    topicMemory.setTopicName(42, 'Memory architecture');
+
     const config: InstarConfig = {
       projectName: 'e2e-test',
       projectDir: tmpDir,
@@ -173,6 +188,7 @@ describe('Working Memory E2E lifecycle', () => {
       sessionManager: mockSM as any,
       state,
       semanticMemory,
+      topicMemory,
       workingMemory,
     });
 
@@ -370,6 +386,49 @@ describe('Working Memory E2E lifecycle', () => {
           expect(source.tokens).toBeLessThanOrEqual(300);
         }
       }
+    });
+  });
+
+  // ══════════════════════════════════════════════════════════════════
+  // Phase 7: Session/topic assembled-context routes (feature is alive)
+  //
+  // These routes are consumed by the session-start hook and the
+  // topic-context migration path. If they return 503 in production,
+  // the assembler was never wired — same dead-on-arrival check as Phase 1.
+  // ══════════════════════════════════════════════════════════════════
+
+  describe('Phase 7: Session/topic assembled-context routes', () => {
+    it('GET /session/context/:topicId returns 200 (not 503)', async () => {
+      const res = await request(app)
+        .get('/session/context/42')
+        .set(auth())
+        .query({ prompt: 'episodic memory sentinel' });
+
+      expect(res.status).toBe(200);
+      expect(typeof res.body.context).toBe('string');
+      expect(res.body.estimatedTokens).toBeGreaterThan(0);
+      expect(res.body.budgets).toBeDefined();
+      expect(res.body.budgets.total).toBe(2000);
+    });
+
+    it('GET /session/context/:topicId returns 400 on invalid topicId', async () => {
+      await request(app)
+        .get('/session/context/not-a-number')
+        .set(auth())
+        .expect(400);
+    });
+
+    it('GET /topic/context/:topicId?assembled=true returns 200 with assembled payload', async () => {
+      const res = await request(app)
+        .get('/topic/context/42')
+        .set(auth())
+        .query({ assembled: 'true', prompt: 'episodic memory sentinel' });
+
+      expect(res.status).toBe(200);
+      expect(res.body.assembled).toBe(true);
+      expect(res.body.budgets).toBeDefined();
+      expect(res.body.budgets.total).toBe(2000);
+      expect(Array.isArray(res.body.sources)).toBe(true);
     });
   });
 });
