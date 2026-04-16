@@ -101,9 +101,14 @@ try {
   // ignore
 }
 const addedFiles = addedOutput.split('\n').map((s) => s.trim()).filter(Boolean);
-if (addedFiles.includes('scripts/instar-dev-precommit.js')) {
+const BOOTSTRAP_TRIGGERS = [
+  'scripts/instar-dev-precommit.js',
+  'skills/spec-converge/SKILL.md',
+];
+const bootstrapTrigger = addedFiles.find((f) => BOOTSTRAP_TRIGGERS.includes(f));
+if (bootstrapTrigger) {
   console.error(
-    '[instar-dev-precommit] bootstrap commit detected (this script is itself being added) — passing. All future commits will be gated.',
+    `[instar-dev-precommit] bootstrap commit detected (${bootstrapTrigger} is being added) — passing. All future commits will be gated by the full spec-tag chain.`,
   );
   process.exit(0);
 }
@@ -205,10 +210,70 @@ if (!validTrace) {
   );
 }
 
+// ─── Step 6: spec-tag verification ───────────────────────────────────────
+// Every in-scope change must reference a spec that has (a) been through
+// /spec-converge to convergence, and (b) been explicitly approved by the
+// user. The trace's `specPath` field points at the spec file. We parse its
+// YAML frontmatter and verify both tags are present.
+
+const spec = validTrace.trace.specPath;
+if (!spec) {
+  blockCommit(
+    inScopeFiles,
+    [
+      'Trace does not reference a spec (trace.specPath is missing).',
+      '',
+      'Every in-scope change must be driven by a spec that has passed /spec-converge',
+      'and been approved by the user. Write the trace with --spec <path>.',
+    ].join('\n'),
+  );
+}
+
+const specPath = path.resolve(ROOT, spec);
+if (!fs.existsSync(specPath)) {
+  blockCommit(
+    inScopeFiles,
+    `Spec file ${spec} (referenced by trace) does not exist.`,
+  );
+}
+
+const specContent = fs.readFileSync(specPath, 'utf8');
+const specFmMatch = specContent.match(/^---\n([\s\S]*?)\n---\n/);
+if (!specFmMatch) {
+  blockCommit(
+    inScopeFiles,
+    `Spec ${spec} has no YAML frontmatter. It cannot carry the required review-convergence and approved tags.`,
+  );
+}
+const specFm = specFmMatch[1];
+const convergenceMatch = specFm.match(/^\s*review-convergence\s*:\s*["']?([^"'\n]+)/m);
+const approvedMatch = specFm.match(/^\s*approved\s*:\s*(true|"true"|'true')/m);
+
+if (!convergenceMatch) {
+  blockCommit(
+    inScopeFiles,
+    [
+      `Spec ${spec} is not tagged review-convergence.`,
+      'Run /spec-converge on this spec before committing the change.',
+    ].join('\n'),
+  );
+}
+
+if (!approvedMatch) {
+  blockCommit(
+    inScopeFiles,
+    [
+      `Spec ${spec} has review-convergence but no approved: true tag.`,
+      'The user must review the convergence report and apply the approved tag',
+      'before /instar-dev can ship this change.',
+    ].join('\n'),
+  );
+}
+
 // ─── Pass ────────────────────────────────────────────────────────────────
 
 console.error(
-  `[instar-dev-precommit] OK — trace ${path.basename(validTrace.entry.file)} covers ${inScopeFiles.length} in-scope file(s), artifact ${validTrace.trace.artifactPath} verified.`,
+  `[instar-dev-precommit] OK — trace ${path.basename(validTrace.entry.file)} covers ${inScopeFiles.length} in-scope file(s), artifact ${validTrace.trace.artifactPath} verified, spec ${spec} is converged + approved.`,
 );
 process.exit(0);
 

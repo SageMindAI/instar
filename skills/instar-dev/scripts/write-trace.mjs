@@ -10,8 +10,15 @@
  *   node skills/instar-dev/scripts/write-trace.mjs \
  *     --artifact upgrades/side-effects/<slug>.md \
  *     --files "src/a.ts,src/b.ts,tests/x.test.ts" \
+ *     [--spec docs/specs/<slug>.md] \
  *     [--second-pass true|false|not-required] \
  *     [--reviewer-concurred true|false]
+ *
+ * The --spec argument records which spec (converged + approved) drove the
+ * change. The pre-commit hook verifies the referenced spec has both
+ * review-convergence and approved tags before allowing the commit.
+ * Bootstrap commits (installing /instar-dev itself or /spec-converge itself)
+ * may omit --spec; all other commits REQUIRE it.
  *
  * The trace is written to .instar/instar-dev-traces/<timestamp>-<slug>.json.
  * Trace files are gitignored (runtime state, not source).
@@ -29,11 +36,12 @@ const ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..',
 
 function parseArgs() {
   const args = process.argv.slice(2);
-  const out = { artifact: null, files: [], secondPass: 'not-required', reviewerConcurred: null };
+  const out = { artifact: null, files: [], spec: null, secondPass: 'not-required', reviewerConcurred: null };
   for (let i = 0; i < args.length; i++) {
     const a = args[i];
     if (a === '--artifact') out.artifact = args[++i];
     else if (a === '--files') out.files = args[++i].split(',').map((s) => s.trim()).filter(Boolean);
+    else if (a === '--spec') out.spec = args[++i];
     else if (a === '--second-pass') out.secondPass = args[++i];
     else if (a === '--reviewer-concurred') out.reviewerConcurred = args[++i] === 'true';
     else {
@@ -52,7 +60,7 @@ function parseArgs() {
   return out;
 }
 
-const { artifact, files, secondPass, reviewerConcurred } = parseArgs();
+const { artifact, files, spec, secondPass, reviewerConcurred } = parseArgs();
 
 const artifactPath = path.resolve(ROOT, artifact);
 if (!fs.existsSync(artifactPath)) {
@@ -73,11 +81,12 @@ fs.mkdirSync(traceDir, { recursive: true });
 
 const traceFile = path.join(traceDir, `${timestamp.replace(/[:.]/g, '-')}-${slug}-${traceId}.json`);
 const trace = {
-  version: 1,
+  version: 2,
   sessionId: process.env.INSTAR_SESSION_ID || process.env.CLAUDE_CODE_SESSION_ID || 'unknown',
   timestamp,
   artifactPath: artifact,
   artifactSha256: crypto.createHash('sha256').update(artifactContent).digest('hex'),
+  specPath: spec,
   coveredFiles: files.sort(),
   phase: 'complete',
   secondPass,

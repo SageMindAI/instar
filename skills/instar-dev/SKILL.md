@@ -33,6 +33,17 @@ If the agent is only editing a markdown file that doesn't affect runtime behavio
 
 The skill runs six structured phases. Each phase has clear success criteria. You cannot skip a phase — the enforcement hooks verify artifacts from every phase before a commit is allowed.
 
+### Phase 0 — Spec prerequisite (required for every non-bootstrap change)
+
+Before any other phase runs, the instar-dev agent verifies the change is driven by an approved converged spec.
+
+- The change must be rooted in a spec file under `docs/specs/<slug>.md`.
+- That spec must have been run through `/spec-converge` to convergence (writes `review-convergence: <timestamp>` into the spec's frontmatter).
+- The user must have reviewed the convergence report and applied `approved: true` to the spec's frontmatter.
+- The spec path is passed to `write-trace.mjs` via `--spec` so the pre-commit hook can verify both tags.
+
+If the spec is missing, not converged, or not approved, the pre-commit hook refuses the commit. No override inside the skill — the only exceptions are the foundational bootstrap commits that install `/instar-dev` and `/spec-converge` themselves.
+
 ### Phase 1 — Principle check
 
 Before writing any code, the instar-dev agent reads:
@@ -89,7 +100,16 @@ The reviewer must read the artifact independently and produce a short response a
 
 ### Phase 6 — Trace, commit, verify
 
-When the artifact is complete (and second-pass concurs, if required), the agent writes a trace file to `.instar/instar-dev-traces/<timestamp>-<slug>.json`. The trace contains:
+When the artifact is complete (and second-pass concurs, if required), the agent writes a trace file by calling `skills/instar-dev/scripts/write-trace.mjs` with:
+
+- `--artifact <path>` — the side-effects artifact just produced
+- `--files <comma-separated paths>` — the staged in-scope files
+- `--spec <path>` — the spec file this change is driven by (REQUIRED for non-bootstrap commits)
+- `--second-pass true|false|not-required` and `--reviewer-concurred true|false` as applicable
+
+The pre-commit hook will refuse the commit if `--spec` is missing or the spec does not have both `review-convergence` and `approved: true` tags.
+
+The trace file in `.instar/instar-dev-traces/<timestamp>-<slug>.json` contains:
 
 ```
 {
