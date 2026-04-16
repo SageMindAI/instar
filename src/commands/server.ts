@@ -5625,7 +5625,50 @@ export async function startServer(options: StartOptions): Promise<void> {
       }, { description: 'Feature discovery state and behavioral contract summary' });
     }
 
-    const server = new AgentServer({ config, sessionManager, state, scheduler, telegram, relationships, feedback, feedbackAnomalyDetector, dispatches, updateChecker, autoUpdater, autoDispatcher, quotaTracker, quotaManager, publisher, viewer, tunnel, evolution, watchdog, topicMemory, triageNurse, projectMapper, coherenceGate: scopeVerifier, contextHierarchy, canonicalState, operationGate, sentinel, adaptiveTrust, memoryMonitor, orphanReaper, coherenceMonitor, commitmentTracker, semanticMemory, activitySentinel, messageRouter, summarySentinel, spawnManager, systemReviewer, capabilityMapper, selfKnowledgeTree, coverageAuditor, topicResumeMap: _topicResumeMap ?? undefined, autonomyManager, trustElevationTracker, autonomousEvolution, coordinator: coordinator.enabled ? coordinator : undefined, localSigningKeyPem, whatsapp: whatsappAdapter, slack: slackAdapter, imessage: imessageAdapter, whatsappBusinessBackend, messageBridge, hookEventReceiver, worktreeMonitor, subagentTracker, instructionsVerifier, handshakeManager: threadlineHandshake, threadlineRouter, threadlineRelayClient, threadlineReplyWaiters, listenerManager: listenerManager ?? undefined, responseReviewGate, messagingToneGate, outboundDedupGate, telemetryHeartbeat, pasteManager, featureRegistry, discoveryEvaluator, unifiedTrust, liveConfig });
+    // ── Integrated-Being ledger (v1) ──────────────────────────────────
+    // Spec: docs/specs/integrated-being-ledger-v1.md
+    let sharedStateLedger: import('../core/SharedStateLedger.js').SharedStateLedger | undefined;
+    {
+      const ibConfig = config.integratedBeing ?? {};
+      const ibEnabled = ibConfig.enabled === undefined ? true : ibConfig.enabled !== false;
+      if (ibEnabled) {
+        const { SharedStateLedger } = await import('../core/SharedStateLedger.js');
+        const { randomBytes } = await import('node:crypto');
+        // Generate salt on first use — persisted via LiveConfig.
+        let salt = ibConfig.counterpartyHashSalt ?? '';
+        if (!salt) {
+          salt = randomBytes(32).toString('hex');
+          try {
+            if (liveConfig) liveConfig.set('integratedBeing.counterpartyHashSalt', salt);
+          } catch { /* best effort */ }
+        }
+        sharedStateLedger = new SharedStateLedger({
+          stateDir: config.stateDir,
+          config: ibConfig,
+          salt,
+          degradationReporter,
+        });
+        // Wire emitters (single call-site; revert = delete this block).
+        const { registerLedgerEmitters } = await import('../core/registerLedgerEmitters.js');
+        // Note: dispatchExecutor is scoped inside the dispatches.enabled block.
+        // AutoDispatcher wraps it; the emitter sink is set via
+        // autoDispatcher.executor.setLedgerEventSink(). We access it through
+        // autoDispatcher — if dispatches are disabled, no emitter is installed.
+        const dispatchExec = autoDispatcher
+          ? (autoDispatcher as any).executor as import('../core/DispatchExecutor.js').DispatchExecutor | undefined
+          : undefined;
+        registerLedgerEmitters(sharedStateLedger, {
+          threadlineRouter: threadlineRouter ?? undefined,
+          dispatchExecutor: dispatchExec ?? undefined,
+          coherenceGate: responseReviewGate ?? undefined,
+          config: ibConfig,
+          instance: config.projectName ?? 'server',
+        });
+        console.log(pc.green('  Integrated-Being ledger: enabled'));
+      }
+    }
+
+    const server = new AgentServer({ config, sessionManager, state, scheduler, telegram, relationships, feedback, feedbackAnomalyDetector, dispatches, updateChecker, autoUpdater, autoDispatcher, quotaTracker, quotaManager, publisher, viewer, tunnel, evolution, watchdog, topicMemory, triageNurse, projectMapper, coherenceGate: scopeVerifier, contextHierarchy, canonicalState, operationGate, sentinel, adaptiveTrust, memoryMonitor, orphanReaper, coherenceMonitor, commitmentTracker, semanticMemory, activitySentinel, messageRouter, summarySentinel, spawnManager, systemReviewer, capabilityMapper, selfKnowledgeTree, coverageAuditor, topicResumeMap: _topicResumeMap ?? undefined, autonomyManager, trustElevationTracker, autonomousEvolution, coordinator: coordinator.enabled ? coordinator : undefined, localSigningKeyPem, whatsapp: whatsappAdapter, slack: slackAdapter, imessage: imessageAdapter, whatsappBusinessBackend, messageBridge, hookEventReceiver, worktreeMonitor, subagentTracker, instructionsVerifier, handshakeManager: threadlineHandshake, threadlineRouter, threadlineRelayClient, threadlineReplyWaiters, listenerManager: listenerManager ?? undefined, responseReviewGate, messagingToneGate, outboundDedupGate, telemetryHeartbeat, pasteManager, featureRegistry, discoveryEvaluator, unifiedTrust, liveConfig, sharedStateLedger });
     await server.start();
 
     // Connect DegradationReporter downstream systems now that everything is initialized.
@@ -5916,6 +5959,8 @@ export async function startServer(options: StartOptions): Promise<void> {
       // when better-sqlite3 destructors fire during process teardown.
       topicMemory?.close();
       semanticMemory?.close();
+      // Integrated-Being v1 — flush stats sidecar (coalesces pending writes).
+      try { sharedStateLedger?.shutdown(); } catch { /* best effort */ }
       await server.stop();
       process.exit(0);
     };

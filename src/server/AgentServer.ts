@@ -127,6 +127,8 @@ export class AgentServer {
     discoveryEvaluator?: import('../core/DiscoveryEvaluator.js').DiscoveryEvaluator;
     unifiedTrust?: import('../threadline/UnifiedTrustWiring.js').UnifiedTrustSystem;
     liveConfig?: { set(path: string, value: unknown): void };
+    /** Integrated-Being shared-state ledger (v1). Null/undefined when disabled. */
+    sharedStateLedger?: import('../core/SharedStateLedger.js').SharedStateLedger;
   }) {
     this.config = options.config;
     this.startTime = new Date();
@@ -319,6 +321,7 @@ export class AgentServer {
       discoveryEvaluator: options.discoveryEvaluator ?? null,
       unifiedTrust: options.unifiedTrust ?? null,
       threadlineReplyWaiters: options.threadlineReplyWaiters ?? new Map(),
+      sharedStateLedger: options.sharedStateLedger ?? null,
       startTime: this.startTime,
     };
     this.routeContext = routeCtx;

@@ -124,6 +124,11 @@ const DEFAULT_GENERATED_PATTERNS = [
   '*.min.js', '*.min.css', '*.map',
   'coverage/', '.nyc_output/',
   'target/',  // Rust/Java
+  // Integrated-Being v1 — per-machine ledger, never synced across machines.
+  // If this ever ends up in a merge, prefer ours and exclude from LLM conflict
+  // resolution. See docs/specs/integrated-being-ledger-v1.md §Multi-machine.
+  '.instar/shared-state.jsonl',
+  '.instar/shared-state.jsonl.*',
 ];
 
 const DEFAULT_SECRET_PATTERNS = [

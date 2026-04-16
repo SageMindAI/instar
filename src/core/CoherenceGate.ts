@@ -144,6 +144,18 @@ const VALUE_DOC_CACHE_TTL_MS = 60 * 60 * 1000; // 60 minutes
 
 // ── Main Class ───────────────────────────────────────────────────────
 
+/**
+ * Ledger event for Integrated-Being v1 — fires on block decisions.
+ * Signal-only; never blocks on ledger write failure. Passes rule id ONLY
+ * (no rule context), per spec to avoid leaking bypass hints to later sessions.
+ */
+export interface CoherenceGateLedgerEvent {
+  ruleId: string;
+  sessionId: string;
+  channel: string;
+  timestamp: string;
+}
+
 export class CoherenceGate {
   private config: ResponseReviewConfig;
   private stateDir: string;
@@ -159,6 +171,7 @@ export class CoherenceGate {
   private researchRateLimiter: ResearchRateLimiter;
   private canonicalState: CanonicalState;
   private onResearchTriggered?: (context: ResearchTriggerContext) => void;
+  private onLedgerEventSink: ((evt: CoherenceGateLedgerEvent) => void) | null = null;
   private static RETENTION_DAYS = 30;
 
   constructor(options: CoherenceGateOptions) {
@@ -190,6 +203,28 @@ export class CoherenceGate {
 
     // Load custom reviewers
     this.loadCustomReviewers(options.apiKey, options.intelligence);
+  }
+
+  /**
+   * Register a ledger-event sink (Integrated-Being v1). Signal-only; thrown
+   * exceptions from the sink are swallowed. Called once during server wiring
+   * by registerLedgerEmitters().
+   */
+  setLedgerEventSink(sink: (evt: CoherenceGateLedgerEvent) => void): void {
+    this.onLedgerEventSink = sink;
+  }
+
+  /** Internal helper that safely fires the ledger event sink. */
+  private emitLedgerBlock(ruleId: string, sessionId: string, channel: string): void {
+    if (!this.onLedgerEventSink) return;
+    try {
+      this.onLedgerEventSink({
+        ruleId,
+        sessionId,
+        channel,
+        timestamp: new Date().toISOString(),
+      });
+    } catch { /* signal-only */ }
   }
 
   /**
@@ -259,6 +294,8 @@ export class CoherenceGate {
     if (pelResult.outcome === 'hard_block') {
       const feedback = this.composePELFeedback(pelResult);
       this.logAudit(sessionId, context, 'pel-block', [], 'PEL hard block');
+      // Integrated-Being: rule id only, no rule context. Spec §Write path §4.
+      this.emitLedgerBlock('PEL_HARD_BLOCK', sessionId, context.channel);
       return {
         pass: false,
         feedback,
@@ -508,6 +545,10 @@ export class CoherenceGate {
       const feedback = this.composeFeedback(blockResults, warnResults, retryState.retryCount, maxRetries);
       retryState.lastViolations = auditViolations;
       this.logAudit(sessionId, context, 'block', auditViolations, `Block: retry ${retryState.retryCount}/${maxRetries}`);
+      // Integrated-Being: emit rule id ONLY (no context). Use the first block
+      // reviewer's name as the rule id, consistent with existing audit logs.
+      const ruleId = blockResults[0]?.reviewer ?? 'COHERENCE_BLOCK';
+      this.emitLedgerBlock(ruleId, sessionId, context.channel);
       return {
         pass: false,
         feedback,

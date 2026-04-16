@@ -2413,6 +2413,7 @@
           <button class="tab" data-tab="jobs" onclick="switchTab('jobs')">Jobs <span class="tab-count" id="tabJobCount">0</span></button>
           <button class="tab" data-tab="features" onclick="switchTab('features')">Features</button>
           <button class="tab" data-tab="systems" onclick="switchTab('systems')">Health</button>
+          <button class="tab" data-tab="integrated-being" onclick="switchTab('integrated-being')">Integrated-Being</button>
         </nav>
       </div>
       <div class="vital-signs" id="vitalSigns">
@@ -2638,6 +2639,97 @@
           </div>
         </div>
         <div class="jobs-detail-content" id="jobsDetailContent" style="display:none"></div>
+      </div>
+    </div>
+
+    <!-- Integrated-Being Tab (Integrated-Being v1) -->
+    <div id="integratedBeingPanel" style="display:none;flex-direction:column;padding:20px;gap:16px;overflow-y:auto">
+      <div style="display:flex;justify-content:space-between;align-items:center">
+        <h2 style="margin:0">Integrated-Being</h2>
+        <div>
+          <button onclick="loadIntegratedBeing()" style="padding:6px 12px">Refresh</button>
+        </div>
+      </div>
+      <div id="ibPerMachineNotice" style="font-size:12px;color:var(--text-dim);display:none">
+        Integrated-Being on this machine only — cross-machine ledger visibility is not yet implemented.
+      </div>
+
+      <!-- Summary cards -->
+      <div id="ibSummaryCards" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px">
+        <div style="background:var(--panel);padding:14px;border-radius:8px;border:1px solid var(--border)">
+          <div style="font-size:11px;color:var(--text-dim);text-transform:uppercase">Total entries</div>
+          <div id="ibCardTotal" style="font-size:22px;font-weight:600">–</div>
+        </div>
+        <div style="background:var(--panel);padding:14px;border-radius:8px;border:1px solid var(--border)">
+          <div style="font-size:11px;color:var(--text-dim);text-transform:uppercase">Classifier fires</div>
+          <div id="ibCardClassifier" style="font-size:22px;font-weight:600">–</div>
+        </div>
+        <div style="background:var(--panel);padding:14px;border-radius:8px;border:1px solid var(--border)">
+          <div style="font-size:11px;color:var(--text-dim);text-transform:uppercase">Rotations</div>
+          <div id="ibCardRotations" style="font-size:22px;font-weight:600">–</div>
+        </div>
+        <div style="background:var(--panel);padding:14px;border-radius:8px;border:1px solid var(--border)">
+          <div style="font-size:11px;color:var(--text-dim);text-transform:uppercase">Unclosed &gt; TTL</div>
+          <div id="ibCardUnclosed" style="font-size:22px;font-weight:600">–</div>
+        </div>
+      </div>
+
+      <!-- Filters -->
+      <div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap">
+        <label style="font-size:12px;color:var(--text-dim)">Kind
+          <select id="ibFilterKind" onchange="loadIntegratedBeing()" style="margin-left:6px">
+            <option value="">(any)</option>
+            <option value="commitment">commitment</option>
+            <option value="agreement">agreement</option>
+            <option value="thread-opened">thread-opened</option>
+            <option value="thread-closed">thread-closed</option>
+            <option value="thread-abandoned">thread-abandoned</option>
+            <option value="decision">decision</option>
+            <option value="note">note</option>
+          </select>
+        </label>
+        <label style="font-size:12px;color:var(--text-dim)">Counterparty
+          <select id="ibFilterCounterparty" onchange="loadIntegratedBeing()" style="margin-left:6px">
+            <option value="">(any)</option>
+            <option value="user">user</option>
+            <option value="agent">agent</option>
+            <option value="self">self</option>
+            <option value="system">system</option>
+          </select>
+        </label>
+        <label style="font-size:12px;color:var(--text-dim)">Limit
+          <input type="number" id="ibFilterLimit" value="50" min="1" max="200" style="width:60px;margin-left:6px" onchange="loadIntegratedBeing()">
+        </label>
+      </div>
+
+      <!-- Recent entries table -->
+      <div style="background:var(--panel);border-radius:8px;border:1px solid var(--border);overflow:hidden">
+        <table style="width:100%;border-collapse:collapse;font-size:12px">
+          <thead>
+            <tr style="background:var(--bg-alt)">
+              <th style="text-align:left;padding:8px">ID</th>
+              <th style="text-align:left;padding:8px">Time</th>
+              <th style="text-align:left;padding:8px">Kind</th>
+              <th style="text-align:left;padding:8px">Subject</th>
+              <th style="text-align:left;padding:8px">Counterparty</th>
+              <th style="text-align:left;padding:8px">Provenance</th>
+              <th style="text-align:left;padding:8px">Supersedes</th>
+            </tr>
+          </thead>
+          <tbody id="ibEntriesTbody">
+            <tr><td colspan="7" style="padding:14px;color:var(--text-dim);text-align:center">Loading…</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <!-- Chain explorer -->
+      <div style="background:var(--panel);border-radius:8px;border:1px solid var(--border);padding:12px">
+        <div style="font-size:13px;font-weight:600;margin-bottom:8px">Chain explorer</div>
+        <div style="display:flex;gap:8px;align-items:center">
+          <input type="text" id="ibChainInput" placeholder="12-hex entry id" style="flex:1;padding:6px">
+          <button onclick="walkIntegratedBeingChain()" style="padding:6px 12px">Walk chain</button>
+        </div>
+        <pre id="ibChainResult" style="margin-top:10px;max-height:200px;overflow:auto;font-size:11px"></pre>
       </div>
     </div>
 
@@ -3657,6 +3749,13 @@
         panels: ['systemsTab'],
         display: ['flex'],
         onActivate: () => { loadSystems(); },
+      },
+      {
+        id: 'integrated-being',
+        panels: ['integratedBeingPanel'],
+        display: ['flex'],
+        onActivate: () => { if (typeof loadIntegratedBeing === 'function') loadIntegratedBeing(); if (typeof startIntegratedBeingPoll === 'function') startIntegratedBeingPoll(); },
+        onDeactivate: () => { if (typeof stopIntegratedBeingPoll === 'function') stopIntegratedBeingPoll(); },
       },
     ];
 
@@ -5443,6 +5542,86 @@
           }).join('')}`;
       } catch (e) {
         // History not available, that's fine
+      }
+    }
+
+    // ── Integrated-Being Tab (v1) ────────────────────────────────
+    let integratedBeingPollTimer = null;
+
+    async function loadIntegratedBeing() {
+      const limit = document.getElementById('ibFilterLimit')?.value || 50;
+      const kind = document.getElementById('ibFilterKind')?.value || '';
+      const cpType = document.getElementById('ibFilterCounterparty')?.value || '';
+      const qs = new URLSearchParams({ limit: String(limit) });
+      if (cpType) qs.set('counterpartyType', cpType);
+      try {
+        const [recentRes, statsRes] = await Promise.all([
+          apiFetch(`/shared-state/recent?${qs.toString()}`).catch(() => null),
+          apiFetch('/shared-state/stats').catch(() => null),
+        ]);
+        const tbody = document.getElementById('ibEntriesTbody');
+        if (!recentRes || !recentRes.entries) {
+          tbody.innerHTML = '<tr><td colspan="7" style="padding:14px;color:var(--text-dim);text-align:center">Integrated-Being disabled or unavailable</td></tr>';
+        } else {
+          let entries = recentRes.entries;
+          if (kind) entries = entries.filter(e => e.kind === kind);
+          if (entries.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="7" style="padding:14px;color:var(--text-dim);text-align:center">No entries</td></tr>';
+          } else {
+            tbody.innerHTML = entries.map(e => `
+              <tr style="border-top:1px solid var(--border)">
+                <td style="padding:6px;font-family:monospace">${esc(e.id)}</td>
+                <td style="padding:6px">${esc((e.t || '').slice(0, 19).replace('T', ' '))}</td>
+                <td style="padding:6px">${esc(e.kind)}</td>
+                <td style="padding:6px">${esc(e.subject)}</td>
+                <td style="padding:6px">${esc(e.counterparty?.type)}/${esc(e.counterparty?.name)}</td>
+                <td style="padding:6px;font-size:11px;color:var(--text-dim)">${esc(e.provenance)}${e.source ? ' · '+esc(e.source):''}</td>
+                <td style="padding:6px;font-family:monospace;font-size:11px">${esc(e.supersedes || '')}</td>
+              </tr>`).join('');
+          }
+        }
+        if (statsRes) {
+          document.getElementById('ibCardTotal').textContent =
+            String(Object.values(statsRes.counts || {}).reduce((a, b) => a + b, 0));
+          document.getElementById('ibCardClassifier').textContent = String(statsRes.classifierFired ?? 0);
+          document.getElementById('ibCardRotations').textContent = String(statsRes.rotationCount ?? 0);
+          document.getElementById('ibCardUnclosed').textContent = String(statsRes.unclosedThreadsOverTtl ?? 0);
+        }
+        // Show per-machine notice if paired
+        try {
+          const machines = await apiFetch('/machines').catch(() => null);
+          if (machines && Array.isArray(machines.machines) && machines.machines.length > 1) {
+            document.getElementById('ibPerMachineNotice').style.display = 'block';
+          }
+        } catch {}
+      } catch (err) {
+        console.error('[integrated-being] load error', err);
+      }
+    }
+
+    function startIntegratedBeingPoll() {
+      if (integratedBeingPollTimer) return;
+      integratedBeingPollTimer = setInterval(loadIntegratedBeing, 30000);
+    }
+    function stopIntegratedBeingPoll() {
+      if (integratedBeingPollTimer) {
+        clearInterval(integratedBeingPollTimer);
+        integratedBeingPollTimer = null;
+      }
+    }
+
+    async function walkIntegratedBeingChain() {
+      const id = (document.getElementById('ibChainInput')?.value || '').trim();
+      const out = document.getElementById('ibChainResult');
+      if (!/^[0-9a-f]{12}$/.test(id)) {
+        out.textContent = 'Invalid id — expected 12 hex characters.';
+        return;
+      }
+      try {
+        const res = await apiFetch(`/shared-state/chain/${id}`);
+        out.textContent = JSON.stringify(res.chain, null, 2);
+      } catch (err) {
+        out.textContent = String(err && err.message ? err.message : err);
       }
     }
 

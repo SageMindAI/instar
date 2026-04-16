@@ -38,6 +38,23 @@ export interface ThreadlineRouterConfig {
   maxHistoryMessages: number;
 }
 
+/**
+ * Ledger event fired by the router on thread lifecycle transitions.
+ * Consumed by the Integrated-Being SharedStateLedger via registerLedgerEmitters().
+ *
+ * SIGNAL-ONLY by design — the router never blocks on ledger write failures.
+ */
+export interface ThreadlineLedgerEvent {
+  kind: 'thread-opened' | 'thread-closed' | 'thread-abandoned';
+  threadId: string;
+  remoteAgent: string;
+  subject: string;
+  /** Trust-tier source — autonomy level snapshot for trust mapping. */
+  autonomyLevel?: string;
+  /** ISO timestamp of the event. */
+  timestamp: string;
+}
+
 /** Relay context passed from InboundMessageGate when message arrives via relay */
 export interface RelayMessageContext {
   /** Sender's cryptographic fingerprint */
@@ -114,6 +131,9 @@ export class ThreadlineRouter {
    *  session for the thread before falling back to spawn/resume. */
   private readonly messageDelivery: IMessageDelivery | null;
 
+  /** Optional ledger-event sink (Integrated-Being v1). Signal-only. */
+  private readonly onLedgerEvent: ((evt: ThreadlineLedgerEvent) => void) | null;
+
   /** Track in-flight spawn requests to prevent concurrent spawns for the same thread */
   private readonly pendingSpawns = new Set<string>();
 
@@ -125,6 +145,7 @@ export class ThreadlineRouter {
     config: Partial<ThreadlineRouterConfig> & Pick<ThreadlineRouterConfig, 'localAgent' | 'localMachine'>,
     autonomyGate?: AutonomyGate | null,
     messageDelivery?: IMessageDelivery | null,
+    onLedgerEvent?: (evt: ThreadlineLedgerEvent) => void,
   ) {
     this.messageRouter = messageRouter;
     this.spawnManager = spawnManager;
@@ -136,6 +157,43 @@ export class ThreadlineRouter {
     };
     this.autonomyGate = autonomyGate ?? null;
     this.messageDelivery = messageDelivery ?? null;
+    this.onLedgerEvent = onLedgerEvent ?? null;
+  }
+
+  /** Fire a ledger event swallowing any exception (signal-only). */
+  private emitLedger(evt: ThreadlineLedgerEvent): void {
+    if (!this.onLedgerEvent) return;
+    try { this.onLedgerEvent(evt); } catch { /* signal-only */ }
+  }
+
+  /**
+   * Sweep thread-resume entries older than the TTL and emit synthetic
+   * `thread-abandoned` ledger events. Bounded, idempotent via dedupKey on
+   * the ledger side.
+   */
+  sweepAbandonedThreads(ttlMs: number = 24 * 60 * 60 * 1000): number {
+    if (!this.onLedgerEvent) return 0;
+    let emitted = 0;
+    try {
+      const all = this.threadResumeMap.listActive?.() ?? [];
+      const cutoff = Date.now() - ttlMs;
+      for (const { threadId, entry } of all) {
+        if (entry.state === 'active' || entry.state === 'idle') {
+          const last = Date.parse(entry.lastAccessedAt);
+          if (Number.isFinite(last) && last < cutoff) {
+            this.emitLedger({
+              kind: 'thread-abandoned',
+              threadId,
+              remoteAgent: entry.remoteAgent,
+              subject: entry.subject,
+              timestamp: new Date().toISOString(),
+            });
+            emitted += 1;
+          }
+        }
+      }
+    } catch { /* best effort */ }
+    return emitted;
   }
 
   /**
@@ -257,9 +315,23 @@ export class ThreadlineRouter {
 
   /**
    * Notify the router that a thread has been resolved (conversation complete).
+   *
+   * Emits a `thread-closed` ledger event wrapped in try/finally so the ledger
+   * emitter fires even if the resolve() call itself throws. Signal-only.
    */
   onThreadResolved(threadId: string): void {
-    this.threadResumeMap.resolve(threadId);
+    const entry = this.threadResumeMap.get(threadId);
+    try {
+      this.threadResumeMap.resolve(threadId);
+    } finally {
+      this.emitLedger({
+        kind: 'thread-closed',
+        threadId,
+        remoteAgent: entry?.remoteAgent ?? 'unknown',
+        subject: entry?.subject ?? '(unknown)',
+        timestamp: new Date().toISOString(),
+      });
+    }
   }
 
   /**
@@ -418,6 +490,15 @@ export class ThreadlineRouter {
     };
 
     this.threadResumeMap.save(threadId, newEntry);
+
+    // Integrated-Being: emit thread-opened ledger event (signal-only).
+    this.emitLedger({
+      kind: 'thread-opened',
+      threadId,
+      remoteAgent: message.from.agent,
+      subject: message.subject,
+      timestamp: new Date().toISOString(),
+    });
 
     return {
       handled: true,

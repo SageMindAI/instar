@@ -75,6 +75,27 @@ export interface ToneReviewSignals {
     /** Short excerpt of the matched prior message for context (truncated to 200 chars). */
     matchedText?: string;
   };
+  /**
+   * Paraphrase cross-check (Integrated-Being v1).
+   *
+   * This is SIGNAL ONLY. It fires when an outbound message closely paraphrases
+   * an entry in the shared-state ledger whose counterparty differs from the
+   * current outbound target. It NEVER blocks on its own — the MessagingToneGate
+   * is the single authority for block/allow, and the existing rule-id system
+   * (B1-B9) is unchanged. A new rule-id B10_PARAPHRASE_FLAGGED is reserved
+   * for observability so the gate may *cite* B10 in reasoning for dashboard
+   * telemetry, but the gate's default behavior is to PASS on this signal
+   * alone. See docs/signal-vs-authority.md.
+   */
+  paraphrase?: {
+    detected: boolean;
+    /** Similarity score (Jaccard / cosine over bag-of-words) [0, 1]. */
+    similarityScore?: number;
+    /** ID of the matched ledger entry. */
+    matchedEntryId?: string;
+    /** Counterparty of the matched entry (differs from current outbound). */
+    counterparty?: { type: string; name: string };
+  };
 }
 
 export interface ToneReviewContext {
@@ -214,7 +235,7 @@ ${JSON.stringify(text)}
   }
 
   private renderSignals(signals?: ToneReviewSignals): string {
-    if (!signals || (!signals.junk && !signals.duplicate)) {
+    if (!signals || (!signals.junk && !signals.duplicate && !signals.paraphrase)) {
       return '\n=== UPSTREAM SIGNALS ===\n(no signals reported)\n';
     }
     const lines: string[] = ['', '=== UPSTREAM SIGNALS ==='];
@@ -226,6 +247,17 @@ ${JSON.stringify(text)}
       lines.push(`- outbound-dedup detector: detected=${signals.duplicate.detected} similarity=${sim}`);
       if (signals.duplicate.matchedText) {
         lines.push(`    matched prior: ${JSON.stringify(signals.duplicate.matchedText.slice(0, 200))}`);
+      }
+    }
+    if (signals.paraphrase) {
+      // Integrated-Being v1 — SIGNAL ONLY (see ToneReviewSignals.paraphrase).
+      // The tone gate remains the single authority; this is observability.
+      const sim = signals.paraphrase.similarityScore !== undefined
+        ? signals.paraphrase.similarityScore.toFixed(3)
+        : 'n/a';
+      lines.push(`- paraphrase-xcheck (signal-only, never blocks on its own): detected=${signals.paraphrase.detected} similarity=${sim}`);
+      if (signals.paraphrase.counterparty) {
+        lines.push(`    matched counterparty: ${signals.paraphrase.counterparty.type}/${signals.paraphrase.counterparty.name}`);
       }
     }
     return lines.join('\n') + '\n';

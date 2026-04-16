@@ -1637,10 +1637,9 @@ autostartCmd
     }
   });
 
-// Hidden command: run post-update migration from the NEW binary
-// Called by the auto-updater after `npm install -g` to ensure
-// migrations use the latest code, not the old in-memory modules.
-program
+// Migrate command — post-update migrations. Default action (no subcommand)
+// runs the full migration flow. Subcommands perform targeted migrations.
+const migrateCmd = program
   .command('migrate')
   .description('Run post-update knowledge migration')
   .option('-d, --dir <path>', 'Project directory')
@@ -1687,6 +1686,47 @@ program
           pendingGuidePath: guideResult.pendingGuidePath,
         } : null,
       }));
+    } catch (err) {
+      console.error(JSON.stringify({ error: err instanceof Error ? err.message : String(err) }));
+      process.exit(1);
+    }
+  });
+
+// Integrated-Being v1 — sync .claude/hooks/instar/session-start.sh with the
+// latest inline template. Used by divergent-local-hook agents to pick up the
+// /shared-state/render injection after an update.
+migrateCmd
+  .command('sync-session-hook')
+  .description('Sync .claude/hooks/instar/session-start.sh with the latest template (Integrated-Being v1)')
+  .option('-d, --dir <path>', 'Project directory')
+  .option('--force', 'Overwrite a divergent local hook')
+  .action(async (opts: { dir?: string; force?: boolean }) => {
+    try {
+      const { syncSessionHook } = await import('./commands/migrate.js');
+      const result = await syncSessionHook(opts);
+      console.log(JSON.stringify(result));
+    } catch (err) {
+      console.error(JSON.stringify({ error: err instanceof Error ? err.message : String(err) }));
+      process.exit(1);
+    }
+  });
+
+// Integrated-Being v1 — delete orphaned shared-state ledger files.
+const ledgerCmd = program
+  .command('ledger')
+  .description('Manage the Integrated-Being shared-state ledger');
+
+ledgerCmd
+  .command('cleanup')
+  .description('Delete orphaned shared-state.jsonl* files (only when feature is disabled)')
+  .option('-d, --dir <path>', 'Project directory')
+  .option('--yes', 'Skip confirmation prompt')
+  .option('--force', 'Delete even when feature is enabled')
+  .action(async (opts: { dir?: string; yes?: boolean; force?: boolean }) => {
+    try {
+      const { ledgerCleanup } = await import('./commands/ledgerCleanup.js');
+      const result = await ledgerCleanup(opts);
+      console.log(JSON.stringify(result));
     } catch (err) {
       console.error(JSON.stringify({ error: err instanceof Error ? err.message : String(err) }));
       process.exit(1);
