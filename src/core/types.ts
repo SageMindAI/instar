@@ -1484,6 +1484,101 @@ export interface InstarConfig {
     agentName?: string;
     platform?: string;
   };
+  /** Integrated-Being ledger (cross-session coherence) — see docs/specs/integrated-being-ledger-v1.md */
+  integratedBeing?: IntegratedBeingConfig;
+}
+
+// ── Integrated-Being Ledger (v1) ────────────────────────────────────
+
+/**
+ * Configuration for the Integrated-Being ledger (per-agent shared state across
+ * concurrent sessions). All fields are optional — defaults apply when absent.
+ * See docs/specs/integrated-being-ledger-v1.md for the authoritative spec.
+ */
+export interface IntegratedBeingConfig {
+  /** Master switch. Default: true. Gates endpoint registration, emitter
+   *  registration, and backup inclusion. When false, all three are skipped. */
+  enabled?: boolean;
+  /** Outbound commitment classifier. Default: false (explicit opt-in). */
+  classifierEnabled?: boolean;
+  /** Retention for rotated archives. Default: 7 days. */
+  retentionDays?: number;
+  /** Fraction of prefilter-hits to LLM-classify (0..1). Default: 1.0. */
+  classifierSampleRate?: number;
+  /** Downstream paraphrase cross-check in outbound path. Default: true. */
+  paraphraseCheckEnabled?: boolean;
+  /** Per-agent salt for hashing untrusted counterparty names. Generated on
+   *  first use; never rotated silently. */
+  counterpartyHashSalt?: string;
+}
+
+/** Ledger entry subsystem (who emitted). Always bound server-side. */
+export type LedgerEntrySubsystem =
+  | 'threadline'
+  | 'outbound-classifier'
+  | 'session-manager'
+  | 'compaction-sentinel'
+  | 'dispatch'
+  | 'coherence-gate';
+
+/** Ledger entry kind. */
+export type LedgerEntryKind =
+  | 'commitment'
+  | 'agreement'
+  | 'thread-opened'
+  | 'thread-closed'
+  | 'thread-abandoned'
+  | 'decision'
+  | 'note';
+
+/** Authorship label on each entry (replaces "confidence"). */
+export type LedgerProvenance = 'subsystem-asserted' | 'subsystem-inferred';
+
+/** Counterparty metadata for a ledger entry. */
+export interface LedgerCounterparty {
+  /** Type of counterparty. */
+  type: 'user' | 'agent' | 'self' | 'system';
+  /** Raw name. Charset [a-zA-Z0-9-_.:], max 64 chars. Rendered as
+   *  agent:<hash> for untrusted-tier counterparties at render time. */
+  name: string;
+  /** Trust tier, snapshotted at append time. Never re-resolved on read. */
+  trustTier: 'trusted' | 'untrusted';
+}
+
+/**
+ * A single append-only ledger entry.
+ *
+ * The id and timestamp are server-generated at append time; emittedBy is
+ * bound from calling code and never from external input.
+ */
+export interface LedgerEntry {
+  /** 12-hex server-generated ID. */
+  id: string;
+  /** ISO timestamp, server-set. */
+  t: string;
+  /** Who emitted this entry (always server-bound). */
+  emittedBy: {
+    subsystem: LedgerEntrySubsystem;
+    /** Instance identifier. Max 64 chars, charset [a-zA-Z0-9-_.:]. */
+    instance: string;
+  };
+  /** Entry kind. */
+  kind: LedgerEntryKind;
+  /** Human-readable subject. Max 200 chars, Unicode-sanitized at render time. */
+  subject: string;
+  /** Optional expanded summary. Max 400 chars, Unicode-sanitized at render time. */
+  summary?: string;
+  /** Counterparty metadata (required — addresses authority ambiguity). */
+  counterparty: LedgerCounterparty;
+  /** Optional id of an earlier entry this resolves/withdraws. */
+  supersedes?: string;
+  /** Authorship label (replaces earlier "confidence" field). */
+  provenance: LedgerProvenance;
+  /** Append-side dedup key within the rotation window.
+   *  e.g., "threadline:opened:<thread-id>". */
+  dedupKey: string;
+  /** Optional source label for classifier-produced entries. */
+  source?: 'heuristic-classifier';
 }
 
 // ── Dashboard ───────────────────────────────────────────────────────

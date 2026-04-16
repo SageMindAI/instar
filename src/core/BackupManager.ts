@@ -29,25 +29,78 @@ const DEFAULT_CONFIG: BackupConfig = {
     'jobs.json',
     'users.json',
     'relationships/',
+    // Integrated-Being v1 (gated by config.integratedBeing.enabled at snapshot
+    // time — see resolveIncludedFiles()). Glob matches the active ledger and
+    // any rotated .jsonl.<epoch> archives.
+    'shared-state.jsonl*',
   ],
 };
+
+/**
+ * Expand a single glob-style entry (only trailing `*` is supported) against
+ * a directory. Returns literal filenames to copy. Safe against path traversal —
+ * each returned name is a plain basename in stateDir.
+ */
+function expandGlob(stateDir: string, entry: string): string[] {
+  if (!entry.includes('*')) return [entry];
+  // Only support trailing * for now — e.g., 'shared-state.jsonl*'
+  const starIdx = entry.indexOf('*');
+  const prefix = entry.slice(0, starIdx);
+  const suffix = entry.slice(starIdx + 1);
+  if (prefix.includes('/') || suffix.includes('/') || suffix.includes('*')) {
+    // Unsupported glob shape — return the literal entry; caller will skip if missing.
+    return [entry];
+  }
+  try {
+    const names = fs.readdirSync(stateDir);
+    return names.filter((n) => n.startsWith(prefix) && n.endsWith(suffix));
+  } catch {
+    return [];
+  }
+}
 
 export class BackupManager {
   private readonly stateDir: string;
   private readonly backupsDir: string;
   private readonly config: BackupConfig;
   private readonly isSessionActive?: () => boolean;
+  /** Optional resolver — called at snapshot time to check if Integrated-Being
+   *  is enabled. When false, shared-state.jsonl* is excluded. See spec §Config knob. */
+  private readonly isIntegratedBeingEnabled?: () => boolean;
   private lastAutoSnapshot: number = 0;
 
   constructor(
     stateDir: string,
     config?: Partial<BackupConfig>,
     isSessionActive?: () => boolean,
+    isIntegratedBeingEnabled?: () => boolean,
   ) {
     this.stateDir = path.resolve(stateDir);
     this.backupsDir = path.resolve(stateDir, 'backups');
     this.config = { ...DEFAULT_CONFIG, ...config };
     this.isSessionActive = isSessionActive;
+    this.isIntegratedBeingEnabled = isIntegratedBeingEnabled;
+  }
+
+  /**
+   * Resolve the effective list of files to include at snapshot time, with
+   * glob expansion and the integrated-being gate applied.
+   */
+  private resolveIncludedFiles(): string[] {
+    const expanded: string[] = [];
+    const sharedStateGateOff = this.isIntegratedBeingEnabled
+      ? !this.isIntegratedBeingEnabled()
+      : false;
+    for (const entry of this.config.includeFiles) {
+      // Gate: exclude the shared-state pattern when feature is disabled.
+      if (sharedStateGateOff && entry.startsWith('shared-state.jsonl')) continue;
+      if (entry.includes('*')) {
+        for (const real of expandGlob(this.stateDir, entry)) expanded.push(real);
+      } else {
+        expanded.push(entry);
+      }
+    }
+    return expanded;
   }
 
   /**
@@ -111,7 +164,7 @@ export class BackupManager {
     const files: string[] = [];
     let totalBytes = 0;
 
-    for (const entry of this.config.includeFiles) {
+    for (const entry of this.resolveIncludedFiles()) {
       // Security: block config.json and secrets regardless of user config
       const baseName = path.basename(entry).replace(/\/$/, '');
       if (BLOCKED_FILES.has(baseName) || BLOCKED_FILES.has(entry)) {

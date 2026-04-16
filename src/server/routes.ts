@@ -6,6 +6,7 @@
  */
 
 import { Router } from 'express';
+import type { Request as ExpressRequest, Response as ExpressResponse } from 'express';
 import { execFileSync } from 'node:child_process';
 import { createHash, timingSafeEqual, randomUUID } from 'node:crypto';
 import fs from 'node:fs';
@@ -165,6 +166,8 @@ export interface RouteContext {
   featureRegistry: import('../core/FeatureRegistry.js').FeatureRegistry | null;
   discoveryEvaluator: import('../core/DiscoveryEvaluator.js').DiscoveryEvaluator | null;
   unifiedTrust: UnifiedTrustSystem | null;
+  /** Integrated-Being SharedStateLedger (v1). Null when disabled. */
+  sharedStateLedger: import('../core/SharedStateLedger.js').SharedStateLedger | null;
   /** Pending reply waiters for threadline relay-send waitForReply support.
    *  Key: threadId (UUID — unique per conversation, unlike agent names which
    *  can collide when multiple agents share a name). Value: resolve callback
@@ -9944,6 +9947,80 @@ export function createRoutes(ctx: RouteContext): Router {
         eligibleCount: 0,
         error: err instanceof Error ? err.message : 'Unknown error',
       });
+    }
+  });
+
+  // ── Integrated-Being shared-state ledger (v1) ─────────────────────
+  //
+  // Four bearer-token-gated endpoints (auth enforced globally by authMiddleware).
+  // Per-IP rate limiting uses the same middleware applied elsewhere in the API.
+  // When config.integratedBeing.enabled === false, all four return 503.
+  //
+  // Spec: docs/specs/integrated-being-ledger-v1.md §"Read path".
+
+  const sharedStateDisabled = (_req: ExpressRequest, res: ExpressResponse): boolean => {
+    const enabled = ctx.config.integratedBeing?.enabled;
+    const effective = enabled === undefined ? true : enabled !== false;
+    if (!effective || !ctx.sharedStateLedger) {
+      res.status(503).json({ error: 'Integrated-Being ledger disabled' });
+      return true;
+    }
+    return false;
+  };
+
+  router.get('/shared-state/recent', rateLimiter(60_000, 60), async (req, res) => {
+    if (sharedStateDisabled(req, res)) return;
+    try {
+      const limit = req.query.limit ? Math.max(1, Math.min(200, parseInt(String(req.query.limit), 10) || 20)) : 20;
+      const since = typeof req.query.since === 'string' ? req.query.since : undefined;
+      const cpType = typeof req.query.counterpartyType === 'string'
+        ? (req.query.counterpartyType as 'user' | 'agent' | 'self' | 'system')
+        : undefined;
+      const entries = await ctx.sharedStateLedger!.recent({
+        limit,
+        since,
+        counterpartyType: cpType,
+      });
+      res.json({ entries });
+    } catch (err) {
+      res.status(500).json({ error: err instanceof Error ? err.message : String(err) });
+    }
+  });
+
+  router.get('/shared-state/render', rateLimiter(60_000, 60), async (req, res) => {
+    if (sharedStateDisabled(req, res)) return;
+    try {
+      const limit = req.query.limit ? Math.max(1, Math.min(200, parseInt(String(req.query.limit), 10) || 50)) : 50;
+      const rendered = await ctx.sharedStateLedger!.renderForInjection({ limit });
+      res.type('text/plain').send(rendered);
+    } catch (err) {
+      res.status(500).json({ error: err instanceof Error ? err.message : String(err) });
+    }
+  });
+
+  router.get('/shared-state/chain/:id', rateLimiter(60_000, 60), async (req, res) => {
+    if (sharedStateDisabled(req, res)) return;
+    try {
+      const id = String(req.params.id || '').trim();
+      if (!/^[0-9a-f]{12}$/.test(id)) {
+        res.status(400).json({ error: 'Invalid entry id' });
+        return;
+      }
+      const chain = await ctx.sharedStateLedger!.walkChain(id);
+      res.json({ chain });
+    } catch (err) {
+      res.status(500).json({ error: err instanceof Error ? err.message : String(err) });
+    }
+  });
+
+  router.get('/shared-state/stats', rateLimiter(60_000, 60), async (req, res) => {
+    if (sharedStateDisabled(req, res)) return;
+    try {
+      const rebuild = req.query.rebuild === '1' || req.query.rebuild === 'true';
+      const stats = await ctx.sharedStateLedger!.stats(rebuild);
+      res.json(stats);
+    } catch (err) {
+      res.status(500).json({ error: err instanceof Error ? err.message : String(err) });
     }
   });
 

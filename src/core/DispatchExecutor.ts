@@ -115,13 +115,40 @@ const BLOCKED_COMMANDS = [
 
 // ── Executor ───────────────────────────────────────────────────────
 
+/**
+ * Ledger event for Integrated-Being v1 — fires on successful dispatch execution.
+ * Signal-only; the dispatch executor never blocks on ledger-sink failure.
+ */
+export interface DispatchLedgerEvent {
+  dispatchId?: string;
+  description: string;
+  completedSteps: number;
+  totalSteps: number;
+  verified: boolean;
+  timestamp: string;
+}
+
 export class DispatchExecutor {
   private projectDir: string;
   private sessionManager: SessionManager | null;
+  private onLedgerEvent: ((evt: DispatchLedgerEvent) => void) | null = null;
 
   constructor(projectDir: string, sessionManager?: SessionManager | null) {
     this.projectDir = projectDir;
     this.sessionManager = sessionManager ?? null;
+  }
+
+  /**
+   * Register a ledger-event sink (Integrated-Being v1). Signal-only; thrown
+   * exceptions from the sink are swallowed.
+   */
+  setLedgerEventSink(sink: (evt: DispatchLedgerEvent) => void): void {
+    this.onLedgerEvent = sink;
+  }
+
+  private emitLedger(evt: DispatchLedgerEvent): void {
+    if (!this.onLedgerEvent) return;
+    try { this.onLedgerEvent(evt); } catch { /* signal-only */ }
   }
 
   /**
@@ -208,6 +235,15 @@ export class DispatchExecutor {
         console.log(`[DispatchExecutor] Verification failed: ${verifyResult.error}`);
       }
     }
+
+    // Integrated-Being ledger: emit decision entry on successful execution.
+    this.emitLedger({
+      description: payload.description,
+      completedSteps,
+      totalSteps: payload.steps.length,
+      verified,
+      timestamp: new Date().toISOString(),
+    });
 
     return {
       success: true,

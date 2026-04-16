@@ -64,6 +64,9 @@ export class MultiMachineCoordinator extends EventEmitter {
   private _enabled: boolean = false;
   private heartbeatWriteTimer: ReturnType<typeof setInterval> | null = null;
   private heartbeatCheckTimer: ReturnType<typeof setInterval> | null = null;
+  /** Integrated-Being v1 — tracks whether we've already emitted the
+   *  per-machine-ledger warning this boot. Spec §Multi-machine. */
+  private integratedBeingWarningEmitted: boolean = false;
 
   constructor(state: StateManager, config: CoordinatorConfig) {
     super();
@@ -128,6 +131,12 @@ export class MultiMachineCoordinator extends EventEmitter {
     // corruption, disk glitch, or manual cleanup hard-crashes the server
     // on boot because updateRole throws on unknown machineIds.
     this.identityManager.ensureSelfRegistered(this._identity, 'standby');
+
+    // Integrated-Being v1 — per-machine ledger warning.
+    // Emit exactly once per startup when the registry shows >1 machine.
+    // The ledger itself is per-machine and does NOT sync cross-machine (see
+    // .gitignore entry for shared-state.jsonl*).
+    this.emitIntegratedBeingMultiMachineWarning();
 
     this.securityLog.initialize();
 
@@ -212,6 +221,28 @@ export class MultiMachineCoordinator extends EventEmitter {
   /**
    * Stop the coordinator. Call on server shutdown.
    */
+  /**
+   * Integrated-Being v1 — log a one-time warning when paired on >1 machine.
+   * Spec §Multi-machine. The ledger is per-machine; cross-machine coherence
+   * is out of scope for v1.
+   */
+  private emitIntegratedBeingMultiMachineWarning(): void {
+    if (this.integratedBeingWarningEmitted) return;
+    try {
+      const registry = this.identityManager.loadRegistry();
+      const count = Object.keys(registry.machines ?? {}).length;
+      if (count > 1) {
+        console.warn(
+          `[integrated-being] This agent runs on ${count} machines. ` +
+          `Each machine has its own ledger; cross-machine visibility is not yet implemented.`,
+        );
+        this.integratedBeingWarningEmitted = true;
+      }
+    } catch {
+      // Don't fail startup on warning-emission failure.
+    }
+  }
+
   stop(): void {
     if (this.heartbeatWriteTimer) {
       clearInterval(this.heartbeatWriteTimer);

@@ -1748,6 +1748,25 @@ for m in d.get('recentMessages', []):
   fi
 fi
 
+# INTEGRATED-BEING LEDGER — cross-session observations (see docs/specs/integrated-being-ledger-v1.md)
+# Fetches /shared-state/render and injects it if non-empty. Silent on absence /
+# auth failure — endpoint returns 503 when disabled, empty body when enabled
+# but has no entries. Either way we only echo when content is present.
+if [ -f "$INSTAR_DIR/config.json" ]; then
+  PORT=\${PORT:-\$(grep -o '"port":[0-9]*' "$INSTAR_DIR/config.json" | head -1 | cut -d':' -f2)}
+  TOKEN=\$(grep -o '"authToken":"[^"]*"' "$INSTAR_DIR/config.json" | head -1 | sed 's/"authToken":"//;s/"$//')
+  if [ -n "\$PORT" ] && [ -n "\$TOKEN" ]; then
+    SHARED_STATE=\$(curl -sf -H "Authorization: Bearer \$TOKEN" "http://localhost:\${PORT}/shared-state/render?limit=50" 2>/dev/null)
+    if [ -n "\$SHARED_STATE" ]; then
+      echo ""
+      echo "--- INTEGRATED-BEING (cross-session observations) ---"
+      echo "\$SHARED_STATE"
+      echo "--- END INTEGRATED-BEING ---"
+      echo ""
+    fi
+  fi
+fi
+
 # Identity summary (first 20 lines of AGENT.md — enough for name + role)
 if [ -f "$INSTAR_DIR/AGENT.md" ]; then
   echo ""

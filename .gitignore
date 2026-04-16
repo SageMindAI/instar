@@ -16,6 +16,10 @@ dist/
 .instar/logs/
 .instar/instar-dev-traces/
 
+# Integrated-Being ledger — per-machine, not synced across machines (spec §Multi-machine)
+.instar/shared-state.jsonl
+.instar/shared-state.jsonl.*
+
 # OS
 .DS_Store
 Thumbs.db
