@@ -106,11 +106,14 @@ export class MessageRouter implements IMessageRouter {
     body: string,
     options?: SendMessageOptions,
   ): Promise<SendResult> {
-    // Intelligent routing: resolve session: "best" to actual session
+    // Intelligent routing: resolve session: "best" to actual session.
+    // Pass `from.session` as an exclusion so the sender's own session is
+    // never selected as the target — otherwise a self-to-self match would
+    // immediately trip the echo-prevention check below.
     if (to.session === 'best' && this.summarySentinel) {
       const isLocal = to.machine === 'local' || to.machine === this.config.localMachine;
       if (isLocal && to.agent === this.config.localAgent) {
-        const scores = this.summarySentinel.findBestSession(subject, body, to.agent);
+        const scores = this.summarySentinel.findBestSession(subject, body, to.agent, from.session);
         if (scores.length > 0) {
           to = { ...to, session: scores[0].tmuxSession };
         }

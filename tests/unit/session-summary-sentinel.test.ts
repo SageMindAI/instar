@@ -420,6 +420,96 @@ describe('SessionSummarySentinel', () => {
       );
       expect(scores).toEqual([]);
     });
+
+    it('excludes sender session from candidates', () => {
+      // Two active sessions, both would score above threshold.
+      // Without the exclusion, the sender's own session could win and
+      // trip echo-prevention in MessageRouter.send when resolving
+      // to.session === "best".
+      const sSender = makeSession({ id: 'session-sender', tmuxSession: 'tmux-sender' });
+      const sOther = makeSession({ id: 'session-other', tmuxSession: 'tmux-other' });
+      sessions.push(sSender, sOther);
+
+      const summaryDirSender = path.join(tmpDir, 'sessions', sSender.id);
+      const summaryDirOther = path.join(tmpDir, 'sessions', sOther.id);
+      fs.mkdirSync(summaryDirSender, { recursive: true });
+      fs.mkdirSync(summaryDirOther, { recursive: true });
+
+      const senderSummary: SessionSummary = {
+        sessionId: sSender.id, tmuxSession: sSender.tmuxSession,
+        task: 'Database migration work', phase: 'building',
+        files: ['prisma/schema.prisma'], topics: ['database', 'migration'],
+        blockers: null, lastActivity: new Date().toISOString(),
+        updatedAt: new Date().toISOString(), stale: false, outputHash: 'hS',
+      };
+      const otherSummary: SessionSummary = {
+        sessionId: sOther.id, tmuxSession: sOther.tmuxSession,
+        task: 'Database schema review', phase: 'building',
+        files: ['prisma/schema.prisma'], topics: ['database', 'schema'],
+        blockers: null, lastActivity: new Date().toISOString(),
+        updatedAt: new Date().toISOString(), stale: false, outputHash: 'hO',
+      };
+
+      fs.writeFileSync(path.join(summaryDirSender, 'summary.json'), JSON.stringify(senderSummary));
+      fs.writeFileSync(path.join(summaryDirOther, 'summary.json'), JSON.stringify(otherSummary));
+
+      // Without exclusion: sender's session is a valid candidate
+      const withoutExclude = sentinel.findBestSession(
+        'Database question',
+        'Database schema migration question',
+        'test-agent',
+      );
+      expect(withoutExclude.some(s => s.sessionId === sSender.id)).toBe(true);
+
+      // With exclusion by sessionId: sender's session must be dropped
+      const excludeById = sentinel.findBestSession(
+        'Database question',
+        'Database schema migration question',
+        'test-agent',
+        sSender.id,
+      );
+      expect(excludeById.some(s => s.sessionId === sSender.id)).toBe(false);
+      expect(excludeById.some(s => s.sessionId === sOther.id)).toBe(true);
+
+      // With exclusion by tmuxSession name: also dropped
+      const excludeByTmux = sentinel.findBestSession(
+        'Database question',
+        'Database schema migration question',
+        'test-agent',
+        sSender.tmuxSession,
+      );
+      expect(excludeByTmux.some(s => s.sessionId === sSender.id)).toBe(false);
+      expect(excludeByTmux.some(s => s.sessionId === sOther.id)).toBe(true);
+    });
+
+    it('returns empty when the only candidate is the excluded sender', () => {
+      // Reproduction: sender's session is the ONLY active session. Without
+      // the exclusion, MessageRouter.send would set to.session = from.session
+      // and throw echo-prevention. With the exclusion, the resolver returns
+      // no matches and MessageRouter keeps to.session = "best" for queueing.
+      const sSender = makeSession({ id: 'session-only', tmuxSession: 'tmux-only' });
+      sessions.push(sSender);
+
+      const summaryDir = path.join(tmpDir, 'sessions', sSender.id);
+      fs.mkdirSync(summaryDir, { recursive: true });
+
+      const summary: SessionSummary = {
+        sessionId: sSender.id, tmuxSession: sSender.tmuxSession,
+        task: 'Database migration', phase: 'building',
+        files: ['prisma/schema.prisma'], topics: ['database', 'migration'],
+        blockers: null, lastActivity: new Date().toISOString(),
+        updatedAt: new Date().toISOString(), stale: false, outputHash: 'h',
+      };
+      fs.writeFileSync(path.join(summaryDir, 'summary.json'), JSON.stringify(summary));
+
+      const scores = sentinel.findBestSession(
+        'Database question',
+        'Database migration question',
+        'test-agent',
+        sSender.id,
+      );
+      expect(scores).toEqual([]);
+    });
   });
 
   // ── Staleness ──────────────────────────────────────────────

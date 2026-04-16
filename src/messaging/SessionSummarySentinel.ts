@@ -365,18 +365,29 @@ export class SessionSummarySentinel {
   /**
    * Find the best session to deliver a message to.
    * Returns scored sessions sorted by relevance, or empty if no good match.
+   *
+   * `excludeSession` (optional): a session id (or tmux session name) to omit
+   * from candidates. Used by MessageRouter.send to prevent the sender's own
+   * session from being selected as the target, which would otherwise trip
+   * echo prevention when resolving `to.session === 'best'` for self-directed
+   * routing.
    */
   findBestSession(
     subject: string,
     body: string,
     targetAgent: string,
+    excludeSession?: string,
   ): RoutingScore[] {
     const summaries = this.getAllSummaries();
     const activeSessions = this.config.getActiveSessions();
     const activeIds = new Set(activeSessions.map(s => s.id));
 
-    // Only score sessions that are still active
-    const activeSummaries = summaries.filter(s => activeIds.has(s.sessionId));
+    // Only score sessions that are still active, and exclude the sender's
+    // own session if provided (matched by sessionId OR tmuxSession name).
+    const activeSummaries = summaries.filter(s =>
+      activeIds.has(s.sessionId)
+      && (!excludeSession || (s.sessionId !== excludeSession && s.tmuxSession !== excludeSession))
+    );
 
     if (activeSummaries.length === 0) return [];
 
