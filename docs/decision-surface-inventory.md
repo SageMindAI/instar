@@ -17,9 +17,10 @@
 
 | Location | Decides | Style | Classification | Notes |
 |---|---|---|---|---|
-| `server/routes.ts` — `checkOutboundMessage()` calling `MessagingToneGate.review()` | Whether an outbound message contains enumerated leak patterns (B1–B9 rule set) | LLM-backed | **Authority — OK** | Sole outbound authority. Receives structured signals from junk and dedup detectors plus recent conversation. `ToneReviewResult.rule` now constrained to B1..B9; citations outside the set fail-open with `invalidRule=true` (2026-04-15 rework). |
+| `server/routes.ts` — `checkOutboundMessage()` calling `MessagingToneGate.review()` | Whether an outbound message contains enumerated leak patterns (B1–B9 rule set) | LLM-backed | **Authority — OK** | Sole outbound authority. Receives structured signals from junk, dedup, and paraphrase detectors plus recent conversation. `ToneReviewResult.rule` now constrained to B1..B9; citations outside the set fail-open with `invalidRule=true` (2026-04-15 rework). B10_PARAPHRASE_FLAGGED is reserved for observability — the gate may cite it in dashboard telemetry but never blocks on it alone. |
 | `core/junk-payload.ts` — `isJunkPayload()` (signal only) | Whether an outbound message looks like a debug token | Deterministic (literal tokens) | **Signal — OK** | Was a direct 422-block violator; reworked 2026-04-15 into a pure signal (`signals.junk`) fed into `checkOutboundMessage()`. No independent block authority. |
 | `core/OutboundDedupGate.ts` — `check()` (signal only) | Whether an outbound message is a near-duplicate of a recent one | Deterministic (Jaccard 3-gram similarity) | **Signal — OK** | Was a direct 422-block violator; reworked 2026-04-15 into a pure signal (`signals.duplicate`) fed into `checkOutboundMessage()`. No independent block authority. |
+| `core/LedgerParaphraseDetector.ts` — `check()` (signal only, Integrated-Being v1) | Whether an outbound message closely paraphrases a SharedStateLedger entry whose counterparty differs from the current outbound target | Deterministic (Jaccard over lowercased word sets, threshold ≥ 0.7) | **Signal — OK** | New in Integrated-Being v1. Emits `signals.paraphrase` into `checkOutboundMessage()`. Only compares against `provenance: subsystem-asserted` entries. Never blocks independently. |
 
 ## 2. Inbound message filtering (user → agent)
 
@@ -159,9 +160,9 @@ The three violations identified in the initial audit were resolved together in a
 
 ## Summary metrics
 
-- **Total decision points catalogued:** ~45 (consolidated from the initial sweep of 55–65 by merging sub-decisions inside the same class).
+- **Total decision points catalogued:** ~46 (added `LedgerParaphraseDetector` signal in Integrated-Being v1).
 - **Violators:** 0 (three outbound-path violations resolved in `c204b68`, 2026-04-15).
 - **Audit-flagged:** 1 (coherence gate specialist reviewers — reasoning-traceability check pending).
-- **Explicitly OK:** 44 (includes the three reclassified outbound points).
+- **Explicitly OK:** 45 (includes the three reclassified outbound points and new paraphrase signal).
 
 The instar codebase is largely compliant with the signal-vs-authority principle. The 2026-04-15 rework resolved all three known violators in a single pass. The audit-flagged coherence specialists share the same structural pattern as the tone gate pre-fix; they should get the same rule-citation constraint when that work is scoped.
