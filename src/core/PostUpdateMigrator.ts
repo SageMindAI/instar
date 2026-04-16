@@ -1146,20 +1146,65 @@ The user has been talking to you (possibly for days). A generic greeting like "H
     const scriptsDir = path.join(this.config.projectDir, '.claude', 'scripts');
     fs.mkdirSync(scriptsDir, { recursive: true });
 
-    // Telegram reply script — install if Telegram configured and script missing
+    // Telegram reply script — install if missing, or migrate if the existing
+    // copy is an older version that lacks HTTP 408 handling. The 408-handling
+    // fix prevents duplicate-send cascades when the outbound-route request
+    // timeout races a successful tone-gate + Telegram API send (see 408 branch
+    // in the current template). Detection: the telltale is the literal
+    // 'HTTP_CODE" = "408"' branch — older versions don't have it.
     if (this.config.hasTelegram) {
       const scriptPath = path.join(scriptsDir, 'telegram-reply.sh');
+      const newContent = this.getTelegramReplyScript();
       if (!fs.existsSync(scriptPath)) {
         try {
-          fs.writeFileSync(scriptPath, this.getTelegramReplyScript(), { mode: 0o755 });
+          fs.writeFileSync(scriptPath, newContent, { mode: 0o755 });
           result.upgraded.push('scripts/telegram-reply.sh (Telegram outbound relay)');
         } catch (err) {
           result.errors.push(`telegram-reply.sh: ${err instanceof Error ? err.message : String(err)}`);
         }
       } else {
-        result.skipped.push('scripts/telegram-reply.sh (already exists)');
+        try {
+          const existing = fs.readFileSync(scriptPath, 'utf-8');
+          // Only overwrite if the existing copy is an older version (lacks 408
+          // handling) AND looks like the shipped version (starts with the
+          // shipped shebang comment). Don't stomp custom user scripts.
+          const looksShipped = existing.includes('telegram-reply.sh — Send a message back to a Telegram topic via instar server');
+          const hasNewHandling = existing.includes('HTTP_CODE" = "408"');
+          if (looksShipped && !hasNewHandling) {
+            fs.writeFileSync(scriptPath, newContent, { mode: 0o755 });
+            result.upgraded.push('scripts/telegram-reply.sh (upgraded to HTTP 408 ambiguous-outcome handling)');
+          } else {
+            result.skipped.push('scripts/telegram-reply.sh (already exists)');
+          }
+        } catch (err) {
+          result.errors.push(`telegram-reply.sh migration: ${err instanceof Error ? err.message : String(err)}`);
+        }
       }
     }
+
+    // Slack reply script — file-presence gated (migrator has no hasSlack
+    // signal and init.ts doesn't install this one; scripts get deployed
+    // through the template manifest). If the script is present and matches
+    // the shipped header but lacks 408 handling, migrate it. Custom scripts
+    // are preserved by the shipped-marker check.
+    this.migrateReplyScriptTo408({
+      scriptPath: path.join(scriptsDir, 'slack-reply.sh'),
+      templateFilename: 'slack-reply.sh',
+      shippedMarker: 'slack-reply.sh — Send a message to a Slack channel via the instar server',
+      label: 'scripts/slack-reply.sh',
+      result,
+    });
+
+    // WhatsApp reply script — lives in .instar/scripts/ per init.ts, not
+    // .claude/scripts/. File-presence gated same as Slack.
+    const whatsappScriptsDir = path.join(this.config.stateDir, 'scripts');
+    this.migrateReplyScriptTo408({
+      scriptPath: path.join(whatsappScriptsDir, 'whatsapp-reply.sh'),
+      templateFilename: 'whatsapp-reply.sh',
+      shippedMarker: 'whatsapp-reply.sh — Send a message back to a WhatsApp JID via instar server',
+      label: 'scripts/whatsapp-reply.sh',
+      result,
+    });
 
     // Health watchdog — install if missing
     const watchdogPath = path.join(scriptsDir, 'health-watchdog.sh');
@@ -2998,56 +3043,97 @@ process.stdin.on('end', async () => {
 `;
   }
 
+  /**
+   * Apply the HTTP 408 ambiguous-outcome migration to an existing reply script
+   * if and only if:
+   *   - the file exists (we never install these from here — only upgrade),
+   *   - its header matches the shipped version (so we don't stomp custom scripts),
+   *   - and it does NOT already handle HTTP 408.
+   *
+   * Used by migrateScripts() for slack-reply.sh and whatsapp-reply.sh. The
+   * telegram-reply.sh migration uses similar logic inline because it ALSO
+   * installs on first run (hasTelegram gate); these two are upgrade-only.
+   */
+  private migrateReplyScriptTo408(opts: {
+    scriptPath: string;
+    templateFilename: string;
+    shippedMarker: string;
+    label: string;
+    result: MigrationResult;
+  }): void {
+    if (!fs.existsSync(opts.scriptPath)) return; // Not installed — not our responsibility here
+    try {
+      const existing = fs.readFileSync(opts.scriptPath, 'utf-8');
+      const looksShipped = existing.includes(opts.shippedMarker);
+      const hasNewHandling = existing.includes('HTTP_CODE" = "408"');
+      if (!looksShipped || hasNewHandling) {
+        opts.result.skipped.push(`${opts.label} (already up to date or customized)`);
+        return;
+      }
+      const template = this.loadRelayTemplate(opts.templateFilename);
+      if (!template) {
+        opts.result.errors.push(`${opts.label}: template file not found`);
+        return;
+      }
+      fs.writeFileSync(opts.scriptPath, template, { mode: 0o755 });
+      opts.result.upgraded.push(`${opts.label} (upgraded to HTTP 408 ambiguous-outcome handling)`);
+    } catch (err) {
+      opts.result.errors.push(`${opts.label} migration: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
+
+  /**
+   * Read a reply-script template from src/templates/scripts/.
+   * Returns null if the template file cannot be located (shouldn't happen in
+   * a healthy install). The caller is responsible for handling the null case.
+   */
+  private loadRelayTemplate(filename: string): string | null {
+    const modDir = path.dirname(new URL(import.meta.url).pathname);
+    const candidates = [
+      path.resolve(modDir, '..', 'templates', 'scripts', filename),
+      path.resolve(modDir, '..', '..', 'src', 'templates', 'scripts', filename),
+    ];
+    for (const candidate of candidates) {
+      if (fs.existsSync(candidate)) {
+        return fs.readFileSync(candidate, 'utf-8');
+      }
+    }
+    return null;
+  }
+
   private getTelegramReplyScript(): string {
+    // Read the canonical template from the templates directory. Keeping this
+    // in sync with src/commands/init.ts (scaffold-time installer) matters —
+    // both paths must ship the same HTTP 408 handling, or an upgraded agent
+    // would still duplicate-send if it re-ran init after the upgrade.
+    // Same pattern as getConvergenceCheck() above.
+    const template = this.loadRelayTemplate('telegram-reply.sh');
+    if (template !== null) {
+      return template;
+    }
+    // Fallback: minimal inline version that still handles HTTP 408 correctly.
+    // Used only if template file isn't found (shouldn't happen in a healthy
+    // install). The full-featured version — auth header, 422 tone-gate UX,
+    // 408 ambiguous-outcome — lives in src/templates/scripts/telegram-reply.sh.
     const port = this.config.port;
     return `#!/bin/bash
-# telegram-reply.sh — Send a message back to a Telegram topic via instar server.
-#
-# Usage:
-#   .claude/scripts/telegram-reply.sh TOPIC_ID "message text"
-#   echo "message text" | .claude/scripts/telegram-reply.sh TOPIC_ID
-#   cat <<'EOF' | .claude/scripts/telegram-reply.sh TOPIC_ID
-#   Multi-line message here
-#   EOF
-
+# telegram-reply.sh — fallback version (template file not found).
 TOPIC_ID="$1"
 shift
-
-if [ -z "$TOPIC_ID" ]; then
-  echo "Usage: telegram-reply.sh TOPIC_ID [message]" >&2
-  exit 1
-fi
-
-# Read message from args or stdin
-if [ $# -gt 0 ]; then
-  MSG="$*"
-else
-  MSG="$(cat)"
-fi
-
-if [ -z "$MSG" ]; then
-  echo "No message provided" >&2
-  exit 1
-fi
-
+MSG="\${*:-$(cat)}"
 PORT="\${INSTAR_PORT:-${port}}"
-
-# Escape for JSON
 JSON_MSG=$(printf '%s' "$MSG" | python3 -c 'import sys,json; print(json.dumps(sys.stdin.read()))' 2>/dev/null)
-if [ -z "$JSON_MSG" ]; then
-  JSON_MSG="$(printf '%s' "$MSG" | sed 's/\\\\\\\\/\\\\\\\\\\\\\\\\/g; s/"/\\\\\\\\"/g' | sed ':a;N;$!ba;s/\\\\n/\\\\\\\\n/g')"
-  JSON_MSG="\\"$JSON_MSG\\""
-fi
-
 RESPONSE=$(curl -s -w "\\n%{http_code}" -X POST "http://localhost:\${PORT}/telegram/reply/\${TOPIC_ID}" \\
   -H 'Content-Type: application/json' \\
   -d "{\\"text\\":\${JSON_MSG}}")
-
 HTTP_CODE=$(echo "$RESPONSE" | tail -1)
 BODY=$(echo "$RESPONSE" | sed '$d')
-
 if [ "$HTTP_CODE" = "200" ]; then
   echo "Sent $(echo "$MSG" | wc -c | tr -d ' ') chars to topic $TOPIC_ID"
+elif [ "$HTTP_CODE" = "408" ]; then
+  echo "AMBIGUOUS (HTTP 408): server timed out; send may have completed — verify before retrying." >&2
+  echo "AMBIGUOUS (HTTP 408): outcome unknown — verify in conversation before retrying"
+  exit 0
 else
   echo "Failed (HTTP $HTTP_CODE): $BODY" >&2
   exit 1

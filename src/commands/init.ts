@@ -3258,70 +3258,42 @@ function refreshScripts(projectDir: string, stateDir: string): void {
 }
 
 /**
+ * Load a messaging-relay script template from src/templates/scripts/,
+ * substituting the agent's configured port into the INSTAR_PORT fallback.
+ *
+ * The canonical templates live at src/templates/scripts/*-reply.sh. Keeping
+ * a single source of truth (vs. duplicated inlined bash) eliminates a class
+ * of bugs where scaffold-time and migration-time versions drift out of sync.
+ * PostUpdateMigrator.getTelegramReplyScript() uses the same loading pattern.
+ */
+function loadRelayTemplate(filename: string, port: number): string {
+  const modDir = path.dirname(new URL(import.meta.url).pathname);
+  const candidates = [
+    // dev: src/commands → ../templates/scripts
+    path.resolve(modDir, '..', 'templates', 'scripts', filename),
+    // dist: dist/commands → ../../src/templates/scripts
+    path.resolve(modDir, '..', '..', 'src', 'templates', 'scripts', filename),
+  ];
+  for (const candidate of candidates) {
+    if (fs.existsSync(candidate)) {
+      const content = fs.readFileSync(candidate, 'utf-8');
+      // Template defaults to port 4040; bake the agent's actual port in so
+      // the script works even without INSTAR_PORT set in the environment.
+      return content.replace('${INSTAR_PORT:-4040}', `\${INSTAR_PORT:-${port}}`);
+    }
+  }
+  throw new Error(`Relay template not found: ${filename}`);
+}
+
+/**
  * Install the Telegram relay script that Claude uses to send responses
  * back to Telegram topics via the instar server API.
  */
 function installTelegramRelay(projectDir: string, port: number): void {
   const scriptsDir = path.join(projectDir, '.claude', 'scripts');
   fs.mkdirSync(scriptsDir, { recursive: true });
-
-  const scriptContent = `#!/bin/bash
-# telegram-reply.sh — Send a message back to a Telegram topic via instar server.
-#
-# Usage:
-#   .claude/scripts/telegram-reply.sh TOPIC_ID "message text"
-#   echo "message text" | .claude/scripts/telegram-reply.sh TOPIC_ID
-#   cat <<'EOF' | .claude/scripts/telegram-reply.sh TOPIC_ID
-#   Multi-line message here
-#   EOF
-
-TOPIC_ID="$1"
-shift
-
-if [ -z "$TOPIC_ID" ]; then
-  echo "Usage: telegram-reply.sh TOPIC_ID [message]" >&2
-  exit 1
-fi
-
-# Read message from args or stdin
-if [ $# -gt 0 ]; then
-  MSG="$*"
-else
-  MSG="$(cat)"
-fi
-
-if [ -z "$MSG" ]; then
-  echo "No message provided" >&2
-  exit 1
-fi
-
-PORT="\${INSTAR_PORT:-${port}}"
-
-# Escape for JSON
-JSON_MSG=$(printf '%s' "$MSG" | python3 -c 'import sys,json; print(json.dumps(sys.stdin.read()))' 2>/dev/null)
-if [ -z "$JSON_MSG" ]; then
-  # Fallback if python3 not available: basic escape
-  JSON_MSG="$(printf '%s' "$MSG" | sed 's/\\\\\\\\/\\\\\\\\\\\\\\\\/g; s/"/\\\\\\\\"/g' | sed ':a;N;$!ba;s/\\\\n/\\\\\\\\n/g')"
-  JSON_MSG="\\"$JSON_MSG\\""
-fi
-
-RESPONSE=$(curl -s -w "\\n%{http_code}" -X POST "http://localhost:\${PORT}/telegram/reply/\${TOPIC_ID}" \\
-  -H 'Content-Type: application/json' \\
-  -d "{\\"text\\":\${JSON_MSG}}")
-
-HTTP_CODE=$(echo "$RESPONSE" | tail -1)
-BODY=$(echo "$RESPONSE" | sed '$d')
-
-if [ "$HTTP_CODE" = "200" ]; then
-  echo "Sent $(echo "$MSG" | wc -c | tr -d ' ') chars to topic $TOPIC_ID"
-else
-  echo "Failed (HTTP $HTTP_CODE): $BODY" >&2
-  exit 1
-fi
-`;
-
   const scriptPath = path.join(scriptsDir, 'telegram-reply.sh');
-  fs.writeFileSync(scriptPath, scriptContent, { mode: 0o755 });
+  fs.writeFileSync(scriptPath, loadRelayTemplate('telegram-reply.sh', port), { mode: 0o755 });
 }
 
 /**
@@ -3331,78 +3303,8 @@ fi
 function installWhatsAppRelay(projectDir: string, port: number): void {
   const scriptsDir = path.join(projectDir, '.instar', 'scripts');
   fs.mkdirSync(scriptsDir, { recursive: true });
-
-  const scriptContent = `#!/bin/bash
-# whatsapp-reply.sh — Send a message back to a WhatsApp JID via instar server.
-#
-# Usage:
-#   .instar/scripts/whatsapp-reply.sh JID "message text"
-#   echo "message text" | .instar/scripts/whatsapp-reply.sh JID
-#   cat <<'EOF' | .instar/scripts/whatsapp-reply.sh JID
-#   Multi-line message here
-#   EOF
-#
-# JID format: phone@s.whatsapp.net (e.g., 12345678901@s.whatsapp.net)
-
-JID="$1"
-shift
-
-if [ -z "$JID" ]; then
-  echo "Usage: whatsapp-reply.sh JID [message]" >&2
-  exit 1
-fi
-
-# Read message from args or stdin
-if [ $# -gt 0 ]; then
-  MSG="$*"
-else
-  MSG="$(cat)"
-fi
-
-if [ -z "$MSG" ]; then
-  echo "No message provided" >&2
-  exit 1
-fi
-
-PORT="\${INSTAR_PORT:-${port}}"
-
-# Read auth token from config (if present)
-AUTH_TOKEN=""
-if [ -f ".instar/config.json" ]; then
-  AUTH_TOKEN=$(python3 -c "import json; print(json.load(open('.instar/config.json')).get('authToken',''))" 2>/dev/null)
-fi
-
-# Escape for JSON
-JSON_MSG=$(printf '%s' "$MSG" | python3 -c 'import sys,json; print(json.dumps(sys.stdin.read()))' 2>/dev/null)
-if [ -z "$JSON_MSG" ]; then
-  JSON_MSG="$(printf '%s' "$MSG" | sed 's/\\\\\\\\/\\\\\\\\\\\\\\\\/g; s/"/\\\\\\\\"/g' | sed ':a;N;$!ba;s/\\\\n/\\\\\\\\n/g')"
-  JSON_MSG="\\"$JSON_MSG\\""
-fi
-
-if [ -n "$AUTH_TOKEN" ]; then
-  RESPONSE=$(curl -s -w "\\n%{http_code}" -X POST "http://localhost:\${PORT}/whatsapp/send/\${JID}" \\
-    -H 'Content-Type: application/json' \\
-    -H "Authorization: Bearer \${AUTH_TOKEN}" \\
-    -d "{\\"text\\":\${JSON_MSG}}")
-else
-  RESPONSE=$(curl -s -w "\\n%{http_code}" -X POST "http://localhost:\${PORT}/whatsapp/send/\${JID}" \\
-    -H 'Content-Type: application/json' \\
-    -d "{\\"text\\":\${JSON_MSG}}")
-fi
-
-HTTP_CODE=$(echo "$RESPONSE" | tail -1)
-BODY=$(echo "$RESPONSE" | sed '$d')
-
-if [ "$HTTP_CODE" = "200" ]; then
-  echo "Sent $(echo "$MSG" | wc -c | tr -d ' ') chars to $JID"
-else
-  echo "Failed (HTTP $HTTP_CODE): $BODY" >&2
-  exit 1
-fi
-`;
-
   const scriptPath = path.join(scriptsDir, 'whatsapp-reply.sh');
-  fs.writeFileSync(scriptPath, scriptContent, { mode: 0o755 });
+  fs.writeFileSync(scriptPath, loadRelayTemplate('whatsapp-reply.sh', port), { mode: 0o755 });
 }
 
 /**

@@ -166,9 +166,38 @@ export function rateLimiter(windowMs: number = 60_000, maxRequests: number = 10)
 /**
  * Request timeout middleware — prevents slow requests from hanging.
  * Returns 408 if the request takes longer than the timeout.
+ *
+ * `perPathOverrides` lets specific path prefixes use a longer (or shorter)
+ * budget. This exists because some routes are intentionally LLM-backed and
+ * need headroom the default 30s doesn't provide — the outbound messaging
+ * routes (tone gate review + Telegram Bot API roundtrip) commonly take
+ * 30–60s under normal load, and a 408 while the actual send is in flight
+ * triggers duplicate-send cascades on the client side.
+ *
+ * Override matching is by longest-prefix, so a more specific prefix beats a
+ * shorter parent if both are registered.
  */
-export function requestTimeout(timeoutMs: number = 30_000) {
+export function requestTimeout(
+  defaultMs: number = 30_000,
+  perPathOverrides: Record<string, number> = {},
+) {
+  // Precompute overrides sorted by descending prefix length so longest-match
+  // wins without scanning every entry on every request.
+  const sortedOverrides = Object.entries(perPathOverrides)
+    .sort((a, b) => b[0].length - a[0].length);
+
   return (req: Request, res: Response, next: NextFunction): void => {
+    let timeoutMs = defaultMs;
+    for (const [prefix, ms] of sortedOverrides) {
+      // Match either exact prefix or prefix followed by '/' so that '/foo'
+      // does NOT spuriously match '/foo-bar'. req.path in Express never
+      // contains the query string, so no '?' branch is needed.
+      if (req.path === prefix || req.path.startsWith(prefix + '/')) {
+        timeoutMs = ms;
+        break;
+      }
+    }
+
     let done = false;
     const timer = setTimeout(() => {
       if (!done && !res.headersSent) {

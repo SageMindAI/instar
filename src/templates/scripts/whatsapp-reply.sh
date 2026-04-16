@@ -62,6 +62,16 @@ BODY=$(echo "$RESPONSE" | sed '$d')
 
 if [ "$HTTP_CODE" = "200" ]; then
   echo "Sent $(echo "$MSG" | wc -c | tr -d ' ') chars to $JID"
+elif [ "$HTTP_CODE" = "408" ]; then
+  # Request timeout on the server side — the outbound path (tone gate + WhatsApp API)
+  # exceeded the route's budget. The actual send may have completed anyway.
+  # Report AMBIGUOUS and exit 0 so the agent verifies before retrying (a retry
+  # would double-send since the first attempt likely went through).
+  echo "AMBIGUOUS (HTTP 408): server timed out; the message MAY have been delivered." >&2
+  echo "  Do NOT retry blindly — check the conversation to verify delivery before resending." >&2
+  echo "  If the message is there, proceed; if not, retry with a shorter/simpler version." >&2
+  echo "AMBIGUOUS (HTTP 408): outcome unknown — verify in conversation before retrying"
+  exit 0
 elif [ "$HTTP_CODE" = "422" ]; then
   ISSUE=$(echo "$BODY" | python3 -c 'import sys,json; print(json.load(sys.stdin).get("issue","unknown"))' 2>/dev/null || echo "unknown")
   SUGGESTION=$(echo "$BODY" | python3 -c 'import sys,json; print(json.load(sys.stdin).get("suggestion",""))' 2>/dev/null || echo "")

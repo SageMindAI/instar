@@ -248,7 +248,22 @@ export class AgentServer {
     }
 
     this.app.use(authMiddleware(options.config.authToken));
-    this.app.use(requestTimeout(options.config.requestTimeoutMs));
+    // Outbound messaging routes are intentionally LLM-backed (tone gate review)
+    // and involve third-party API calls (Telegram/Slack/WhatsApp Bot APIs) whose
+    // latency we don't control. The default 30s budget is routinely exceeded
+    // under normal load; a 408 fired while the handler's send is in flight
+    // causes the agent's client to treat a successful delivery as failure,
+    // regenerate, and retry — shipping a duplicate message. Extended budget
+    // of 120s accommodates the realistic p99 of this path.
+    const OUTBOUND_MESSAGING_TIMEOUT_MS = 120_000;
+    this.app.use(requestTimeout(options.config.requestTimeoutMs, {
+      '/telegram/reply': OUTBOUND_MESSAGING_TIMEOUT_MS,
+      '/telegram/post-update': OUTBOUND_MESSAGING_TIMEOUT_MS,
+      '/slack/reply': OUTBOUND_MESSAGING_TIMEOUT_MS,
+      '/whatsapp/send': OUTBOUND_MESSAGING_TIMEOUT_MS,
+      '/imessage/reply': OUTBOUND_MESSAGING_TIMEOUT_MS,
+      '/imessage/validate-send': OUTBOUND_MESSAGING_TIMEOUT_MS,
+    }));
 
     // Routes
     const routeCtx = {

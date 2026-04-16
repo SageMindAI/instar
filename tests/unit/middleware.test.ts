@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import express from 'express';
 import request from 'supertest';
-import { authMiddleware, corsMiddleware, errorHandler, rateLimiter, signViewPath } from '../../src/server/middleware.js';
+import { authMiddleware, corsMiddleware, errorHandler, rateLimiter, requestTimeout, signViewPath } from '../../src/server/middleware.js';
 
 function createApp(authToken?: string) {
   const app = express();
@@ -157,6 +157,91 @@ describe('errorHandler', () => {
     expect(source).not.toContain('err: any');
     // Should use instanceof Error check
     expect(source).toContain('err instanceof Error');
+  });
+});
+
+describe('requestTimeout', () => {
+  it('returns 408 when a handler exceeds the default timeout', async () => {
+    const app = express();
+    app.use(requestTimeout(50));
+    app.get('/slow', (_req, res) => {
+      setTimeout(() => {
+        if (!res.headersSent) res.json({ ok: true });
+      }, 200);
+    });
+
+    const res = await request(app).get('/slow');
+    expect(res.status).toBe(408);
+    expect(res.body.error).toBe('Request timeout');
+    expect(res.body.timeoutMs).toBe(50);
+  });
+
+  it('does not fire when the handler completes before the timeout', async () => {
+    const app = express();
+    app.use(requestTimeout(100));
+    app.get('/fast', (_req, res) => res.json({ ok: true }));
+
+    const res = await request(app).get('/fast');
+    expect(res.status).toBe(200);
+    expect(res.body.ok).toBe(true);
+  });
+
+  it('honors per-path override for a longer timeout', async () => {
+    const app = express();
+    app.use(requestTimeout(50, { '/telegram/reply': 300 }));
+    app.post('/telegram/reply/:topic', (_req, res) => {
+      setTimeout(() => {
+        if (!res.headersSent) res.json({ ok: true, topic: _req.params.topic });
+      }, 150); // longer than default (50) but shorter than override (300)
+    });
+
+    const res = await request(app).post('/telegram/reply/42').send({});
+    expect(res.status).toBe(200);
+    expect(res.body.ok).toBe(true);
+  });
+
+  it('still times out under the override for paths that exceed it', async () => {
+    const app = express();
+    app.use(requestTimeout(50, { '/telegram/reply': 100 }));
+    app.post('/telegram/reply/:topic', (_req, res) => {
+      setTimeout(() => {
+        if (!res.headersSent) res.json({ ok: true });
+      }, 300); // exceeds override
+    });
+
+    const res = await request(app).post('/telegram/reply/42').send({});
+    expect(res.status).toBe(408);
+    expect(res.body.timeoutMs).toBe(100);
+  });
+
+  it('uses default timeout for paths not in the override map', async () => {
+    const app = express();
+    app.use(requestTimeout(50, { '/telegram/reply': 500 }));
+    app.get('/unrelated', (_req, res) => {
+      setTimeout(() => {
+        if (!res.headersSent) res.json({ ok: true });
+      }, 200);
+    });
+
+    const res = await request(app).get('/unrelated');
+    expect(res.status).toBe(408);
+    expect(res.body.timeoutMs).toBe(50);
+  });
+
+  it('matches override by path prefix so /:topicId routes are covered', async () => {
+    const app = express();
+    app.use(requestTimeout(50, { '/telegram/reply': 300 }));
+    app.post('/telegram/reply/:topic', (req, res) => {
+      setTimeout(() => {
+        if (!res.headersSent) res.json({ topic: req.params.topic });
+      }, 150);
+    });
+
+    // The path at request time is /telegram/reply/6655 — must match the
+    // '/telegram/reply' prefix.
+    const res = await request(app).post('/telegram/reply/6655').send({});
+    expect(res.status).toBe(200);
+    expect(res.body.topic).toBe('6655');
   });
 });
 

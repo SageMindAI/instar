@@ -61,6 +61,18 @@ BODY=$(echo "$RESPONSE" | sed '$d')
 
 if [ "$HTTP_CODE" = "200" ]; then
   echo "Sent $(echo "$MSG" | wc -c | tr -d ' ') chars to topic $TOPIC_ID"
+elif [ "$HTTP_CODE" = "408" ]; then
+  # Request timeout on the server side — the outbound path (tone gate + Telegram API)
+  # exceeded the route's budget. The actual send may have completed anyway, because
+  # the handler's async work continues after the middleware fires 408. Treating this
+  # as a hard failure (exit 1) causes the agent to regenerate and retry, which
+  # double-sends the message. Instead report the outcome as AMBIGUOUS and exit 0 —
+  # the agent should check the conversation before retrying.
+  echo "AMBIGUOUS (HTTP 408): server timed out; the message MAY have been delivered." >&2
+  echo "  Do NOT retry blindly — check the conversation to verify delivery before resending." >&2
+  echo "  If the message is there, proceed; if not, retry with a shorter/simpler version." >&2
+  echo "AMBIGUOUS (HTTP 408): outcome unknown — verify in conversation before retrying"
+  exit 0
 elif [ "$HTTP_CODE" = "422" ]; then
   # Tone gate blocked the message — surface the issue + suggestion to the agent
   ISSUE=$(echo "$BODY" | python3 -c 'import sys,json; print(json.load(sys.stdin).get("issue","unknown"))' 2>/dev/null || echo "unknown")
