@@ -5,7 +5,7 @@
  * offline behavior, corrupted state.
  */
 
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { UpdateChecker } from '../../src/core/UpdateChecker.js';
 import { createTempProject } from '../helpers/setup.js';
 import type { TempProject } from '../helpers/setup.js';
@@ -23,6 +23,7 @@ describe('UpdateChecker edge cases', () => {
 
   afterEach(() => {
     project.cleanup();
+    vi.restoreAllMocks();
   });
 
   describe('getLastCheck', () => {
@@ -66,8 +67,12 @@ describe('UpdateChecker edge cases', () => {
 
   describe('semver comparison (via check)', () => {
     // We can't directly test isNewer since it's private,
-    // but we can verify the logic works through the full check
+    // but we can verify the logic works through the full check.
+    // execAsync is mocked to avoid a real npm registry call — this is a
+    // unit test, not an integration test. The real call takes 5-15s on CI
+    // and causes vitest's 10s timeout to fire on slower Node 20 runners.
     it('check returns a valid UpdateInfo structure', async () => {
+      vi.spyOn(checker as any, 'execAsync').mockResolvedValue('0.0.0');
       const info = await checker.check();
       expect(info).toHaveProperty('currentVersion');
       expect(info).toHaveProperty('latestVersion');

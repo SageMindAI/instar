@@ -2855,7 +2855,7 @@ If no overdue or stale items, exit silently.`,
       expectedDurationMinutes: 5,
       model: 'haiku',
       enabled: true,
-      gate: 'bash .claude/scripts/git-sync-gate.sh',
+      gate: 'bash ${CLAUDE_PROJECT_DIR}/.claude/scripts/git-sync-gate.sh',
       execute: {
         type: 'skill',
         value: 'git-sync',
@@ -4066,27 +4066,27 @@ function installClaudeSettings(projectDir: string, serverPort?: number): void {
   const instarBashHooks = [
     {
       type: 'command',
-      command: 'bash .instar/hooks/instar/dangerous-command-guard.sh "$TOOL_INPUT"',
+      command: 'bash ${CLAUDE_PROJECT_DIR}/.instar/hooks/instar/dangerous-command-guard.sh "$TOOL_INPUT"',
       blocking: true,
     },
     {
       type: 'command',
-      command: 'bash .instar/hooks/instar/grounding-before-messaging.sh "$TOOL_INPUT"',
+      command: 'bash ${CLAUDE_PROJECT_DIR}/.instar/hooks/instar/grounding-before-messaging.sh "$TOOL_INPUT"',
       blocking: false,
     },
     {
       type: 'command',
-      command: 'node .instar/hooks/instar/deferral-detector.js',
+      command: 'node ${CLAUDE_PROJECT_DIR}/.instar/hooks/instar/deferral-detector.js',
       timeout: 5000,
     },
     {
       type: 'command',
-      command: 'node .instar/hooks/instar/external-communication-guard.js',
+      command: 'node ${CLAUDE_PROJECT_DIR}/.instar/hooks/instar/external-communication-guard.js',
       timeout: 5000,
     },
     {
       type: 'command',
-      command: 'node .instar/hooks/instar/post-action-reflection.js',
+      command: 'node ${CLAUDE_PROJECT_DIR}/.instar/hooks/instar/post-action-reflection.js',
       timeout: 5000,
     },
   ];
@@ -4095,7 +4095,7 @@ function installClaudeSettings(projectDir: string, serverPort?: number): void {
   const instarMcpHooks = [
     {
       type: 'command',
-      command: 'node .instar/hooks/instar/external-operation-gate.js',
+      command: 'node ${CLAUDE_PROJECT_DIR}/.instar/hooks/instar/external-operation-gate.js',
       blocking: true,
       timeout: 5000,
     },
@@ -4145,7 +4145,7 @@ function installClaudeSettings(projectDir: string, serverPort?: number): void {
   // The session-start.sh hook handles event routing internally via CLAUDE_HOOK_MATCHER
   const sessionStartHook = {
     type: 'command',
-    command: 'bash .instar/hooks/instar/session-start.sh',
+    command: 'bash ${CLAUDE_PROJECT_DIR}/.instar/hooks/instar/session-start.sh',
     timeout: 5,
   };
 
@@ -4201,7 +4201,7 @@ function installClaudeSettings(projectDir: string, serverPort?: number): void {
   // PostToolUse: scope coherence collector tracks implementation depth
   const scopeCollectorHook = {
     type: 'command',
-    command: 'node .instar/hooks/instar/scope-coherence-collector.js',
+    command: 'node ${CLAUDE_PROJECT_DIR}/.instar/hooks/instar/scope-coherence-collector.js',
     timeout: 5000,
   };
 
@@ -4214,7 +4214,7 @@ function installClaudeSettings(projectDir: string, serverPort?: number): void {
   // (scope collector also added to Read and Skill)
   const claimInterceptHook = {
     type: 'command',
-    command: 'node .instar/hooks/instar/claim-intercept.js',
+    command: 'node ${CLAUDE_PROJECT_DIR}/.instar/hooks/instar/claim-intercept.js',
     timeout: 5000,
   };
 
@@ -4240,21 +4240,21 @@ function installClaudeSettings(projectDir: string, serverPort?: number): void {
   // Stop: response review pipeline — Coherence Gate LLM-powered review
   const responseReviewHook = {
     type: 'command',
-    command: 'node .instar/hooks/instar/response-review.js',
+    command: 'node ${CLAUDE_PROJECT_DIR}/.instar/hooks/instar/response-review.js',
     timeout: 10000,
   };
 
   // Stop: scope coherence checkpoint fires the zoom-out prompt
   const scopeCheckpointHook = {
     type: 'command',
-    command: 'node .instar/hooks/instar/scope-coherence-checkpoint.js',
+    command: 'node ${CLAUDE_PROJECT_DIR}/.instar/hooks/instar/scope-coherence-checkpoint.js',
     timeout: 10000,
   };
 
   // Stop: claim intercept response checks direct text for false claims
   const claimInterceptResponseHook = {
     type: 'command',
-    command: 'node .instar/hooks/instar/claim-intercept-response.js',
+    command: 'node ${CLAUDE_PROJECT_DIR}/.instar/hooks/instar/claim-intercept-response.js',
     timeout: 10000,
   };
 
@@ -4295,7 +4295,7 @@ function installClaudeSettings(projectDir: string, serverPort?: number): void {
   if (!hasAutonomousHook) {
     (hooks.Stop as unknown[]).unshift({ matcher: '', hooks: [{
       type: 'command',
-      command: 'bash .claude/skills/autonomous/hooks/autonomous-stop-hook.sh',
+      command: 'bash ${CLAUDE_PROJECT_DIR}/.claude/skills/autonomous/hooks/autonomous-stop-hook.sh',
       timeout: 10000,
     }] });
   }
@@ -4314,7 +4314,7 @@ function installClaudeSettings(projectDir: string, serverPort?: number): void {
       matcher: '',
       hooks: [{
         type: 'command',
-        command: 'node .instar/hooks/instar/auto-approve-permissions.js',
+        command: 'node ${CLAUDE_PROJECT_DIR}/.instar/hooks/instar/auto-approve-permissions.js',
         timeout: 5000,
       }],
     });

@@ -206,12 +206,14 @@ iMessage support lets your agent send and receive iMessages on macOS. Messages a
 ### Prerequisites
 
 1. **macOS** with Messages.app signed into an Apple ID
-2. **Full Disk Access** for your terminal app (System Settings → Privacy & Security → Full Disk Access → add Terminal.app or iTerm)
+2. **Full Disk Access** for your terminal app, *for first startup only* (System Settings → Privacy & Security → Full Disk Access → add Terminal.app or iTerm). Instar hardlinks `chat.db` to `.instar/imessage/` on first startup so subsequent runs don't need FDA — useful for LaunchDaemon deployments.
 3. **imsg CLI** installed:
    ```bash
    brew install steipete/tap/imsg
    ```
 4. **Automation permission** for Messages.app — macOS will prompt on first send
+
+For running as a LaunchDaemon (always-on, survives reboots), see [docs/LAUNCHDAEMON-SETUP.md](docs/LAUNCHDAEMON-SETUP.md).
 
 ### Configuration
 

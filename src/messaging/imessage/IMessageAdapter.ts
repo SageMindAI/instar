@@ -14,10 +14,27 @@
  * - Config is cached at startup — runtime edits don't expand permissions
  * - SessionChannelRegistry maps senders to sessions
  * - StallDetector monitors for unanswered messages
+ *
+ * Immediate Ack Feature:
+ * - Sends a brief text message when a message is received, before session spawn
+ * - Closes the feedback loop within seconds (30-90s session spawn delay otherwise)
+ * - Configurable message text and cooldown period
+ * - Note: Typing indicator (`imsg typing`) was attempted but has limitations:
+ *   - Fails with "Chat not found" even when chat exists in chat.db
+ *   - Chat GUID exists (e.g., "any;-;+14084424360") but imsg can't locate it
+ *   - May require Messages.app to be actively open or newer imsg version
+ *   - Reverted to text message acks as reliable alternative (2026-04-02)
+ *
+ * Version History:
+ * - 2026-04-02: Added immediate text message ack feature
+ * - 2026-04-02: Attempted typing indicator, reverted due to imsg limitations
  */
 
 import path from 'node:path';
 import crypto from 'node:crypto';
+import fs from 'node:fs';
+import os from 'node:os';
+import { execFile } from 'node:child_process';
 import type { MessagingAdapter, Message, OutgoingMessage } from '../../core/types.js';
 import { NativeBackend } from './NativeBackend.js';
 import { MessageLogger, type LogEntry } from '../shared/MessageLogger.js';
@@ -73,6 +90,7 @@ export class IMessageAdapter implements MessagingAdapter {
   private receivedMessageIds = new Set<string>();
   private lastInboundFrom = new Map<string, number>();  // normalized contact → timestamp
   private pendingSendTokens = new Map<string, SendToken>();
+  private lastAckTime = new Map<string, number>();  // normalized contact → last ack timestamp
 
   // Callbacks (wired by server.ts)
   onMessageLogged: ((entry: LogEntry) => void) | null = null;
@@ -99,8 +117,18 @@ export class IMessageAdapter implements MessagingAdapter {
     this.agentName = this.config.agentName;
 
     // Initialize backend (read-only)
+    // Set up hardlinks to chat.db so reads don't require Full Disk Access on
+    // the node binary. Hardlinks share the inode, so reads are instant and
+    // always current, but the link itself isn't in the TCC-protected
+    // ~/Library/Messages/ directory.
+    //
+    // If dbPath is explicitly configured, respect it. Otherwise use the
+    // hardlinked path in .instar/imessage/ which we maintain automatically.
+    const effectiveDbPath = this.config.dbPath
+      ?? IMessageAdapter.ensureChatDbHardlink(stateDir);
+
     this.backend = new NativeBackend({
-      dbPath: this.config.dbPath,
+      dbPath: effectiveDbPath,
       pollIntervalMs: this.config.pollIntervalMs,
       includeAttachments: this.config.includeAttachments,
       offsetPath: path.join(stateDir, 'imessage-poll-offset.json'),
@@ -532,6 +560,76 @@ export class IMessageAdapter implements MessagingAdapter {
     return '***';
   }
 
+  /**
+   * Ensure hardlinks to ~/Library/Messages/chat.db (and WAL/SHM files) exist
+   * in a non-TCC-protected location so the server can read them without
+   * requiring Full Disk Access on the node binary.
+   *
+   * Hardlinks share the inode — reads are instant and always current, but
+   * the link path itself isn't in the protected ~/Library/Messages/ directory.
+   *
+   * If the hardlinks already exist and point to the same inode, this is a
+   * no-op. If they're stale (different inode) or missing, they're recreated.
+   * If ~/Library/Messages/chat.db doesn't exist or isn't readable, returns
+   * the original path as a fallback.
+   *
+   * Called during adapter construction — safe to call on every startup.
+   * Requires FDA on the calling process to create the hardlinks the first
+   * time; subsequent startups read through the existing hardlinks without
+   * needing FDA.
+   */
+  static ensureChatDbHardlink(stateDir: string): string {
+    const messagesDir = path.join(os.homedir(), 'Library', 'Messages');
+    const srcDb = path.join(messagesDir, 'chat.db');
+    const linkDir = path.join(stateDir, 'imessage');
+    const linkDb = path.join(linkDir, 'chat.db');
+
+    // Fallback: if Messages.app hasn't been set up, return source path.
+    // The adapter will degrade with a clear error message.
+    if (!fs.existsSync(srcDb)) {
+      return srcDb;
+    }
+
+    try {
+      fs.mkdirSync(linkDir, { recursive: true });
+
+      for (const name of ['chat.db', 'chat.db-wal', 'chat.db-shm']) {
+        const src = path.join(messagesDir, name);
+        const link = path.join(linkDir, name);
+
+        if (!fs.existsSync(src)) continue;
+
+        // If link exists and already points to the same inode, skip.
+        if (fs.existsSync(link)) {
+          try {
+            const srcIno = fs.statSync(src).ino;
+            const linkIno = fs.statSync(link).ino;
+            if (srcIno === linkIno) continue;
+          } catch { /* fall through to recreate */ }
+          try { fs.unlinkSync(link); } catch { /* best effort */ }
+        }
+
+        // Create hardlink. Requires FDA on the calling process.
+        try {
+          fs.linkSync(src, link);
+        } catch (err) {
+          console.warn(`[imessage] Could not hardlink ${name}: ${(err as Error).message}. ` +
+            `If this is first setup, run from a terminal with Full Disk Access.`);
+        }
+      }
+
+      // Verify the primary link worked
+      if (fs.existsSync(linkDb)) {
+        return linkDb;
+      }
+    } catch (err) {
+      console.warn(`[imessage] Hardlink setup failed: ${(err as Error).message}. ` +
+        `Falling back to direct chat.db read (requires FDA on node).`);
+    }
+
+    return srcDb;
+  }
+
   // ── Internal ──
 
   /**
@@ -642,6 +740,9 @@ export class IMessageAdapter implements MessagingAdapter {
       raw: msg,
     });
 
+    // Send immediate acknowledgment if enabled
+    this._sendImmediateAck(msg.sender);
+
     // Route to registered message handler
     if (this.messageHandler) {
       const message: Message = {
@@ -664,6 +765,31 @@ export class IMessageAdapter implements MessagingAdapter {
         console.error(`[imessage] Message handler error: ${(err as Error).message}`);
       }
     }
+  }
+
+  private _sendImmediateAck(sender: string): void {
+    const ackConfig = this.config.immediateAck;
+    if (!ackConfig?.enabled) return;
+
+    const cooldown = (ackConfig.cooldownSeconds ?? 30) * 1000;
+    const now = Date.now();
+    const lastAck = this.lastAckTime.get(sender) ?? 0;
+
+    if (now - lastAck < cooldown) return;
+
+    this.lastAckTime.set(sender, now);
+
+    const cliPath = this.config.cliPath ?? 'imsg';
+    const message = ackConfig.message ?? 'Got it, thinking...';
+
+    // Send brief text ack (non-blocking)
+    execFile(cliPath, ['send', '--to', sender, '--text', message, '--service', 'imessage'], (err) => {
+      if (err) {
+        console.error(`[imessage] Immediate ack failed: ${err.message}`);
+      } else {
+        console.log(`[imessage] Sent immediate ack to ${IMessageAdapter.maskIdentifier(sender)}: "${message}"`);
+      }
+    });
   }
 
   private _trackReceivedId(messageId: string): void {
