@@ -75,7 +75,96 @@ When `dbPath` is set, the adapter uses it as-is and does not create hardlinks.
 
 In practice: most setups have someone log in eventually, and sending works thereafter.
 
-## 3. Node binary path
+## 3. iMessage photo attachments (optional)
+
+If your agent needs to receive and process **photo attachments** sent via iMessage (not just text), a second piece of infrastructure is required. The `chat.db` hardlink approach only covers message text — photo files live in `~/Library/Messages/Attachments/`, which is a separate TCC-protected directory.
+
+### Why a dedicated binary
+
+Granting FDA to a general-purpose binary like `bash`, `node`, or `fswatch` works but is broader than necessary — any process using that binary gets the same access. The right approach is a **purpose-built binary** whose name makes the FDA grant self-documenting: `instar-attachments-sync`.
+
+### What it does
+
+`instar-attachments-sync` is a small Go binary (~3MB) that:
+1. On startup, hardlinks all existing image/video attachments from `~/Library/Messages/Attachments/` to `.instar/imessage/attachments/`
+2. Watches for new files via FSEvents and hardlinks them within ~500ms of arrival
+3. Prunes hardlinks whose source has been deleted
+
+Hardlinks share the same inode as the originals, so the agent can read them without any FDA grant of its own.
+
+### Build and install
+
+```bash
+# Requires Go (brew install go)
+cd scripts/attachments-sync
+go build -o ~/.instar/agents/AGENT/.instar/bin/instar-attachments-sync .
+```
+
+Or copy a pre-built binary from the [releases page](https://github.com/JKHeadley/instar/releases) *(coming soon)*.
+
+### Grant Full Disk Access
+
+In **System Settings → Privacy & Security → Full Disk Access**, click `+` and add:
+
+```
+~/.instar/agents/AGENT/.instar/bin/instar-attachments-sync
+```
+
+> **Important:** FDA is granted per resolved binary path. If you rebuild or replace the binary, you must re-grant FDA. Use the Cellar path or a stable location that won't change.
+
+### LaunchAgent plist
+
+The attachments watcher should run as a **LaunchAgent** (not a Daemon) because it needs a user session context to access the Messages sandbox. Save to `~/Library/LaunchAgents/ai.instar.AttachmentsWatcher.plist`:
+
+```xml
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>ai.instar.AttachmentsWatcher</string>
+    <key>Program</key>
+    <string>/Users/YOU/.instar/agents/AGENT/.instar/bin/instar-attachments-sync</string>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <true/>
+    <key>StandardOutPath</key>
+    <string>/Users/YOU/.instar/agents/AGENT/.instar/logs/attachments-watcher.log</string>
+    <key>StandardErrorPath</key>
+    <string>/Users/YOU/.instar/agents/AGENT/.instar/logs/attachments-watcher.err</string>
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>HOME</key>
+        <string>/Users/YOU</string>
+    </dict>
+    <key>ThrottleInterval</key>
+    <integer>5</integer>
+</dict>
+</plist>
+```
+
+Load it:
+```bash
+launchctl load ~/Library/LaunchAgents/ai.instar.AttachmentsWatcher.plist
+```
+
+### Verify
+
+```bash
+tail -f ~/.instar/agents/AGENT/.instar/logs/attachments-watcher.log
+```
+
+You should see:
+```
+2026-01-01T00:00:00Z instar-attachments-sync starting
+2026-01-01T00:00:00Z initial sync: linked N new files
+2026-01-01T00:00:00Z watching /Users/YOU/Library/Messages/Attachments
+```
+
+If you see `operation not permitted`, FDA has not been granted or was granted to a different binary path.
+
+## 4. Node binary path
 
 Instar symlinks `.instar/bin/node` to a node binary. If multiple Homebrew prefixes exist (e.g., `/opt/homebrew` and `/Users/you/homebrew`), the symlink may point to the wrong one. This matters if you've granted FDA to a specific binary — FDA is per-path.
 
