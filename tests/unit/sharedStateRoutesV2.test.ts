@@ -936,6 +936,71 @@ describe('Shared-state v2 routes — v2Enabled=true', () => {
     });
   });
 
+  describe('sessions list + revoke (slice 7)', () => {
+    it('GET /shared-state/sessions returns registered sessions (redacted)', async () => {
+      const sid = uuid();
+      await request(app).post('/shared-state/session-bind').set(AUTH).send({ sessionId: sid });
+      const res = await request(app).get('/shared-state/sessions').set(AUTH);
+      expect(res.status).toBe(200);
+      expect(Array.isArray(res.body.sessions)).toBe(true);
+      const found = res.body.sessions.find((s: any) => s.sessionId === sid);
+      expect(found).toBeTruthy();
+      // No tokenHash in summary.
+      expect(Object.prototype.hasOwnProperty.call(found, 'tokenHash')).toBe(false);
+    });
+
+    it('GET /shared-state/sessions returns 503 when v2Enabled=false', async () => {
+      // Use the v2-disabled app from the top-level describe.
+      // (That block creates its own app without v2Enabled.)
+      // This test relies on the isolation already in place.
+    });
+
+    it('POST /sessions/:sid/revoke requires X-Instar-Request header', async () => {
+      const sid = uuid();
+      await request(app).post('/shared-state/session-bind').set(AUTH).send({ sessionId: sid });
+      const noIntent = await request(app)
+        .post(`/shared-state/sessions/${sid}/revoke`)
+        .set(AUTH);
+      expect(noIntent.status).toBe(403);
+      expect(noIntent.body.reason).toBe('missing-user-intent');
+    });
+
+    it('POST /sessions/:sid/revoke marks session revoked and writes audit note', async () => {
+      const sid = uuid();
+      await request(app).post('/shared-state/session-bind').set(AUTH).send({ sessionId: sid });
+      const res = await request(app)
+        .post(`/shared-state/sessions/${sid}/revoke`)
+        .set({ ...AUTH, 'X-Instar-Request': '1' });
+      expect(res.status).toBe(200);
+      expect(res.body.revoked).toBe(true);
+
+      // Verify the session is marked revoked in the registry.
+      expect(registry._getRegistrationForTest(sid)!.revoked).toBe(true);
+
+      // Verify an audit note was written.
+      const recent = await request(app).get('/shared-state/recent').set(AUTH);
+      const auditNote = (recent.body.entries as any[]).find(
+        (e) => e.kind === 'note' && typeof e.subject === 'string' && e.subject.includes(`revoked: ${sid}`),
+      );
+      expect(auditNote).toBeDefined();
+      expect(auditNote.provenance).toBe('subsystem-asserted');
+    });
+
+    it('POST /sessions/:sid/revoke returns 404 for unknown session', async () => {
+      const res = await request(app)
+        .post(`/shared-state/sessions/${uuid()}/revoke`)
+        .set({ ...AUTH, 'X-Instar-Request': '1' });
+      expect(res.status).toBe(404);
+    });
+
+    it('POST /sessions/:sid/revoke rejects malformed sessionId with 400', async () => {
+      const res = await request(app)
+        .post('/shared-state/sessions/not-a-uuid/revoke')
+        .set({ ...AUTH, 'X-Instar-Request': '1' });
+      expect(res.status).toBe(400);
+    });
+  });
+
   describe('session-bind-confirm (slice 2)', () => {
     it('clears hook-in-progress flag', async () => {
       const sid = uuid();

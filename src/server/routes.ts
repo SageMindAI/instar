@@ -10714,6 +10714,93 @@ export function createRoutes(ctx: RouteContext): Router {
   );
 
   /**
+   * GET /shared-state/sessions — slice 7
+   *
+   * Returns the list of registered sessions (redacted: no tokenHash,
+   * no plaintext token). Bearer-token gated by the global middleware.
+   * Used by the dashboard Bindings subtab.
+   */
+  router.get(
+    '/shared-state/sessions',
+    rateLimiter(60_000, 60),
+    async (req, res) => {
+      if (v2Disabled(req, res)) return;
+      try {
+        const sessions = ctx.ledgerSessionRegistry!.listSessions();
+        res.json({ sessions });
+      } catch (err) {
+        res.status(500).json({
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
+    }
+  );
+
+  /**
+   * POST /shared-state/sessions/:sid/revoke — slice 7
+   *
+   * Marks a session's binding revoked. Requires the X-Instar-Request: 1
+   * header alongside bearer auth — same convention used by other
+   * user-authoritative actions (backup triggers, config edits). This
+   * provides a minimal user-intent attestation without requiring full
+   * PIN-unlock infrastructure (which is deferred for user-resolve but
+   * not needed here — revocation is idempotent and bounded by session
+   * registration, not state-shaping).
+   *
+   * Emits a subsystem-asserted note entry "session binding revoked:
+   * <sid>" so the audit trail preserves the action.
+   */
+  router.post(
+    '/shared-state/sessions/:sid/revoke',
+    rateLimiter(60_000, 20),
+    async (req, res) => {
+      if (v2Disabled(req, res)) return;
+      const userIntent = String(req.header('x-instar-request') ?? '').trim();
+      if (userIntent !== '1') {
+        res.status(403).json({
+          error:
+            'revocation requires X-Instar-Request: 1 header (user-intent attestation)',
+          reason: 'missing-user-intent',
+        });
+        return;
+      }
+      const sid = String(req.params.sid || '').trim();
+      if (!/^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/.test(sid)) {
+        res.status(400).json({ error: 'Invalid sessionId format' });
+        return;
+      }
+      const registry = ctx.ledgerSessionRegistry!;
+      const existed = registry.revoke(sid);
+      if (!existed) {
+        res.status(404).json({ error: 'session not found' });
+        return;
+      }
+      // Audit note — subsystem-asserted; visible in the dashboard
+      // stream next to the session binding history.
+      try {
+        await ctx.sharedStateLedger!.append({
+          emittedBy: {
+            subsystem: 'session-manager',
+            instance: ctx.config.projectName ?? 'server',
+          },
+          kind: 'note',
+          subject: `session binding revoked: ${sid}`,
+          counterparty: {
+            type: 'self',
+            name: 'self',
+            trustTier: 'trusted',
+          },
+          provenance: 'subsystem-asserted',
+          dedupKey: `integrated-being-v2:session-revoke:${sid}:${Date.now()}`,
+        });
+      } catch {
+        /* audit note is best-effort; revocation itself succeeded */
+      }
+      res.json({ revoked: true, sessionId: sid });
+    }
+  );
+
+  /**
    * POST /shared-state/session-bind-confirm
    *
    * Called by the session-start hook AFTER the file-based handoff has

@@ -2731,6 +2731,33 @@
         </div>
         <pre id="ibChainResult" style="margin-top:10px;max-height:200px;overflow:auto;font-size:11px"></pre>
       </div>
+
+      <!-- Bindings subtab (slice 7) -->
+      <div id="ibBindingsSection" style="background:var(--panel);border-radius:8px;border:1px solid var(--border);padding:12px;display:none">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+          <div style="font-size:13px;font-weight:600">Session bindings (v2)</div>
+          <button onclick="loadIntegratedBeingBindings()" style="padding:4px 10px;font-size:11px">Refresh</button>
+        </div>
+        <div id="ibBindingsNotice" style="font-size:11px;color:var(--text-dim);margin-bottom:8px">
+          Each registered session has a binding token. Revoke to invalidate it — subsequent writes from that session fail 401. Revocation is logged as a subsystem-asserted note.
+        </div>
+        <table style="width:100%;border-collapse:collapse;font-size:11px">
+          <thead>
+            <tr style="background:var(--bg-alt)">
+              <th style="text-align:left;padding:6px">Session ID</th>
+              <th style="text-align:left;padding:6px">Label</th>
+              <th style="text-align:left;padding:6px">Registered</th>
+              <th style="text-align:left;padding:6px">Last active</th>
+              <th style="text-align:left;padding:6px">Absolute TTL</th>
+              <th style="text-align:left;padding:6px">Status</th>
+              <th style="text-align:left;padding:6px">Action</th>
+            </tr>
+          </thead>
+          <tbody id="ibBindingsTbody">
+            <tr><td colspan="7" style="padding:14px;color:var(--text-dim);text-align:center">Loading…</td></tr>
+          </tbody>
+        </table>
+      </div>
     </div>
 
     <!-- Health Tab (was Systems) -->
@@ -3754,7 +3781,7 @@
         id: 'integrated-being',
         panels: ['integratedBeingPanel'],
         display: ['flex'],
-        onActivate: () => { if (typeof loadIntegratedBeing === 'function') loadIntegratedBeing(); if (typeof startIntegratedBeingPoll === 'function') startIntegratedBeingPoll(); },
+        onActivate: () => { if (typeof loadIntegratedBeing === 'function') loadIntegratedBeing(); if (typeof loadIntegratedBeingBindings === 'function') loadIntegratedBeingBindings(); if (typeof startIntegratedBeingPoll === 'function') startIntegratedBeingPoll(); },
         onDeactivate: () => { if (typeof stopIntegratedBeingPoll === 'function') stopIntegratedBeingPoll(); },
       },
     ];
@@ -5681,9 +5708,82 @@
       }
     }
 
+    async function loadIntegratedBeingBindings() {
+      // GET /shared-state/sessions returns 503 when v2Enabled=false.
+      // In that case, keep the Bindings section hidden.
+      const section = document.getElementById('ibBindingsSection');
+      const tbody = document.getElementById('ibBindingsTbody');
+      try {
+        const res = await apiFetch('/shared-state/sessions').catch(() => null);
+        if (!res || !Array.isArray(res.sessions)) {
+          if (section) section.style.display = 'none';
+          return;
+        }
+        if (section) section.style.display = 'block';
+        if (res.sessions.length === 0) {
+          tbody.innerHTML = '<tr><td colspan="7" style="padding:14px;color:var(--text-dim);text-align:center">No sessions registered</td></tr>';
+          return;
+        }
+        const nowMs = Date.now();
+        const esc2 = (s) => esc(String(s == null ? '' : s));
+        tbody.innerHTML = res.sessions.map(s => {
+          const ttlMs = Date.parse(s.absoluteExpiresAt || '') - nowMs;
+          const ttlLabel = Number.isFinite(ttlMs)
+            ? (ttlMs < 0 ? 'expired' : Math.round(ttlMs / 3600000) + 'h')
+            : '';
+          const status = s.revoked
+            ? '<span style="color:#e74c3c">revoked</span>'
+            : (Date.parse(s.absoluteExpiresAt || '') < nowMs
+              ? '<span style="color:#888">expired</span>'
+              : (s.hasWritten ? '<span style="color:#27ae60">active</span>' : '<span style="color:var(--text-dim)">bound</span>'));
+          const idShort = (s.sessionId || '').slice(0, 8) + '…';
+          const action = s.revoked
+            ? '<span style="color:var(--text-dim);font-size:10px">—</span>'
+            : `<button onclick="revokeIntegratedBeingBinding('${esc2(s.sessionId)}')" style="padding:2px 8px;font-size:10px;background:#c0392b;color:#fff;border:none;border-radius:3px;cursor:pointer">Revoke</button>`;
+          return `
+            <tr style="border-top:1px solid var(--border)">
+              <td style="padding:4px;font-family:monospace" title="${esc2(s.sessionId)}">${esc2(idShort)}</td>
+              <td style="padding:4px">${esc2(s.label || '')}</td>
+              <td style="padding:4px">${esc2((s.registeredAt || '').slice(0, 16).replace('T', ' '))}</td>
+              <td style="padding:4px">${esc2((s.lastActiveAt || '').slice(0, 16).replace('T', ' '))}</td>
+              <td style="padding:4px">${esc2(ttlLabel)}</td>
+              <td style="padding:4px">${status}</td>
+              <td style="padding:4px">${action}</td>
+            </tr>`;
+        }).join('');
+      } catch (err) {
+        console.error('[integrated-being-v2] bindings load error', err);
+        if (section) section.style.display = 'none';
+      }
+    }
+
+    async function revokeIntegratedBeingBinding(sid) {
+      if (!sid) return;
+      if (!confirm('Revoke the binding for session ' + sid.slice(0, 8) + '…?\n\nThis invalidates the session token. Subsequent writes from that session will fail 401.')) return;
+      try {
+        const res = await apiFetch(`/shared-state/sessions/${encodeURIComponent(sid)}/revoke`, {
+          method: 'POST',
+          headers: { 'X-Instar-Request': '1' },
+        });
+        if (res && res.revoked) {
+          await loadIntegratedBeingBindings();
+          await loadIntegratedBeing();
+        } else {
+          alert('Revocation did not succeed — see console for details.');
+          console.warn('[integrated-being-v2] revoke unexpected', res);
+        }
+      } catch (err) {
+        console.error('[integrated-being-v2] revoke error', err);
+        alert('Revoke failed: ' + (err && err.message ? err.message : err));
+      }
+    }
+
     function startIntegratedBeingPoll() {
       if (integratedBeingPollTimer) return;
-      integratedBeingPollTimer = setInterval(loadIntegratedBeing, 30000);
+      integratedBeingPollTimer = setInterval(() => {
+        loadIntegratedBeing();
+        loadIntegratedBeingBindings();
+      }, 30000);
     }
     function stopIntegratedBeingPoll() {
       if (integratedBeingPollTimer) {
