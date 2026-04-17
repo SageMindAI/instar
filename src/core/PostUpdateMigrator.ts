@@ -71,11 +71,55 @@ export class PostUpdateMigrator {
     this.migrateConfig(result);
     this.migrateGitignore(result);
     this.migrateBuiltinSkills(result);
+    this.migrateSkillPortHardcoding(result);
     this.migrateSelfKnowledgeTree(result);
     this.migrateSoulMd(result);
     this.migrateAgentMdSections(result);
 
     return result;
+  }
+
+  /**
+   * Upgrade built-in skills that hardcoded a localhost port at install time
+   * to use a runtime-expandable ${INSTAR_PORT:-PORT} pattern.
+   *
+   * Background: installBuiltinSkills used to template the port at install.
+   * Users who later changed their server port ended up with stale URLs in
+   * their skills. This migration rewrites `http://localhost:NNNN/` to
+   * `http://localhost:${INSTAR_PORT:-NNNN}/` in the known-default skill set.
+   *
+   * Idempotent: skips files that already use the dynamic pattern.
+   * Scoped: only touches skills from the installBuiltinSkills set — custom
+   * skills are never modified.
+   */
+  private migrateSkillPortHardcoding(result: MigrationResult): void {
+    const defaultSkills = [
+      'evolve', 'learn', 'gaps', 'commit-action', 'feedback',
+      'triage-findings', 'reflect', 'coherence-audit', 'degradation-digest',
+      'state-integrity-check', 'memory-hygiene', 'guardian-pulse',
+      'session-continuity-check', 'git-sync',
+    ];
+    const skillsDir = path.join(this.config.projectDir, '.claude', 'skills');
+    const hardcodedRe = /http:\/\/localhost:(\d+)\//g;
+    const dynamicMarker = '${INSTAR_PORT:-';
+
+    for (const name of defaultSkills) {
+      const skillFile = path.join(skillsDir, name, 'SKILL.md');
+      if (!fs.existsSync(skillFile)) continue;
+      try {
+        const original = fs.readFileSync(skillFile, 'utf8');
+        if (original.includes(dynamicMarker)) continue;
+        if (!hardcodedRe.test(original)) continue;
+        hardcodedRe.lastIndex = 0;
+        const updated = original.replace(hardcodedRe, (_m, p) => `http://localhost:\${INSTAR_PORT:-${p}}/`);
+        if (updated !== original) {
+          fs.writeFileSync(skillFile, updated);
+          result.upgraded.push(`skills/${name}/SKILL.md (hardcoded port -> \${INSTAR_PORT:-NNNN})`);
+        }
+      } catch (err) {
+        result.errors.push(`skills/${name}/SKILL.md port migration: ${err instanceof Error ? err.message : String(err)}`);
+      }
+    }
   }
 
   /**
