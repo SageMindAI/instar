@@ -121,7 +121,9 @@ This toolkit is meant to be tested against real Claude Code projects. The flow:
   2. **Config defaults** — Add to `migrateConfig()` with existence checks (only add missing fields)
   3. **CLAUDE.md sections** — Add to `migrateClaudeMd()` with content-sniffing guards
   4. **Hook scripts** — Add to `migrateHooks()`. Built-in hooks (`instar/` directory) are **always overwritten** on every migration run — never install-if-missing. This ensures agents can't get stuck on broken templates (lesson from `hook-event-reporter.js`: it was install-if-missing, so agents with ESM hosts got stuck on a broken CJS `require('http')` — fixed by switching to always-overwrite). Custom hooks (`custom/` directory) are never touched.
-  5. **Built-in skills** — No migration needed. `installBuiltinSkills()` is called from `refreshHooksAndSettings()` on every update and is non-destructive (only writes missing SKILL.md files). Adding a new built-in skill just requires adding it to the skills registry.
+  5. **Built-in skills** — Split into two cases:
+     - **Adding a new skill**: No migration needed. `installBuiltinSkills()` is called from `refreshHooksAndSettings()` on every update and is non-destructive (only writes missing SKILL.md files). Just add the skill to the skills registry.
+     - **Updating existing skill content**: Add an idempotent migration in `PostUpdateMigrator` (e.g. `migrateSkillPortHardcoding()`) scoped to the known default-skill allowlist. `installBuiltinSkills()` never overwrites existing files — a dedicated migration is the only path to update content already installed on-disk. Custom skills are never touched.
   6. **Idempotency** — Every migration must be safe to run multiple times (check before patching)
 
   The principle: instar agents update in place. If `PostUpdateMigrator` doesn't know about a change, deployed agents will silently run stale configurations. This is how the zombie-cleanup-kills-active-sessions bug happened — and why we enforce this structurally with CI.
