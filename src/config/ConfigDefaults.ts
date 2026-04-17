@@ -47,6 +47,11 @@ const SHARED_DEFAULTS: Record<string, unknown> = {
   backup: {
     includeFiles: [] as string[],
   },
+  // PR-REVIEW-HARDENING-SPEC Phase A default: all /pr-gate/* routes
+  // 404 until explicitly flipped by Phase B+. Runtime kill-switch.
+  prGate: {
+    phase: 'off' as const,
+  },
 };
 
 /**

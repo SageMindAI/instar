@@ -186,6 +186,45 @@ const VALID_SORTS = ['significance', 'recent', 'name'] as const;
 export function createRoutes(ctx: RouteContext): Router {
   const router = Router();
 
+  // ── PR-REVIEW-HARDENING kill-switch (Phase A) ─────────────────────
+  //
+  // Spec §"Runtime kill-switch": `prGate.phase = 'off'` returns 404 for
+  // every /pr-gate/* route. Must run BEFORE any /pr-gate/* route
+  // registration downstream — Express middleware only applies to routes
+  // declared after it in the same Router. Placed here at the top so
+  // every future pr-gate route is automatically gated by this check.
+  //
+  // Phases:
+  //   'off'       — 404 with {disabled: true, reason: 'prGate.phase=off'}
+  //   'shadow'    — pass-through; downstream handlers accept writes but
+  //                 never block merges (future phase wiring).
+  //   'layer1-2'  — pass-through; enforcement logic in handlers.
+  //   'layer3'    — pass-through; full gate.
+  //
+  // Default-BLOCK allowlist shape (deliberately inverted from "block
+  // exactly 'off'"): the spec's signal-vs-authority carve-out is
+  // "safety guards on irreversible actions where false pass is
+  // catastrophic". A default-pass check that blocks only one literal
+  // spelling would let typos/casing/whitespace in the JSON config
+  // ('OFF', '', ' shadow', 'bogus') bypass the gate. Default-block +
+  // allowlist of known-active phases matches the risk profile: a new
+  // phase value cannot accidentally open the gate; only explicit
+  // allowlist membership does.
+  const PR_GATE_ACTIVE_PHASES = new Set(['shadow', 'layer1-2', 'layer3']);
+  router.use('/pr-gate', (_req, res, next) => {
+    const prGate = (ctx.config as { prGate?: { phase?: unknown } }).prGate;
+    const phase = typeof prGate?.phase === 'string'
+      ? prGate.phase.trim().toLowerCase()
+      : 'off';
+    if (!PR_GATE_ACTIVE_PHASES.has(phase)) {
+      return res.status(404).json({
+        disabled: true,
+        reason: 'prGate.phase=off',
+      });
+    }
+    return next();
+  });
+
   // Reflection metrics — usage-based reflection trigger (ported from Dawn)
   const reflectionMetrics = new ReflectionMetrics(ctx.config.stateDir);
 

@@ -1500,6 +1500,27 @@ export interface InstarConfig {
    * identity/memory defaults.
    */
   backup?: Partial<BackupConfig>;
+  /**
+   * PR-REVIEW-HARDENING kill-switch and rollout phase. Default 'off'
+   * (Phase A landing). Flipping to 'shadow' / 'layer1-2' / 'layer3'
+   * activates progressively more pipeline enforcement — see
+   * docs/specs/PR-REVIEW-HARDENING-SPEC.md §"Rollout plan".
+   */
+  prGate?: PrGateConfig;
+}
+
+// ── PR-gate (PR-REVIEW-HARDENING-SPEC Phase A) ────────────────────
+
+export interface PrGateConfig {
+  /**
+   * Rollout phase. 'off' returns 404 for every /pr-gate/* route.
+   * 'shadow' | 'layer1-2' | 'layer3' progressively enable enforcement.
+   */
+  phase: 'off' | 'shadow' | 'layer1-2' | 'layer3';
+  /** Machine ID that serves the authoritative pr-gate endpoints. */
+  primaryMachineId?: string;
+  /** Machine IDs paired for replication / cross-tunnel failover. */
+  pairedMachineIds?: string[];
 }
 
 // ── Integrated-Being Ledger (v1) ────────────────────────────────────
