@@ -1,7 +1,7 @@
 {
   "$schema": "./builtin-manifest.schema.json",
   "schemaVersion": 1,
-  "generatedAt": "2026-04-16T16:04:24.657Z",
+  "generatedAt": "2026-04-17T01:19:27.369Z",
   "instarVersion": "0.28.46",
   "entryCount": 186,
   "entries": {
@@ -11,7 +11,7 @@
       "domain": "identity",
       "sourcePath": "src/core/PostUpdateMigrator.ts",
       "installedPath": ".instar/hooks/instar/session-start.sh",
-      "contentHash": "e813931af351d9ed2434a8c28c6bcb9394788e8cf62a70665faf9823430cca2e",
+      "contentHash": "0c11d57b5462485511452c10fc139ad61bd8c9dfefcfba15705d13bc6c5fa9f1",
       "since": "2025-01-01"
     },
     "hook:dangerous-command-guard": {
@@ -20,7 +20,7 @@
       "domain": "safety",
       "sourcePath": "src/core/PostUpdateMigrator.ts",
       "installedPath": ".instar/hooks/instar/dangerous-command-guard.sh",
-      "contentHash": "e813931af351d9ed2434a8c28c6bcb9394788e8cf62a70665faf9823430cca2e",
+      "contentHash": "0c11d57b5462485511452c10fc139ad61bd8c9dfefcfba15705d13bc6c5fa9f1",
       "since": "2025-01-01"
     },
     "hook:grounding-before-messaging": {
@@ -29,7 +29,7 @@
       "domain": "safety",
       "sourcePath": "src/core/PostUpdateMigrator.ts",
       "installedPath": ".instar/hooks/instar/grounding-before-messaging.sh",
-      "contentHash": "e813931af351d9ed2434a8c28c6bcb9394788e8cf62a70665faf9823430cca2e",
+      "contentHash": "0c11d57b5462485511452c10fc139ad61bd8c9dfefcfba15705d13bc6c5fa9f1",
       "since": "2025-01-01"
     },
     "hook:compaction-recovery": {
@@ -38,7 +38,7 @@
       "domain": "identity",
       "sourcePath": "src/core/PostUpdateMigrator.ts",
       "installedPath": ".instar/hooks/instar/compaction-recovery.sh",
-      "contentHash": "e813931af351d9ed2434a8c28c6bcb9394788e8cf62a70665faf9823430cca2e",
+      "contentHash": "0c11d57b5462485511452c10fc139ad61bd8c9dfefcfba15705d13bc6c5fa9f1",
       "since": "2025-01-01"
     },
     "hook:external-operation-gate": {
@@ -47,7 +47,7 @@
       "domain": "safety",
       "sourcePath": "src/core/PostUpdateMigrator.ts",
       "installedPath": ".instar/hooks/instar/external-operation-gate.js",
-      "contentHash": "e813931af351d9ed2434a8c28c6bcb9394788e8cf62a70665faf9823430cca2e",
+      "contentHash": "0c11d57b5462485511452c10fc139ad61bd8c9dfefcfba15705d13bc6c5fa9f1",
       "since": "2025-01-01"
     },
     "hook:deferral-detector": {
@@ -56,7 +56,7 @@
       "domain": "safety",
       "sourcePath": "src/core/PostUpdateMigrator.ts",
       "installedPath": ".instar/hooks/instar/deferral-detector.js",
-      "contentHash": "e813931af351d9ed2434a8c28c6bcb9394788e8cf62a70665faf9823430cca2e",
+      "contentHash": "0c11d57b5462485511452c10fc139ad61bd8c9dfefcfba15705d13bc6c5fa9f1",
       "since": "2025-01-01"
     },
     "hook:post-action-reflection": {
@@ -65,7 +65,7 @@
       "domain": "evolution",
       "sourcePath": "src/core/PostUpdateMigrator.ts",
       "installedPath": ".instar/hooks/instar/post-action-reflection.js",
-      "contentHash": "e813931af351d9ed2434a8c28c6bcb9394788e8cf62a70665faf9823430cca2e",
+      "contentHash": "0c11d57b5462485511452c10fc139ad61bd8c9dfefcfba15705d13bc6c5fa9f1",
       "since": "2025-01-01"
     },
     "hook:external-communication-guard": {
@@ -74,7 +74,7 @@
       "domain": "safety",
       "sourcePath": "src/core/PostUpdateMigrator.ts",
       "installedPath": ".instar/hooks/instar/external-communication-guard.js",
-      "contentHash": "e813931af351d9ed2434a8c28c6bcb9394788e8cf62a70665faf9823430cca2e",
+      "contentHash": "0c11d57b5462485511452c10fc139ad61bd8c9dfefcfba15705d13bc6c5fa9f1",
       "since": "2025-01-01"
     },
     "hook:scope-coherence-collector": {
@@ -83,7 +83,7 @@
       "domain": "coherence",
       "sourcePath": "src/core/PostUpdateMigrator.ts",
       "installedPath": ".instar/hooks/instar/scope-coherence-collector.js",
-      "contentHash": "e813931af351d9ed2434a8c28c6bcb9394788e8cf62a70665faf9823430cca2e",
+      "contentHash": "0c11d57b5462485511452c10fc139ad61bd8c9dfefcfba15705d13bc6c5fa9f1",
       "since": "2025-01-01"
     },
     "hook:scope-coherence-checkpoint": {
@@ -92,7 +92,7 @@
       "domain": "coherence",
       "sourcePath": "src/core/PostUpdateMigrator.ts",
       "installedPath": ".instar/hooks/instar/scope-coherence-checkpoint.js",
-      "contentHash": "e813931af351d9ed2434a8c28c6bcb9394788e8cf62a70665faf9823430cca2e",
+      "contentHash": "0c11d57b5462485511452c10fc139ad61bd8c9dfefcfba15705d13bc6c5fa9f1",
       "since": "2025-01-01"
     },
     "hook:free-text-guard": {
@@ -101,7 +101,7 @@
       "domain": "safety",
       "sourcePath": "src/core/PostUpdateMigrator.ts",
       "installedPath": ".instar/hooks/instar/free-text-guard.sh",
-      "contentHash": "e813931af351d9ed2434a8c28c6bcb9394788e8cf62a70665faf9823430cca2e",
+      "contentHash": "0c11d57b5462485511452c10fc139ad61bd8c9dfefcfba15705d13bc6c5fa9f1",
       "since": "2025-01-01"
     },
     "hook:claim-intercept": {
@@ -110,7 +110,7 @@
       "domain": "coherence",
       "sourcePath": "src/core/PostUpdateMigrator.ts",
       "installedPath": ".instar/hooks/instar/claim-intercept.js",
-      "contentHash": "e813931af351d9ed2434a8c28c6bcb9394788e8cf62a70665faf9823430cca2e",
+      "contentHash": "0c11d57b5462485511452c10fc139ad61bd8c9dfefcfba15705d13bc6c5fa9f1",
       "since": "2025-01-01"
     },
     "hook:claim-intercept-response": {
@@ -119,7 +119,7 @@
       "domain": "coherence",
       "sourcePath": "src/core/PostUpdateMigrator.ts",
       "installedPath": ".instar/hooks/instar/claim-intercept-response.js",
-      "contentHash": "e813931af351d9ed2434a8c28c6bcb9394788e8cf62a70665faf9823430cca2e",
+      "contentHash": "0c11d57b5462485511452c10fc139ad61bd8c9dfefcfba15705d13bc6c5fa9f1",
       "since": "2025-01-01"
     },
     "hook:auto-approve-permissions": {
@@ -128,7 +128,7 @@
       "domain": "safety",
       "sourcePath": "src/core/PostUpdateMigrator.ts",
       "installedPath": ".instar/hooks/instar/auto-approve-permissions.js",
-      "contentHash": "e813931af351d9ed2434a8c28c6bcb9394788e8cf62a70665faf9823430cca2e",
+      "contentHash": "0c11d57b5462485511452c10fc139ad61bd8c9dfefcfba15705d13bc6c5fa9f1",
       "since": "2025-01-01"
     },
     "job:health-check": {
@@ -136,7 +136,7 @@
       "type": "job",
       "domain": "monitoring",
       "sourcePath": "src/commands/init.ts",
-      "contentHash": "19a0edf33d9000f4ec42076d1ded11dd1d9c5322a4e3c843ad05d0c41117118a",
+      "contentHash": "b662d04f17d8bcc3d2ae4f1e5bf79eb20996017a7d71b92389885623e2ccdfc0",
       "since": "2025-01-01"
     },
     "job:reflection-trigger": {
@@ -144,7 +144,7 @@
       "type": "job",
       "domain": "evolution",
       "sourcePath": "src/commands/init.ts",
-      "contentHash": "19a0edf33d9000f4ec42076d1ded11dd1d9c5322a4e3c843ad05d0c41117118a",
+      "contentHash": "b662d04f17d8bcc3d2ae4f1e5bf79eb20996017a7d71b92389885623e2ccdfc0",
       "since": "2025-01-01"
     },
     "job:relationship-maintenance": {
@@ -152,7 +152,7 @@
       "type": "job",
       "domain": "relationships",
       "sourcePath": "src/commands/init.ts",
-      "contentHash": "19a0edf33d9000f4ec42076d1ded11dd1d9c5322a4e3c843ad05d0c41117118a",
+      "contentHash": "b662d04f17d8bcc3d2ae4f1e5bf79eb20996017a7d71b92389885623e2ccdfc0",
       "since": "2025-01-01"
     },
     "job:feedback-retry": {
@@ -160,7 +160,7 @@
       "type": "job",
       "domain": "feedback",
       "sourcePath": "src/commands/init.ts",
-      "contentHash": "19a0edf33d9000f4ec42076d1ded11dd1d9c5322a4e3c843ad05d0c41117118a",
+      "contentHash": "b662d04f17d8bcc3d2ae4f1e5bf79eb20996017a7d71b92389885623e2ccdfc0",
       "since": "2025-01-01"
     },
     "job:insight-harvest": {
@@ -168,7 +168,7 @@
       "type": "job",
       "domain": "evolution",
       "sourcePath": "src/commands/init.ts",
-      "contentHash": "19a0edf33d9000f4ec42076d1ded11dd1d9c5322a4e3c843ad05d0c41117118a",
+      "contentHash": "b662d04f17d8bcc3d2ae4f1e5bf79eb20996017a7d71b92389885623e2ccdfc0",
       "since": "2025-01-01"
     },
     "job:evolution-overdue-check": {
@@ -176,7 +176,7 @@
       "type": "job",
       "domain": "general",
       "sourcePath": "src/commands/init.ts",
-      "contentHash": "19a0edf33d9000f4ec42076d1ded11dd1d9c5322a4e3c843ad05d0c41117118a",
+      "contentHash": "b662d04f17d8bcc3d2ae4f1e5bf79eb20996017a7d71b92389885623e2ccdfc0",
       "since": "2025-01-01"
     },
     "job:project-map-refresh": {
@@ -184,7 +184,7 @@
       "type": "job",
       "domain": "mapping",
       "sourcePath": "src/commands/init.ts",
-      "contentHash": "19a0edf33d9000f4ec42076d1ded11dd1d9c5322a4e3c843ad05d0c41117118a",
+      "contentHash": "b662d04f17d8bcc3d2ae4f1e5bf79eb20996017a7d71b92389885623e2ccdfc0",
       "since": "2025-01-01"
     },
     "job:coherence-audit": {
@@ -192,7 +192,7 @@
       "type": "job",
       "domain": "coherence",
       "sourcePath": "src/commands/init.ts",
-      "contentHash": "19a0edf33d9000f4ec42076d1ded11dd1d9c5322a4e3c843ad05d0c41117118a",
+      "contentHash": "b662d04f17d8bcc3d2ae4f1e5bf79eb20996017a7d71b92389885623e2ccdfc0",
       "since": "2025-01-01"
     },
     "job:degradation-digest": {
@@ -200,7 +200,7 @@
       "type": "job",
       "domain": "monitoring",
       "sourcePath": "src/commands/init.ts",
-      "contentHash": "19a0edf33d9000f4ec42076d1ded11dd1d9c5322a4e3c843ad05d0c41117118a",
+      "contentHash": "b662d04f17d8bcc3d2ae4f1e5bf79eb20996017a7d71b92389885623e2ccdfc0",
       "since": "2025-01-01"
     },
     "job:state-integrity-check": {
@@ -208,7 +208,7 @@
       "type": "job",
       "domain": "monitoring",
       "sourcePath": "src/commands/init.ts",
-      "contentHash": "19a0edf33d9000f4ec42076d1ded11dd1d9c5322a4e3c843ad05d0c41117118a",
+      "contentHash": "b662d04f17d8bcc3d2ae4f1e5bf79eb20996017a7d71b92389885623e2ccdfc0",
       "since": "2025-01-01"
     },
     "job:memory-hygiene": {
@@ -216,7 +216,7 @@
       "type": "job",
       "domain": "memory",
       "sourcePath": "src/commands/init.ts",
-      "contentHash": "19a0edf33d9000f4ec42076d1ded11dd1d9c5322a4e3c843ad05d0c41117118a",
+      "contentHash": "b662d04f17d8bcc3d2ae4f1e5bf79eb20996017a7d71b92389885623e2ccdfc0",
       "since": "2025-01-01"
     },
     "job:guardian-pulse": {
@@ -224,7 +224,7 @@
       "type": "job",
       "domain": "monitoring",
       "sourcePath": "src/commands/init.ts",
-      "contentHash": "19a0edf33d9000f4ec42076d1ded11dd1d9c5322a4e3c843ad05d0c41117118a",
+      "contentHash": "b662d04f17d8bcc3d2ae4f1e5bf79eb20996017a7d71b92389885623e2ccdfc0",
       "since": "2025-01-01"
     },
     "job:session-continuity-check": {
@@ -232,7 +232,7 @@
       "type": "job",
       "domain": "sessions",
       "sourcePath": "src/commands/init.ts",
-      "contentHash": "19a0edf33d9000f4ec42076d1ded11dd1d9c5322a4e3c843ad05d0c41117118a",
+      "contentHash": "b662d04f17d8bcc3d2ae4f1e5bf79eb20996017a7d71b92389885623e2ccdfc0",
       "since": "2025-01-01"
     },
     "job:memory-export": {
@@ -240,7 +240,7 @@
       "type": "job",
       "domain": "memory",
       "sourcePath": "src/commands/init.ts",
-      "contentHash": "19a0edf33d9000f4ec42076d1ded11dd1d9c5322a4e3c843ad05d0c41117118a",
+      "contentHash": "b662d04f17d8bcc3d2ae4f1e5bf79eb20996017a7d71b92389885623e2ccdfc0",
       "since": "2025-01-01"
     },
     "job:git-sync": {
@@ -248,7 +248,7 @@
       "type": "job",
       "domain": "coordination",
       "sourcePath": "src/commands/init.ts",
-      "contentHash": "19a0edf33d9000f4ec42076d1ded11dd1d9c5322a4e3c843ad05d0c41117118a",
+      "contentHash": "b662d04f17d8bcc3d2ae4f1e5bf79eb20996017a7d71b92389885623e2ccdfc0",
       "since": "2025-01-01"
     },
     "job:capability-audit": {
@@ -256,7 +256,7 @@
       "type": "job",
       "domain": "general",
       "sourcePath": "src/commands/init.ts",
-      "contentHash": "19a0edf33d9000f4ec42076d1ded11dd1d9c5322a4e3c843ad05d0c41117118a",
+      "contentHash": "b662d04f17d8bcc3d2ae4f1e5bf79eb20996017a7d71b92389885623e2ccdfc0",
       "since": "2025-01-01"
     },
     "job:identity-review": {
@@ -264,7 +264,7 @@
       "type": "job",
       "domain": "general",
       "sourcePath": "src/commands/init.ts",
-      "contentHash": "19a0edf33d9000f4ec42076d1ded11dd1d9c5322a4e3c843ad05d0c41117118a",
+      "contentHash": "b662d04f17d8bcc3d2ae4f1e5bf79eb20996017a7d71b92389885623e2ccdfc0",
       "since": "2025-01-01"
     },
     "job:evolution-proposal-evaluate": {
@@ -272,7 +272,7 @@
       "type": "job",
       "domain": "general",
       "sourcePath": "src/commands/init.ts",
-      "contentHash": "19a0edf33d9000f4ec42076d1ded11dd1d9c5322a4e3c843ad05d0c41117118a",
+      "contentHash": "b662d04f17d8bcc3d2ae4f1e5bf79eb20996017a7d71b92389885623e2ccdfc0",
       "since": "2025-01-01"
     },
     "job:evolution-proposal-implement": {
@@ -280,7 +280,7 @@
       "type": "job",
       "domain": "general",
       "sourcePath": "src/commands/init.ts",
-      "contentHash": "19a0edf33d9000f4ec42076d1ded11dd1d9c5322a4e3c843ad05d0c41117118a",
+      "contentHash": "b662d04f17d8bcc3d2ae4f1e5bf79eb20996017a7d71b92389885623e2ccdfc0",
       "since": "2025-01-01"
     },
     "job:commitment-detection": {
@@ -288,7 +288,7 @@
       "type": "job",
       "domain": "general",
       "sourcePath": "src/commands/init.ts",
-      "contentHash": "19a0edf33d9000f4ec42076d1ded11dd1d9c5322a4e3c843ad05d0c41117118a",
+      "contentHash": "b662d04f17d8bcc3d2ae4f1e5bf79eb20996017a7d71b92389885623e2ccdfc0",
       "since": "2025-01-01"
     },
     "job:dashboard-link-refresh": {
@@ -296,7 +296,7 @@
       "type": "job",
       "domain": "general",
       "sourcePath": "src/commands/init.ts",
-      "contentHash": "19a0edf33d9000f4ec42076d1ded11dd1d9c5322a4e3c843ad05d0c41117118a",
+      "contentHash": "b662d04f17d8bcc3d2ae4f1e5bf79eb20996017a7d71b92389885623e2ccdfc0",
       "since": "2025-01-01"
     },
     "job:overseer-guardian": {
@@ -304,7 +304,7 @@
       "type": "job",
       "domain": "general",
       "sourcePath": "src/commands/init.ts",
-      "contentHash": "19a0edf33d9000f4ec42076d1ded11dd1d9c5322a4e3c843ad05d0c41117118a",
+      "contentHash": "b662d04f17d8bcc3d2ae4f1e5bf79eb20996017a7d71b92389885623e2ccdfc0",
       "since": "2025-01-01"
     },
     "job:overseer-learning": {
@@ -312,7 +312,7 @@
       "type": "job",
       "domain": "general",
       "sourcePath": "src/commands/init.ts",
-      "contentHash": "19a0edf33d9000f4ec42076d1ded11dd1d9c5322a4e3c843ad05d0c41117118a",
+      "contentHash": "b662d04f17d8bcc3d2ae4f1e5bf79eb20996017a7d71b92389885623e2ccdfc0",
       "since": "2025-01-01"
     },
     "job:overseer-maintenance": {
@@ -320,7 +320,7 @@
       "type": "job",
       "domain": "general",
       "sourcePath": "src/commands/init.ts",
-      "contentHash": "19a0edf33d9000f4ec42076d1ded11dd1d9c5322a4e3c843ad05d0c41117118a",
+      "contentHash": "b662d04f17d8bcc3d2ae4f1e5bf79eb20996017a7d71b92389885623e2ccdfc0",
       "since": "2025-01-01"
     },
     "job:overseer-infrastructure": {
@@ -328,7 +328,7 @@
       "type": "job",
       "domain": "general",
       "sourcePath": "src/commands/init.ts",
-      "contentHash": "19a0edf33d9000f4ec42076d1ded11dd1d9c5322a4e3c843ad05d0c41117118a",
+      "contentHash": "b662d04f17d8bcc3d2ae4f1e5bf79eb20996017a7d71b92389885623e2ccdfc0",
       "since": "2025-01-01"
     },
     "job:overseer-development": {
@@ -336,7 +336,7 @@
       "type": "job",
       "domain": "general",
       "sourcePath": "src/commands/init.ts",
-      "contentHash": "19a0edf33d9000f4ec42076d1ded11dd1d9c5322a4e3c843ad05d0c41117118a",
+      "contentHash": "b662d04f17d8bcc3d2ae4f1e5bf79eb20996017a7d71b92389885623e2ccdfc0",
       "since": "2025-01-01"
     },
     "skill:autonomous": {
@@ -1096,7 +1096,7 @@
       "type": "template",
       "domain": "operations",
       "sourcePath": "src/templates/scripts/slack-reply.sh",
-      "contentHash": "b0efb1df25e12c37adf56277659563c064424fc44f0edb32fe42756d2b93e5c0",
+      "contentHash": "1813442032e435e4ecbf01467510e39a33c3feb3acb1407307c5569a65f30305",
       "since": "2025-01-01"
     },
     "template:smart-fetch.py": {
@@ -1112,7 +1112,7 @@
       "type": "template",
       "domain": "operations",
       "sourcePath": "src/templates/scripts/telegram-reply.sh",
-      "contentHash": "f3aa0c8aae3f3275d0efb45b333ad83c14f7513a9e27c743039a9a113c0d16ff",
+      "contentHash": "4f8787df1bf6384545dd7f19093fd77daa1bf993ed48a8ab02b6598d41a2007c",
       "since": "2025-01-01"
     },
     "template:whatsapp-reply.sh": {
@@ -1120,7 +1120,7 @@
       "type": "template",
       "domain": "operations",
       "sourcePath": "src/templates/scripts/whatsapp-reply.sh",
-      "contentHash": "f1c3cdba35e1e495c4bf1e3e22397ce7cd9f63554e5ae4becf68f71c0582edb2",
+      "contentHash": "a226d76025036d6b0f11ffcded50a748ff8d2102f2dbb06ce86599001b62ec23",
       "since": "2025-01-01"
     },
     "playbook-script:atomic_write.py": {
@@ -1400,7 +1400,7 @@
       "type": "subsystem",
       "domain": "server",
       "sourcePath": "src/server/AgentServer.ts",
-      "contentHash": "8b0b572077796a7120f13f7778fecc0263849d13e8e24138ba332207f1cbf28f",
+      "contentHash": "ff746e931b460ef307f8e32226df0ce2e7049c572501aabcfa36bd49ff91b940",
       "since": "2025-01-01"
     },
     "subsystem:session-manager": {
@@ -1408,7 +1408,7 @@
       "type": "subsystem",
       "domain": "sessions",
       "sourcePath": "src/core/SessionManager.ts",
-      "contentHash": "541adcef56fc133c4b56034eeacf17d27ebc4512dd89b09eced58e427b10df39",
+      "contentHash": "12d251dd65b86de16d65ef1ae40992add3b3292d7595d028ec95942d79b1896d",
       "since": "2025-01-01"
     },
     "subsystem:auto-updater": {
@@ -1432,7 +1432,7 @@
       "type": "subsystem",
       "domain": "updates",
       "sourcePath": "src/core/PostUpdateMigrator.ts",
-      "contentHash": "e813931af351d9ed2434a8c28c6bcb9394788e8cf62a70665faf9823430cca2e",
+      "contentHash": "0c11d57b5462485511452c10fc139ad61bd8c9dfefcfba15705d13bc6c5fa9f1",
       "since": "2025-01-01"
     },
     "subsystem:scheduler": {
