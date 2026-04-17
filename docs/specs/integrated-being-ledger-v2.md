@@ -5,7 +5,7 @@ author: "echo"
 created: "2026-04-16"
 supersedes: "docs/specs/integrated-being-ledger-v1.md (remains in force; v2 is additive)"
 review-convergence: null
-review-iterations: 2
+review-iterations: 3
 review-completed-at: null
 review-report: null
 approved: false
@@ -231,6 +231,21 @@ This means: a bearer-token holder CANNOT mint a binding token unless they first 
 
 `POST /shared-state/resolve/<id>` — bearer-token gated.
 
+**Request schema (GPT iter 3 resolution)**:
+
+```typescript
+interface ResolveRequest {
+  resolution: "self-assert" | "subsystem-verify" | "user-resolve" | "dispute";
+  outcome?: "success" | "failure";        // Required for self-assert and subsystem-verify; maps to status: "resolved" or "cancelled"
+  note?: string;                           // Max 400 chars, Unicode-sanitized
+  evidenceRef?: string;                    // Opaque pointer to audit trail
+  disputeReason?: string;                  // Required for dispute; max 200 chars, Unicode-sanitized, rendered in the supersession chain as "disputed: <reason>"
+  dedupKey: string;                        // Required. Same format rules as /append. Makes the resolve call idempotent across retries.
+}
+```
+
+**dedupKey as idempotency key (GPT iter 3 resolution)**: the `dedupKey` on both `/append` and `/resolve` is treated as an idempotency key. Server retains the mapping `(agentId, dedupKey) → entry-id` for the rolling-window retention (same as dedup-index window, 24h). A retry with the same `dedupKey` returns the SAME entry id with 200 OK and `X-Idempotent-Replay: 1` header. This resolves the ack-before-durable-flush retry-correctness gap — if a client times out and retries, the second call gets the same id, not a duplicate entry.
+
 **Resolution types and authorization (Adversarial A4 resolution — self-assert restricted)**:
 
 | Resolution | Who can call | Tier written |
@@ -253,7 +268,16 @@ The `X-Instar-Request: 1` header is NOT sufficient by itself — a shell-side ad
 
 **Rendered state vs enum (GPT iter 2 resolution)**: `stranded` is NOT a member of the stored `status` enum (which stays `open | resolved | cancelled | expired | disputed`). It is a render-time derived state computed by the rendering layer when a stranded-note is present in the supersession chain. Documented explicitly so no consumer assumes they can set `status: "stranded"` via API — they cannot; the field is rejected at schema validation. The rendering-only approach keeps the write surface small and the stored state finite.
 
-**Accelerated stranding (GPT iter 2 follow-up)**: the 14-day lag (7d session purge + 7d sweep cadence) left commitments in limbo too long. Revised: the stranded sweep runs daily, and triggers at 24h after the creating session is purged (not 7 days). Total stranding lag: creating-session idle-TTL (24h) + session purge (7d activity-based) + stranded sweep (24h after purge) = up to ~9 days maximum, down from 14.
+**Accelerated stranding (GPT iter 2/3 follow-up)**: stranded sweep runs daily and triggers at 24h after the creating session is purged.
+
+**Stranding timeline (GPT iter 3 contradiction resolution)** — canonical flow, unified across the spec:
+1. Session registered, creates commitment.
+2. Session stops writing. After `tokenIdleTtlHours` (default 24h) of inactivity, the token is invalid.
+3. Session remains in registry for `sessionBindingRetentionDays` (default 7 days) after last write.
+4. At day-7-plus, session is purged from the registry.
+5. Next daily stranded-sweep (within 24h of purge) emits a `stranded` note for any commitment whose creator session is no longer in the registry.
+
+Total worst-case stranding lag: 7 days (registry retention) + 24h (sweep cadence) = ~8 days from last session activity. Prior spec text saying "7+ days" referred to step 3 only; total pipeline is 8 days. No other "7-day" or "14-day" references remain in the spec for this flow.
 
 Resolutions write a NEW entry that `supersedes` the commitment AND updates the commitment's effective status via supersession chain walk at render time. The original commitment entry is immutable.
 
@@ -387,6 +411,20 @@ integratedBeing.trustTierLookupTimeoutMs           (default 500)
 integratedBeing.aggregationSignalThreshold         (default 5)
 integratedBeing.aggregationSignalImmediateThreshold (default 2)     # same-session immediate emit
 ```
+
+## Open architectural questions (iter 3 external reviewers)
+
+Two external reviewers (GPT and Gemini) raised architectural concerns at iter 3 that are NOT closed in this spec — they require design decisions that sit at the boundary of this spec's scope. Called out explicitly so they're not hidden:
+
+1. **Session-bind privilege separation (Gemini)**: `POST /shared-state/session-bind` is bearer-token-gated. The same bearer token is what a session uses to call other instar endpoints — so a compromised session can call `session-bind` directly with a fabricated session id, bypassing the 0o600 file ceremony. The file-based handoff only meaningfully protects against non-session local processes that DON'T have the bearer token.
+
+   To truly isolate `session-bind`, it would need to run on a privileged channel (Unix domain socket, lifecycle-admin token issued separately from the bearer token). This is an architectural decision — it changes how the instar server exposes privileged lifecycle APIs. Deferred to v2.1 or documented as an accepted risk of v2 ("the 0o600 handoff protects against sibling processes without bearer, not against a session that already has bearer").
+
+2. **Effective-status state machine (GPT)**: the rules for computing effective status when a commitment has conflicting entries in its supersession chain (e.g., a self-asserted `resolved` followed by a `dispute` followed by a `user-resolved` `cancelled`) are described in prose but not formalized. A formal state machine is v2.1 work unless a specific conflict pattern is demonstrated to matter in v2.
+
+3. **Interactive bind fallback challenge-response (GPT)**: the attestation via hook-in-progress flag is a time-window check, not a cryptographic challenge. A more robust design would have the session prove knowledge of a nonce written only to the token file path. Deferred to v2.1.
+
+These are not blocking v2's practical utility — v2 ships with acknowledged limits and closed them in v2.1. Documented here so they're not surprise-discovered later.
 
 ## Explicit deferrals (to v3 or later)
 
