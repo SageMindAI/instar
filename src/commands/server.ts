@@ -5719,6 +5719,20 @@ export async function startServer(options: StartOptions): Promise<void> {
           console.log(
             pc.green('  Integrated-Being v2 (session-write surface): enabled')
           );
+          // Start background sweepers (expired + stranded). Bounded
+          // per-run; safe to run on every server start.
+          const { CommitmentSweeper } = await import(
+            '../core/CommitmentSweeper.js'
+          );
+          const sweeper = new CommitmentSweeper({
+            ledger: sharedStateLedger!,
+            registry: ledgerSessionRegistry,
+            instance: config.projectName ?? 'server',
+          });
+          sweeper.start();
+          console.log(
+            pc.green('  Integrated-Being v2 (commitment sweepers): running')
+          );
         } else {
           console.log(
             pc.dim('  Integrated-Being v2 (session-write surface): disabled')

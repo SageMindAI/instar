@@ -1578,7 +1578,9 @@ export type LedgerEntrySubsystem =
   | 'dispatch'
   | 'coherence-gate'
   /** v2: session-asserted writes via POST /shared-state/append. instance = session id. */
-  | 'session';
+  | 'session'
+  /** v2 slice 5: CommitmentSweeper expired/stranded emissions. */
+  | 'commitment-sweeper';
 
 /** Ledger entry kind. */
 export type LedgerEntryKind =

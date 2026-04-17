@@ -48,6 +48,8 @@ const VALID_SUBSYSTEMS: readonly LedgerEntrySubsystem[] = [
   'coherence-gate',
   // v2: session-asserted writes via POST /shared-state/append.
   'session',
+  // v2 slice 5: CommitmentSweeper subsystem-asserted emissions.
+  'commitment-sweeper',
 ];
 const VALID_KINDS: readonly LedgerEntryKind[] = [
   'commitment',
