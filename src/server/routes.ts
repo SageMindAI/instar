@@ -10486,6 +10486,234 @@ export function createRoutes(ctx: RouteContext): Router {
   );
 
   /**
+   * POST /shared-state/resolve/:id — slice 4
+   *
+   * Resolves a commitment by appending a new entry that supersedes
+   * (for self-assert / subsystem-verify / cancel) or disputes (for
+   * dispute) the original commitment entry. Tiered authorization:
+   *
+   * - `self-assert`: ONLY the creator session can call (session id
+   *   must match the commitment's emittedBy.instance). Spec §4 A4
+   *   closes "any session can hide any commitment via self-assert".
+   * - `dispute`: any registered session. Rate-capped at
+   *   disputesPerSessionPerHour (default 10) — spec §4 iter 2.
+   * - `user-resolve`: deferred to slice 6 (requires PIN-unlock
+   *   infrastructure that the dashboard surface will add).
+   * - `subsystem-verify`: deferred to slice 5 (requires job-scheduler
+   *   onComplete wiring).
+   *
+   * dedupKey is treated as an idempotency key — a retry with the same
+   * key returns the same result with X-Idempotent-Replay: 1.
+   */
+  router.post(
+    '/shared-state/resolve/:id',
+    rateLimiter(60_000, 60),
+    async (req, res) => {
+      if (v2Disabled(req, res)) return;
+
+      const ibConfig = ctx.config.integratedBeing ?? {};
+      const resolutionEnabled = ibConfig.resolutionEnabled === true;
+      if (!resolutionEnabled) {
+        res.setHeader('X-Disabled', 'resolution');
+        res.status(503).json({ error: 'resolution workflow disabled' });
+        return;
+      }
+
+      // ── Session auth ─────────────────────────────────────────────
+      const sessionId = String(req.header('x-instar-session-id') ?? '').trim();
+      const token = String(req.header('x-instar-session-token') ?? '').trim();
+      if (!sessionId || !token) {
+        res.status(401).json({ error: 'Missing X-Instar-Session-Id or X-Instar-Session-Token' });
+        return;
+      }
+      const vverify = ctx.ledgerSessionRegistry!.verify(sessionId, token);
+      if (!vverify.ok) {
+        res.status(401).json({ error: 'Session binding invalid', reason: vverify.reason });
+        return;
+      }
+
+      // ── Body validation ──────────────────────────────────────────
+      const commitmentId = String(req.params.id || '').trim();
+      if (!/^[0-9a-f]{12}$/.test(commitmentId)) {
+        res.status(400).json({ error: 'Invalid commitment id' });
+        return;
+      }
+      const body = (req.body ?? {}) as {
+        resolution?: unknown;
+        outcome?: unknown;
+        note?: unknown;
+        evidenceRef?: unknown;
+        disputeReason?: unknown;
+        dedupKey?: unknown;
+      };
+      const resolution = typeof body.resolution === 'string' ? body.resolution : '';
+      const validResolutions = ['self-assert', 'dispute', 'user-resolve', 'subsystem-verify'];
+      if (!validResolutions.includes(resolution)) {
+        res.setHeader('X-Invalid-Field', 'resolution');
+        res.status(400).json({
+          error: `resolution must be one of: ${validResolutions.join(' | ')}`,
+        });
+        return;
+      }
+      if (resolution === 'user-resolve' || resolution === 'subsystem-verify') {
+        res.setHeader('X-Pending-Slice', resolution === 'user-resolve' ? '6' : '5');
+        res.status(501).json({
+          error: `resolution type '${resolution}' pending a later slice`,
+        });
+        return;
+      }
+      const dedupKey = typeof body.dedupKey === 'string' ? body.dedupKey : '';
+      if (!dedupKey || dedupKey.length > 200 || !/^[a-zA-Z0-9\-_.:]+$/.test(dedupKey)) {
+        res.setHeader('X-Invalid-Field', 'dedupKey');
+        res.status(400).json({
+          error: 'dedupKey required, [a-zA-Z0-9-_.:], max 200 chars',
+        });
+        return;
+      }
+
+      // ── Fetch commitment entry ───────────────────────────────────
+      let chain;
+      try {
+        chain = await ctx.sharedStateLedger!.walkChain(commitmentId);
+      } catch (err) {
+        res.status(500).json({ error: err instanceof Error ? err.message : String(err) });
+        return;
+      }
+      const commitmentEntry = chain[0];
+      if (!commitmentEntry) {
+        res.status(404).json({ error: 'commitment not found' });
+        return;
+      }
+      if (commitmentEntry.kind !== 'commitment') {
+        res.status(400).json({ error: 'target entry is not a commitment' });
+        return;
+      }
+      const mechanismType =
+        commitmentEntry.commitment?.mechanism?.type ?? 'user-driven';
+
+      // ── Idempotency check (AFTER commitment-fetch; keyed on tuple) ─
+      // Keyed on (sessionId, commitmentId, dedupKey) so a replay from
+      // the SAME session against the SAME commitment returns the cached
+      // result, while any cross-session / cross-commitment lookup misses
+      // and re-runs authorization + write. Per-session authorization
+      // still runs BEFORE the cache lookup (we've verified the session
+      // binding above).
+      const cached = ctx.ledgerSessionRegistry!.getIdempotent(
+        sessionId,
+        commitmentId,
+        dedupKey,
+      );
+      if (cached) {
+        res.setHeader('X-Idempotent-Replay', '1');
+        res.json(cached);
+        return;
+      }
+
+      // ── Per-resolution-type authorization + action ───────────────
+      if (resolution === 'self-assert') {
+        if (commitmentEntry.emittedBy.instance !== sessionId) {
+          res.status(403).json({
+            error: 'self-assert requires the original creator session',
+            reason: 'creator-mismatch',
+          });
+          return;
+        }
+        const outcome = typeof body.outcome === 'string' ? body.outcome : '';
+        if (outcome !== 'success' && outcome !== 'failure') {
+          res.setHeader('X-Invalid-Field', 'outcome');
+          res.status(400).json({
+            error: "self-assert requires outcome: 'success' | 'failure'",
+          });
+          return;
+        }
+        const note = typeof body.note === 'string' ? body.note.slice(0, 400) : undefined;
+        const evidenceRef =
+          typeof body.evidenceRef === 'string' ? body.evidenceRef.slice(0, 200) : undefined;
+        const subject = `${outcome === 'success' ? 'resolved' : 'cancelled'}: ${commitmentEntry.subject}`.slice(0, 200);
+        const appended = await ctx.sharedStateLedger!.append({
+          emittedBy: { subsystem: 'session', instance: sessionId },
+          kind: 'note',
+          subject,
+          summary: note,
+          counterparty: {
+            type: commitmentEntry.counterparty.type,
+            name: commitmentEntry.counterparty.name,
+            trustTier: 'untrusted',
+          },
+          supersedes: commitmentEntry.id,
+          provenance: 'session-asserted',
+          dedupKey,
+        });
+        if (!appended) {
+          res.setHeader('X-Dedup-Or-Fail', '1');
+          res.status(409).json({ error: 'dedupKey collision or fail-open' });
+          return;
+        }
+        const payload = {
+          id: appended.id,
+          t: appended.t,
+          resolution: 'self-assert',
+          outcome,
+          tier: 'self-asserted',
+          evidenceRef,
+        };
+        ctx.ledgerSessionRegistry!.recordCommitmentClosed(
+          commitmentEntry.emittedBy.instance,
+          mechanismType,
+        );
+        ctx.ledgerSessionRegistry!.rememberIdempotent(sessionId, commitmentId, dedupKey, payload);
+        res.json(payload);
+        return;
+      }
+
+      if (resolution === 'dispute') {
+        const disputeLimit = Math.max(1, ibConfig.disputesPerSessionPerHour ?? 10);
+        const capReason = ctx.ledgerSessionRegistry!.checkDisputeRate(sessionId, disputeLimit);
+        if (capReason) {
+          res.setHeader('X-Cap-Reason', capReason);
+          res.status(429).json({ error: 'dispute rate exceeded', reason: capReason });
+          return;
+        }
+        const disputeReason =
+          typeof body.disputeReason === 'string' ? body.disputeReason.slice(0, 200) : '';
+        if (!disputeReason) {
+          res.setHeader('X-Invalid-Field', 'disputeReason');
+          res.status(400).json({ error: 'disputeReason required for dispute resolution' });
+          return;
+        }
+        const appended = await ctx.sharedStateLedger!.append({
+          emittedBy: { subsystem: 'session', instance: sessionId },
+          kind: 'note',
+          subject: `disputed: ${disputeReason}`.slice(0, 200),
+          counterparty: {
+            type: commitmentEntry.counterparty.type,
+            name: commitmentEntry.counterparty.name,
+            trustTier: 'untrusted',
+          },
+          // disputes: separate field, NOT supersedes — avoids the depth-16
+          // data-hiding vector called out in spec §4 iter 2 (Gemini).
+          disputes: commitmentEntry.id,
+          provenance: 'session-asserted',
+          dedupKey,
+        });
+        if (!appended) {
+          res.setHeader('X-Dedup-Or-Fail', '1');
+          res.status(409).json({ error: 'dedupKey collision or fail-open' });
+          return;
+        }
+        ctx.ledgerSessionRegistry!.recordDispute(sessionId);
+        const payload = { id: appended.id, t: appended.t, resolution: 'dispute' };
+        ctx.ledgerSessionRegistry!.rememberIdempotent(sessionId, commitmentId, dedupKey, payload);
+        res.json(payload);
+        return;
+      }
+
+      // Unreachable — all resolution types handled above.
+      res.status(500).json({ error: 'unreachable resolution branch' });
+    }
+  );
+
+  /**
    * POST /shared-state/session-bind-confirm
    *
    * Called by the session-start hook AFTER the file-based handoff has

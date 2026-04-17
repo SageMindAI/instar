@@ -655,6 +655,287 @@ describe('Shared-state v2 routes — v2Enabled=true', () => {
     });
   });
 
+  describe('resolve (slice 4)', () => {
+    let sid: string;
+    let tok: string;
+    let commitmentId: string;
+
+    beforeAll(async () => {
+      // This describe block runs against the app configured with
+      // resolutionEnabled=true — below we swap to a dedicated fresh
+      // AgentServer instance so we don't contaminate the shared app.
+    });
+
+    function makeAppWithResolution() {
+      const p = createTempProject();
+      const cfg = baseConfig(p.stateDir);
+      cfg.integratedBeing = {
+        enabled: true,
+        v2Enabled: true,
+        resolutionEnabled: true,
+        openCommitmentsPerSession: 50,
+        sessionWriteRatePerMinute: 200,
+        disputesPerSessionPerHour: 5,
+      };
+      const l = new SharedStateLedger({ stateDir: p.stateDir, config: cfg.integratedBeing, salt: 's' });
+      const r = new LedgerSessionRegistry({ stateDir: p.stateDir, config: cfg.integratedBeing });
+      const s = new AgentServer({
+        config: cfg,
+        sessionManager: createMockSessionManager() as any,
+        state: p.state,
+        sharedStateLedger: l,
+        ledgerSessionRegistry: r,
+      });
+      return { app: s.getApp(), cleanup: () => { l.shutdown(); p.cleanup(); }, registry: r };
+    }
+
+    async function createCommitment(app: ReturnType<AgentServer['getApp']>, sid2: string, tok2: string) {
+      const res = await request(app).post('/shared-state/append').set({
+        ...AUTH,
+        'X-Instar-Session-Id': sid2,
+        'X-Instar-Session-Token': tok2,
+      }).send({
+        kind: 'commitment',
+        subject: 'test commitment',
+        counterparty: { type: 'self', name: 'self' },
+        dedupKey: `slice4-commit-${Math.random().toString(36).slice(2, 10)}`,
+        commitment: {
+          mechanism: { type: 'scheduled-job' },
+          deadline: new Date(Date.now() + 3600 * 1000).toISOString(),
+        },
+      });
+      return res.body.id as string;
+    }
+
+    it('self-assert resolves a commitment written by the same session', async () => {
+      const { app: a2, cleanup, registry: r } = makeAppWithResolution();
+      try {
+        const s = uuid();
+        const b = await request(a2).post('/shared-state/session-bind').set(AUTH).send({ sessionId: s });
+        const t = b.body.token;
+        const cid = await createCommitment(a2, s, t);
+        expect(r._getRateStateForTest(s).openCommitments).toBe(1);
+
+        const res = await request(a2)
+          .post(`/shared-state/resolve/${cid}`)
+          .set({ ...AUTH, 'X-Instar-Session-Id': s, 'X-Instar-Session-Token': t })
+          .send({
+            resolution: 'self-assert',
+            outcome: 'success',
+            note: 'done',
+            dedupKey: 'slice4-resolve-self-ok',
+          });
+        expect(res.status).toBe(200);
+        expect(res.body.tier).toBe('self-asserted');
+        // Counter decremented.
+        expect(r._getRateStateForTest(s).openCommitments).toBe(0);
+      } finally {
+        cleanup();
+      }
+    });
+
+    it('self-assert rejects a non-creator session', async () => {
+      const { app: a2, cleanup } = makeAppWithResolution();
+      try {
+        const s1 = uuid();
+        const b1 = await request(a2).post('/shared-state/session-bind').set(AUTH).send({ sessionId: s1 });
+        const t1 = b1.body.token;
+        const cid = await createCommitment(a2, s1, t1);
+
+        const s2 = uuid();
+        const b2 = await request(a2).post('/shared-state/session-bind').set(AUTH).send({ sessionId: s2 });
+        const t2 = b2.body.token;
+
+        const res = await request(a2)
+          .post(`/shared-state/resolve/${cid}`)
+          .set({ ...AUTH, 'X-Instar-Session-Id': s2, 'X-Instar-Session-Token': t2 })
+          .send({
+            resolution: 'self-assert',
+            outcome: 'success',
+            dedupKey: 'slice4-resolve-stranger',
+          });
+        expect(res.status).toBe(403);
+        expect(res.body.reason).toBe('creator-mismatch');
+      } finally {
+        cleanup();
+      }
+    });
+
+    it('dispute writes a disputes-pointer entry (not supersedes)', async () => {
+      const { app: a2, cleanup } = makeAppWithResolution();
+      try {
+        const s1 = uuid();
+        const b1 = await request(a2).post('/shared-state/session-bind').set(AUTH).send({ sessionId: s1 });
+        const cid = await createCommitment(a2, s1, b1.body.token);
+
+        const s2 = uuid();
+        const b2 = await request(a2).post('/shared-state/session-bind').set(AUTH).send({ sessionId: s2 });
+        const t2 = b2.body.token;
+
+        const res = await request(a2)
+          .post(`/shared-state/resolve/${cid}`)
+          .set({ ...AUTH, 'X-Instar-Session-Id': s2, 'X-Instar-Session-Token': t2 })
+          .send({
+            resolution: 'dispute',
+            disputeReason: 'this commitment has no real backing',
+            dedupKey: 'slice4-dispute-1',
+          });
+        expect(res.status).toBe(200);
+        expect(res.body.resolution).toBe('dispute');
+
+        // Verify the dispute entry has `disputes` field and NOT `supersedes`.
+        const recent = await request(a2).get('/shared-state/recent').set(AUTH);
+        const disputeEntry = (recent.body.entries as any[]).find(
+          (e) => e.id === res.body.id,
+        );
+        expect(disputeEntry.disputes).toBe(cid);
+        expect(disputeEntry.supersedes).toBeUndefined();
+      } finally {
+        cleanup();
+      }
+    });
+
+    it('dispute cap returns 429 after limit', async () => {
+      const { app: a2, cleanup } = makeAppWithResolution();
+      try {
+        const s1 = uuid();
+        const b1 = await request(a2).post('/shared-state/session-bind').set(AUTH).send({ sessionId: s1 });
+        const cid = await createCommitment(a2, s1, b1.body.token);
+
+        const s2 = uuid();
+        const b2 = await request(a2).post('/shared-state/session-bind').set(AUTH).send({ sessionId: s2 });
+        const hh = { ...AUTH, 'X-Instar-Session-Id': s2, 'X-Instar-Session-Token': b2.body.token };
+
+        // disputesPerSessionPerHour=5 above.
+        for (let i = 1; i <= 5; i++) {
+          const r = await request(a2).post(`/shared-state/resolve/${cid}`).set(hh).send({
+            resolution: 'dispute',
+            disputeReason: `reason ${i}`,
+            dedupKey: `slice4-dispute-cap-${i}`,
+          });
+          expect(r.status).toBe(200);
+        }
+        const over = await request(a2).post(`/shared-state/resolve/${cid}`).set(hh).send({
+          resolution: 'dispute',
+          disputeReason: 'reason 6',
+          dedupKey: 'slice4-dispute-cap-over',
+        });
+        expect(over.status).toBe(429);
+        expect(over.headers['x-cap-reason']).toBe('over-dispute-rate');
+      } finally {
+        cleanup();
+      }
+    });
+
+    it('idempotent replay returns same id with X-Idempotent-Replay: 1', async () => {
+      const { app: a2, cleanup } = makeAppWithResolution();
+      try {
+        const s = uuid();
+        const b = await request(a2).post('/shared-state/session-bind').set(AUTH).send({ sessionId: s });
+        const t = b.body.token;
+        const cid = await createCommitment(a2, s, t);
+        const hh = { ...AUTH, 'X-Instar-Session-Id': s, 'X-Instar-Session-Token': t };
+
+        const first = await request(a2).post(`/shared-state/resolve/${cid}`).set(hh).send({
+          resolution: 'self-assert',
+          outcome: 'success',
+          dedupKey: 'slice4-idempotent',
+        });
+        const second = await request(a2).post(`/shared-state/resolve/${cid}`).set(hh).send({
+          resolution: 'self-assert',
+          outcome: 'success',
+          dedupKey: 'slice4-idempotent',
+        });
+        expect(second.status).toBe(200);
+        expect(second.headers['x-idempotent-replay']).toBe('1');
+        expect(second.body.id).toBe(first.body.id);
+      } finally {
+        cleanup();
+      }
+    });
+
+    it('idempotent replay is session-scoped — session B cannot read session A cached payload', async () => {
+      // Regression for slice-4 reviewer concern: the idempotency cache is
+      // keyed on (sessionId, commitmentId, dedupKey). Session B presenting
+      // session A's dedupKey MUST NOT short-circuit and return A's payload.
+      const { app: a2, cleanup } = makeAppWithResolution();
+      try {
+        const sA = uuid();
+        const bA = await request(a2).post('/shared-state/session-bind').set(AUTH).send({ sessionId: sA });
+        const tA = bA.body.token;
+        const cid = await createCommitment(a2, sA, tA);
+
+        // Session A self-asserts successfully, populating the cache.
+        const first = await request(a2)
+          .post(`/shared-state/resolve/${cid}`)
+          .set({ ...AUTH, 'X-Instar-Session-Id': sA, 'X-Instar-Session-Token': tA })
+          .send({ resolution: 'self-assert', outcome: 'success', dedupKey: 'slice4-xsession' });
+        expect(first.status).toBe(200);
+
+        // Session B replays the same dedupKey — must NOT read A's payload.
+        // Instead, re-auth runs, and B hits creator-mismatch 403.
+        const sB = uuid();
+        const bB = await request(a2).post('/shared-state/session-bind').set(AUTH).send({ sessionId: sB });
+        const tB = bB.body.token;
+        const replay = await request(a2)
+          .post(`/shared-state/resolve/${cid}`)
+          .set({ ...AUTH, 'X-Instar-Session-Id': sB, 'X-Instar-Session-Token': tB })
+          .send({ resolution: 'self-assert', outcome: 'success', dedupKey: 'slice4-xsession' });
+        expect(replay.status).toBe(403);
+        expect(replay.body.reason).toBe('creator-mismatch');
+        expect(replay.headers['x-idempotent-replay']).toBeUndefined();
+      } finally {
+        cleanup();
+      }
+    });
+
+    it('501 on user-resolve (deferred to slice 6)', async () => {
+      const { app: a2, cleanup } = makeAppWithResolution();
+      try {
+        const s = uuid();
+        const b = await request(a2).post('/shared-state/session-bind').set(AUTH).send({ sessionId: s });
+        const t = b.body.token;
+        const cid = await createCommitment(a2, s, t);
+        const res = await request(a2)
+          .post(`/shared-state/resolve/${cid}`)
+          .set({ ...AUTH, 'X-Instar-Session-Id': s, 'X-Instar-Session-Token': t })
+          .send({ resolution: 'user-resolve', outcome: 'success', dedupKey: 'slice4-ur' });
+        expect(res.status).toBe(501);
+        expect(res.headers['x-pending-slice']).toBe('6');
+      } finally {
+        cleanup();
+      }
+    });
+
+    it('404 on unknown commitment id', async () => {
+      const { app: a2, cleanup } = makeAppWithResolution();
+      try {
+        const s = uuid();
+        const b = await request(a2).post('/shared-state/session-bind').set(AUTH).send({ sessionId: s });
+        const t = b.body.token;
+        const res = await request(a2)
+          .post('/shared-state/resolve/000000000000')
+          .set({ ...AUTH, 'X-Instar-Session-Id': s, 'X-Instar-Session-Token': t })
+          .send({ resolution: 'self-assert', outcome: 'success', dedupKey: 'slice4-404' });
+        expect(res.status).toBe(404);
+      } finally {
+        cleanup();
+      }
+    });
+
+    it('503 when resolutionEnabled=false', async () => {
+      // Use the top-level app which has resolutionEnabled unset (defaults false).
+      const sid3 = uuid();
+      const b = await request(app).post('/shared-state/session-bind').set(AUTH).send({ sessionId: sid3 });
+      const res = await request(app)
+        .post('/shared-state/resolve/abc123abc123')
+        .set({ ...AUTH, 'X-Instar-Session-Id': sid3, 'X-Instar-Session-Token': b.body.token })
+        .send({ resolution: 'self-assert', outcome: 'success', dedupKey: 'slice4-disabled' });
+      expect(res.status).toBe(503);
+      expect(res.headers['x-disabled']).toBe('resolution');
+    });
+  });
+
   describe('session-bind-confirm (slice 2)', () => {
     it('clears hook-in-progress flag', async () => {
       const sid = uuid();

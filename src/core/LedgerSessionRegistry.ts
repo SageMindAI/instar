@@ -537,6 +537,86 @@ export class LedgerSessionRegistry {
     }
   }
 
+  // ── Idempotency cache (slice 4 — dedupKey replay) ────────────────
+  //
+  // Caches (sessionId, commitmentId, dedupKey) → result for retries.
+  // 24h TTL matches the dedup index's rolling window.
+  //
+  // CRITICAL: the cache is keyed on the full tuple, not dedupKey
+  // alone, to prevent cross-session result leaks. Second-pass reviewer
+  // (slice 4) caught: with dedupKey-only keys, session B presenting
+  // session A's dedupKey would short-circuit and return A's cached
+  // payload before authorization ran. Keying on the tuple means B's
+  // cache lookup misses, it re-authorizes, and hits the creator-
+  // mismatch 403 or dispute-cap check as intended.
+  //
+  // In-memory — a server restart drops the cache; callers that retry
+  // across restart see v1 dedup (409), not idempotent replay.
+
+  private idempotencyCache: Map<string, { at: number; payload: unknown }> = new Map();
+
+  private idempotencyKey(
+    sessionId: string,
+    commitmentId: string,
+    dedupKey: string,
+  ): string {
+    return `${sessionId}\x00${commitmentId}\x00${dedupKey}`;
+  }
+
+  rememberIdempotent(
+    sessionId: string,
+    commitmentId: string,
+    dedupKey: string,
+    payload: unknown,
+  ): void {
+    this.idempotencyCache.set(this.idempotencyKey(sessionId, commitmentId, dedupKey), {
+      at: this.now(),
+      payload,
+    });
+    this.pruneIdempotency();
+  }
+
+  getIdempotent(
+    sessionId: string,
+    commitmentId: string,
+    dedupKey: string,
+  ): unknown | null {
+    const k = this.idempotencyKey(sessionId, commitmentId, dedupKey);
+    const rec = this.idempotencyCache.get(k);
+    if (!rec) return null;
+    if (this.now() - rec.at > ONE_DAY_MS) {
+      this.idempotencyCache.delete(k);
+      return null;
+    }
+    return rec.payload;
+  }
+
+  private pruneIdempotency(): void {
+    const t = this.now();
+    for (const [k, v] of this.idempotencyCache) {
+      if (t - v.at > ONE_DAY_MS) this.idempotencyCache.delete(k);
+    }
+  }
+
+  // ── Per-session dispute-rate cap (slice 4) ───────────────────────
+  private disputeTimestamps: Map<string, number[]> = new Map();
+
+  checkDisputeRate(sessionId: string, perHourLimit: number): 'over-dispute-rate' | null {
+    const t = this.now();
+    const cutoff = t - ONE_HOUR_MS;
+    const arr = (this.disputeTimestamps.get(sessionId) ?? []).filter((ts) => ts > cutoff);
+    if (arr.length >= perHourLimit) return 'over-dispute-rate';
+    return null;
+  }
+
+  recordDispute(sessionId: string): void {
+    const t = this.now();
+    const cutoff = t - ONE_HOUR_MS;
+    const arr = (this.disputeTimestamps.get(sessionId) ?? []).filter((ts) => ts > cutoff);
+    arr.push(t);
+    this.disputeTimestamps.set(sessionId, arr);
+  }
+
   /** Test-only: read rate-tracker state. */
   _getRateStateForTest(sessionId: string): {
     writesInLastMinute: number;
