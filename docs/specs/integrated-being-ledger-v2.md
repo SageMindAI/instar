@@ -4,13 +4,14 @@ slug: "integrated-being-ledger-v2"
 author: "echo"
 created: "2026-04-16"
 supersedes: "docs/specs/integrated-being-ledger-v1.md (remains in force; v2 is additive)"
-review-convergence: null
+review-convergence: "partial — 2026-04-17T18:36:13Z"
 review-iterations: 3
-review-completed-at: null
-review-report: null
-approved: false
-approved-by: null
-approved-at: null
+review-completed-at: "2026-04-17T18:36:13Z"
+review-report: "docs/specs/reports/integrated-being-ledger-v2-convergence.md"
+approved: true
+approved-by: "justin (via 'please proceed here' authorization, 2026-04-17)"
+approved-at: "2026-04-17T18:36:13Z"
+approval-note: "Partial convergence accepted. 4/4 internal reviewers converged iter 3; Grok APPROVE 10/10; GPT/Gemini CONDITIONAL with 3 architectural items deferred to v2.1 (session-bind privilege separation, formal status state machine, interactive-bind challenge-response). v2 ships behind v2Enabled=false for 7-day observation period. See convergence report for full details."
 ---
 
 # Integrated-Being Ledger v2
