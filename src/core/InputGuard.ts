@@ -18,6 +18,7 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
+import type { IntelligenceProvider } from './types.js';
 
 // ── Types ────────────────────────────────────────────────────────────
 
@@ -32,7 +33,13 @@ export interface InputGuardConfig {
   topicCoherenceReview?: boolean;
   /** Action on suspicious messages: 'warn' (default), 'block', 'log' */
   action?: 'warn' | 'block' | 'log';
-  /** Timeout for LLM review in ms (default: 3000) */
+  /**
+   * Timeout for LLM review in ms. Values below 8000 are clamped up to 8000
+   * — the CLI-subscription provider spawns a subprocess per call whose
+   * cold-start p99 can exceed 3000ms, so a below-floor value would silently
+   * regress Layer 2 from "review ran" to "review timed out." Explicit values
+   * above 8000 take effect as-configured. Default: 8000 (the floor).
+   */
   reviewTimeout?: number;
 }
 
@@ -135,7 +142,7 @@ export class InputGuard {
   private config: InputGuardConfig;
   private stateDir: string;
   private securityLogPath: string;
-  private apiKey: string | undefined;
+  private intelligence: IntelligenceProvider | null;
   private attentionQueueFn: ((title: string, body: string) => void) | null = null;
   private topicMemoryFn: ((topicId: number, limit: number) => Promise<string[]>) | null = null;
   private sessionCreationTimes: Map<string, number> = new Map();
@@ -145,11 +152,17 @@ export class InputGuard {
   constructor(options: {
     config: InputGuardConfig;
     stateDir: string;
-    apiKey?: string;
+    /**
+     * Shared IntelligenceProvider. Layer 2 topic-coherence review runs exclusively
+     * through this abstraction — InputGuard does not call the Anthropic API
+     * directly. When absent, Layer 2 fails closed-to-warn (a degradation log is
+     * emitted) and the session continues without topic-coherence supervision.
+     */
+    intelligence?: IntelligenceProvider;
   }) {
     this.config = options.config;
     this.stateDir = options.stateDir;
-    this.apiKey = options.apiKey;
+    this.intelligence = options.intelligence ?? null;
     this.securityLogPath = path.join(options.stateDir, 'security.jsonl');
   }
 
@@ -248,8 +261,15 @@ export class InputGuard {
     text: string,
     binding: TopicBinding,
   ): Promise<InputReviewResult> {
-    if (!this.config.topicCoherenceReview || !this.apiKey) {
-      return { verdict: 'coherent', reason: 'review disabled or no API key', confidence: 0, layer: 'topic-coherence' };
+    if (!this.config.topicCoherenceReview) {
+      return { verdict: 'coherent', reason: 'review disabled', confidence: 0, layer: 'topic-coherence' };
+    }
+    if (!this.intelligence) {
+      // No LLM transport available — visible degradation instead of silent no-op.
+      // Subscription-first: the Anthropic API is only reachable through the shared
+      // provider abstraction; InputGuard no longer carries its own direct transport.
+      this.logDegradation('topic coherence review skipped: no IntelligenceProvider');
+      return { verdict: 'coherent', reason: 'no LLM available — review skipped', confidence: 0, layer: 'topic-coherence' };
     }
 
     // Get recent messages for context
@@ -286,63 +306,81 @@ Evaluate:
 Respond with ONLY valid JSON (no markdown, no explanation):
 {"verdict": "COHERENT" or "SUSPICIOUS", "reason": "Brief explanation", "confidence": 0.0 to 1.0}`;
 
-    const timeout = this.config.reviewTimeout ?? 3000;
+    // Effective timeout is a FLOOR, not a hard default: `max(config, 8000ms)`.
+    // Rationale: the CLI-subscription provider spawns a subprocess per call whose
+    // cold-start p99 can exceed 3000ms. Honoring a user-configured value below
+    // the floor would silently regress Layer 2 from "LLM review ran" to "LLM
+    // review timed out" on the subscription path. The floor is intentional: a
+    // below-floor config value is clamped up. Explicit config above 8s raises it.
+    // (Warn-only action makes a longer review benign — no user-visible latency.)
+    const FLOOR_MS = 8000;
+    const timeout = Math.max(this.config.reviewTimeout ?? 0, FLOOR_MS);
 
     try {
-      const controller = new AbortController();
-      const timer = setTimeout(() => controller.abort(), timeout);
-
-      const response = await fetch('https://api.anthropic.com/v1/messages', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-api-key': this.apiKey!,
-          'anthropic-version': '2023-06-01',
-        },
-        body: JSON.stringify({
-          model: 'claude-haiku-4-5-20251001',
-          max_tokens: 150,
+      const rawText = await Promise.race([
+        this.intelligence.evaluate(prompt, {
+          model: 'fast',
+          maxTokens: 150,
           temperature: 0,
-          messages: [{ role: 'user', content: prompt }],
         }),
-        signal: controller.signal,
-      });
-
-      clearTimeout(timer);
-
-      if (!response.ok) {
-        const errorText = await response.text().catch(() => 'unknown');
-        throw new Error(`API ${response.status}: ${errorText}`);
-      }
-
-      const data = await response.json() as {
-        content: Array<{ type: string; text?: string }>;
-      };
-
-      const textBlock = data.content?.find(b => b.type === 'text');
-      if (!textBlock?.text) {
-        return { verdict: 'coherent', reason: 'Empty response', confidence: 0, layer: 'topic-coherence' };
-      }
-
-      try {
-        const parsed = JSON.parse(textBlock.text);
-        return {
-          verdict: parsed.verdict?.toLowerCase() === 'suspicious' ? 'suspicious' : 'coherent',
-          reason: parsed.reason || 'No reason provided',
-          confidence: typeof parsed.confidence === 'number' ? parsed.confidence : 0.5,
-          layer: 'topic-coherence',
-        };
-      } catch {
-        // JSON parse failed — fail open
-        this.logDegradation('LLM response was not valid JSON', textBlock.text.slice(0, 100));
-        return { verdict: 'coherent', reason: 'Parse error — fail open', confidence: 0, layer: 'topic-coherence' };
-      }
+        new Promise<never>((_, reject) =>
+          setTimeout(() => reject(new Error(`Review timeout after ${timeout}ms`)), timeout),
+        ),
+      ]);
+      return this.parseReviewResponse(rawText);
     } catch (err) {
-      // LLM call failed — fail open with logging
+      // Transport flake (timeout, network, subprocess failure) — fail open at the
+      // transport boundary so routine infrastructure hiccups don't produce warn-spam.
+      // Authority-level dissent (suspicious verdict) would have come through the
+      // parse path above. Degradation logging + error tracking surfaces persistent
+      // transport failure via the attention queue.
       const msg = err instanceof Error ? err.message : String(err);
       this.logDegradation(`LLM review failed: ${msg}`);
       this.trackErrors();
       return { verdict: 'coherent', reason: `Review failed: ${msg} — fail open`, confidence: 0, layer: 'topic-coherence' };
+    }
+  }
+
+  /**
+   * Parse the LLM's raw response into an InputReviewResult.
+   *
+   * Fail-mode policy:
+   *   - Empty response → coherent (authority declined; indistinguishable from
+   *     transport absence, which is already logged elsewhere).
+   *   - Valid JSON → parsed verdict/reason/confidence.
+   *   - Malformed JSON → suspicious with low confidence AND a degradation log.
+   *     Rationale: under warn-only action, fail-closed-to-warn surfaces a
+   *     non-blocking system-reminder rather than silently passing content that
+   *     may have been crafted to produce malformed authority output.
+   */
+  private parseReviewResponse(rawText: string): InputReviewResult {
+    if (!rawText || rawText.trim().length === 0) {
+      return { verdict: 'coherent', reason: 'Empty response', confidence: 0, layer: 'topic-coherence' };
+    }
+
+    let cleaned = rawText.trim();
+    if (cleaned.startsWith('```')) {
+      cleaned = cleaned.replace(/^```(?:json)?\n?/, '').replace(/\n?```$/, '');
+    }
+    const jsonMatch = cleaned.match(/\{[\s\S]*\}/);
+    const jsonText = jsonMatch ? jsonMatch[0] : cleaned;
+
+    try {
+      const parsed = JSON.parse(jsonText);
+      return {
+        verdict: parsed.verdict?.toLowerCase() === 'suspicious' ? 'suspicious' : 'coherent',
+        reason: parsed.reason || 'No reason provided',
+        confidence: typeof parsed.confidence === 'number' ? parsed.confidence : 0.5,
+        layer: 'topic-coherence',
+      };
+    } catch {
+      this.logDegradation('LLM response was not valid JSON', rawText.slice(0, 100));
+      return {
+        verdict: 'suspicious',
+        reason: 'Parse error — fail-closed-to-warn',
+        confidence: 0.3,
+        layer: 'topic-coherence',
+      };
     }
   }
 

@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { InputGuard, type TopicBinding } from '../../src/core/InputGuard.js';
 
 const BINDING: TopicBinding = {
@@ -183,6 +183,164 @@ describe('InputGuard', () => {
       const text = '[telegram:42] This is for a different topic';
       expect(guard.checkProvenance(text, BINDING)).toBe('mismatched-tag');
       // Blocked — no further layers needed
+    });
+  });
+
+  // ── Layer 2: Subscription-First Intelligence Routing ────────────
+  //
+  // Regression tests for the principle: every LLM-powered decision in instar
+  // flows through the shared IntelligenceProvider. InputGuard does not carry
+  // its own direct Anthropic-API transport — there is exactly one path to the
+  // LLM, and it's through the provider abstraction. Subscription-first is
+  // enforced at the provider-selection layer, not in each consumer.
+
+  describe('topic coherence review — IntelligenceProvider routing', () => {
+    const originalFetch = globalThis.fetch;
+
+    afterEach(() => {
+      globalThis.fetch = originalFetch;
+    });
+
+    it('routes through IntelligenceProvider, never hitting fetch', async () => {
+      const fetchSpy = vi.fn(() => {
+        throw new Error('fetch must not be called from InputGuard');
+      });
+      globalThis.fetch = fetchSpy as unknown as typeof fetch;
+
+      const evaluate = vi.fn(async () =>
+        JSON.stringify({ verdict: 'COHERENT', reason: 'on topic', confidence: 0.9 }),
+      );
+
+      const withProvider = new InputGuard({
+        config: { enabled: true, topicCoherenceReview: true },
+        stateDir: '/tmp/instar-test-inputguard-provider',
+        intelligence: { evaluate },
+      });
+
+      const result = await withProvider.reviewTopicCoherence('some untagged message', BINDING);
+
+      expect(evaluate).toHaveBeenCalledTimes(1);
+      expect(fetchSpy).not.toHaveBeenCalled();
+      expect(result.verdict).toBe('coherent');
+      expect(result.reason).toBe('on topic');
+    });
+
+    it('passes IntelligenceProvider suspicious verdicts through', async () => {
+      const evaluate = vi.fn(async () =>
+        JSON.stringify({ verdict: 'SUSPICIOUS', reason: 'off topic', confidence: 0.8 }),
+      );
+
+      const guardWithProvider = new InputGuard({
+        config: { enabled: true, topicCoherenceReview: true },
+        stateDir: '/tmp/instar-test-inputguard-suspicious',
+        intelligence: { evaluate },
+      });
+
+      const result = await guardWithProvider.reviewTopicCoherence('msg', BINDING);
+      expect(result.verdict).toBe('suspicious');
+      expect(result.confidence).toBe(0.8);
+    });
+
+    it('tolerates IntelligenceProvider responses wrapped in markdown fences', async () => {
+      const evaluate = vi.fn(async () =>
+        '```json\n{"verdict":"COHERENT","reason":"fine","confidence":0.5}\n```',
+      );
+
+      const guardWithProvider = new InputGuard({
+        config: { enabled: true, topicCoherenceReview: true },
+        stateDir: '/tmp/instar-test-inputguard-fenced',
+        intelligence: { evaluate },
+      });
+
+      const result = await guardWithProvider.reviewTopicCoherence('msg', BINDING);
+      expect(result.verdict).toBe('coherent');
+      expect(result.reason).toBe('fine');
+    });
+
+    it('fail-closed-to-warn on malformed JSON: suspicious verdict with low confidence + degradation log', async () => {
+      const evaluate = vi.fn(async () => 'this is not JSON at all');
+      const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+      const guardWithProvider = new InputGuard({
+        config: { enabled: true, topicCoherenceReview: true },
+        stateDir: '/tmp/instar-test-inputguard-malformed',
+        intelligence: { evaluate },
+      });
+
+      const result = await guardWithProvider.reviewTopicCoherence('msg', BINDING);
+      // Crafted-to-malform output is the attacker's bypass of an authority that
+      // can't speak. We surface a low-confidence suspicious signal rather than
+      // pass silently — warn-only action means this is a system-reminder, not a block.
+      expect(result.verdict).toBe('suspicious');
+      expect(result.confidence).toBeLessThanOrEqual(0.5);
+      expect(result.reason).toMatch(/parse error|fail-closed-to-warn/i);
+      const degradationLogged = errorSpy.mock.calls.some((args) =>
+        args.some((arg) => typeof arg === 'string' && arg.includes('DEGRADATION')),
+      );
+      expect(degradationLogged).toBe(true);
+      errorSpy.mockRestore();
+    });
+
+    it('empty provider response → coherent (authority declined, not fail-closed)', async () => {
+      const evaluate = vi.fn(async () => '');
+      const guardWithProvider = new InputGuard({
+        config: { enabled: true, topicCoherenceReview: true },
+        stateDir: '/tmp/instar-test-inputguard-empty',
+        intelligence: { evaluate },
+      });
+
+      const result = await guardWithProvider.reviewTopicCoherence('msg', BINDING);
+      expect(result.verdict).toBe('coherent');
+      expect(result.reason).toBe('Empty response');
+    });
+
+    it('provider error → coherent with degradation log (transport flake ≠ authority dissent)', async () => {
+      const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+      const throwingEvaluate = vi.fn(async () => {
+        throw new Error('simulated transport failure');
+      });
+      const guardWithThrow = new InputGuard({
+        config: { enabled: true, topicCoherenceReview: true },
+        stateDir: '/tmp/instar-test-inputguard-throw',
+        intelligence: { evaluate: throwingEvaluate },
+      });
+
+      const result = await guardWithThrow.reviewTopicCoherence('msg', BINDING);
+      // Transport-layer failures fail open at the transport boundary so routine
+      // network flakes don't produce warn-spam. Authority-level dissent would have
+      // come through the parse path with a suspicious verdict.
+      expect(result.verdict).toBe('coherent');
+      expect(result.reason).toMatch(/fail open/i);
+      const degradationLogged = errorSpy.mock.calls.some((args) =>
+        args.some((arg) => typeof arg === 'string' && arg.includes('DEGRADATION')),
+      );
+      expect(degradationLogged).toBe(true);
+      errorSpy.mockRestore();
+    });
+
+    it('no provider supplied → coherent + degradation log (no silent no-op)', async () => {
+      const fetchSpy = vi.fn(() => {
+        throw new Error('fetch must not be called from InputGuard');
+      });
+      globalThis.fetch = fetchSpy as unknown as typeof fetch;
+
+      const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+      const noLlm = new InputGuard({
+        config: { enabled: true, topicCoherenceReview: true },
+        stateDir: '/tmp/instar-test-inputguard-nollm',
+      });
+
+      const result = await noLlm.reviewTopicCoherence('some message', BINDING);
+      expect(fetchSpy).not.toHaveBeenCalled();
+      expect(result.verdict).toBe('coherent');
+      expect(result.reason).toContain('no LLM available');
+      const degradationLogged = errorSpy.mock.calls.some((args) =>
+        args.some((arg) => typeof arg === 'string' && arg.includes('DEGRADATION')),
+      );
+      expect(degradationLogged).toBe(true);
+      errorSpy.mockRestore();
     });
   });
 });

@@ -1,53 +1,38 @@
 # Upgrade Guide — vNEXT
 
 <!-- bump: patch -->
-<!-- Valid values: patch, minor, major -->
-<!-- patch = bug fixes, refactors, test additions, doc updates -->
-<!-- minor = new features, new APIs, new capabilities (backwards-compatible) -->
-<!-- major = breaking changes to existing APIs or behavior -->
 
 ## What Changed
 
-<!-- Describe what changed technically. What new features, APIs, behavioral changes? -->
-<!-- Write this for the AGENT — they need to understand the system deeply. -->
+Closes the "subscription-first intelligence" loop for the Input Guard. Previously the Input Guard's Layer 2 topic-coherence reviewer called the Anthropic API directly using `ANTHROPIC_API_KEY`. On machines running only the Claude CLI subscription, this meant Layer 2 silently no-opped — the guard wasn't reviewing cross-topic messages at all, and nothing surfaced the degraded state. This release routes Input Guard Layer 2 through the shared `IntelligenceProvider` abstraction. There is now exactly one path to the LLM from the guard (through the provider), and subscription-first is enforced at the single provider-construction layer rather than by each consumer.
+
+Related hardenings that landed in the same change after multi-reviewer spec review:
+
+- The direct Anthropic-API fetch path is removed from `InputGuard` entirely (no `apiKey` constructor parameter, no `fetch('https://api.anthropic.com/...')` call).
+- Malformed LLM responses now produce a `suspicious` verdict with low confidence and a degradation log, rather than a silent `coherent`. Under the default `warn` action this surfaces a non-blocking system-reminder — an attacker-crafted deterministic bypass of Layer 2 is closed.
+- Effective review timeout is floored at 8 seconds to accommodate CLI subprocess cold-start p99 (the pre-change 3000ms default caused more timeout-driven fail-opens on the subscription path).
+- When no LLM transport is available at server startup, the server emits a structured `DegradationReporter.report(...)` event so the condition is visible via the attention queue, Telegram, and feedback — not just a yellow console line. The external impact string is deliberately generic to avoid broadcasting a "which defenses are down" map on public channels; the detailed enumeration stays in local logs.
+
+Deferred to named follow-up specs (with rationale in the convergence report): consecutive-failure escalation to sticky-suspicious state; IntelligenceProvider-level concurrency cap; subprocess abort-signal plumbing; CLI argv/stdin isolation verification; dashboard/doctor visibility for guard backend.
 
 ## What to Tell Your User
 
-<!-- Write talking points the agent should relay to their user. -->
-<!-- This should be warm, conversational, user-facing — not a changelog. -->
-<!-- Focus on what THEY can now do, not internal plumbing. -->
-<!--                                                                    -->
-<!-- PROHIBITED in this section (will fail validation):                 -->
-<!--   camelCase config keys: silentReject, maxRetries, telegramNotify -->
-<!--   Inline code backtick references like silentReject: false        -->
-<!--   Fenced code blocks                                              -->
-<!--   Instructions to edit files or run commands                      -->
-<!--                                                                    -->
-<!-- CORRECT style: "I can turn that on for you" not "set X to false"  -->
-<!-- The agent relays this to their user — keep it human.              -->
-
-- **[Feature name]**: "[Brief, friendly description of what this means for the user]"
+- **Cross-topic injection defense now works on subscription-only machines**: "Your Input Guard's topic-coherence check was only running on machines with an Anthropic API key. If you're on the Claude CLI subscription, Layer 2 has been silently skipped. After this update it actually runs — you're getting the defense you already had turned on."
+- **Degraded LLM state is now loud**: "If the agent starts up and can't reach an LLM at all, you'll see it now — in the attention queue, on Telegram, and in the feedback system. No more silently running without the defenses you configured."
+- **Slightly longer coherence-review budget**: "The topic-coherence check now gives the model up to 8 seconds to respond instead of 3. This is because the subscription path starts a subprocess for each check, and 3 seconds wasn't enough. It doesn't affect how fast I respond to you — only how long the background check takes before it gives up."
 
 ## Summary of New Capabilities
 
 | Capability | How to Use |
 |-----------|-----------|
-| [Capability] | [Endpoint, command, or "automatic"] |
+| Input Guard Layer 2 on CLI subscription | automatic — runs whenever Input Guard is enabled and the agent has either a Claude CLI or an Anthropic API key |
+| Startup degradation alert when no LLM is available | automatic — fires via DegradationReporter on server startup |
+| Fail-closed-to-warn on malformed review responses | automatic — warn action stays non-blocking; a system-reminder surfaces instead of silent pass |
 
 ## Evidence
 
-<!-- REQUIRED if this release claims to fix a bug. -->
-<!-- Unit tests passing is NOT evidence. Provide ONE of: -->
-<!--   (a) Reproduction steps + observed before/after on a live system. -->
-<!--       Include log excerpts, observed command output, or behavior -->
-<!--       description. Make it specific enough that a future reader can -->
-<!--       re-run it and see the same thing. -->
-<!--   (b) "Not reproducible in dev — [concrete reason]" if the failure -->
-<!--       mode truly can't be exercised locally (race conditions, -->
-<!--       event-driven paths requiring external signals, etc). -->
-<!--                                                                 -->
-<!-- If this release doesn't claim a bug fix (pure feature / refactor), -->
-<!-- leave this section blank or delete it — it's only enforced when -->
-<!-- "What Changed" describes a fix. -->
+Reproduction of the pre-fix silent no-op: on a machine with Claude CLI configured and `ANTHROPIC_API_KEY` unset, check `.instar/security.jsonl` after a cross-topic injection attempt. Before fix: no entry for `input-guard-degradation` noting the skipped review; the untagged message passes without Layer 2 evaluation. After fix: the same machine now routes the review through the shared `IntelligenceProvider`, producing an entry in `security.jsonl` with the Layer 2 verdict (`coherent` or `suspicious`) and reasoning. On a machine with neither transport, `logs/degradations.json` gains a `SharedIntelligenceProvider` entry at startup that was absent before.
 
-[Describe reproduction + verified fix, OR "Not reproducible in dev — [concrete reason]"]
+Verified in unit tests: `tests/unit/InputGuard.test.ts` describe block `topic coherence review — IntelligenceProvider routing` — 6 new regression tests asserting: (1) `fetch` is never called when a provider is supplied, (2) suspicious verdicts pass through, (3) markdown-fenced responses parse, (4) malformed JSON → `suspicious` with degradation log, (5) empty response → coherent, (6) transport throw → coherent with degradation log, (7) no-provider → coherent with degradation log. All 35 unit + 36 e2e InputGuard tests pass.
+
+Full side-effects review with 2-iteration multi-reviewer convergence: `upgrades/side-effects/0.28.51.md`. Convergence report: `docs/specs/reports/subscription-first-input-guard-convergence.md`.

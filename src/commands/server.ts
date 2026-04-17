@@ -1984,27 +1984,9 @@ export async function startServer(options: StartOptions): Promise<void> {
 
     const sessionManager = new SessionManager(config.sessions, state);
 
-    // Input Guard — cross-topic injection defense (Layer 1 + 1.5 + 2)
-    if (config.inputGuard?.enabled !== false) {
-      const guardConfig = config.inputGuard ?? { enabled: true };
-      const anthropicKey = process.env['ANTHROPIC_API_KEY']?.trim();
-      const { InputGuard } = await import('../core/InputGuard.js');
-      const inputGuard = new InputGuard({
-        config: {
-          enabled: true,
-          provenanceCheck: guardConfig.provenanceCheck ?? true,
-          injectionPatterns: guardConfig.injectionPatterns ?? true,
-          topicCoherenceReview: guardConfig.topicCoherenceReview ?? true,
-          action: guardConfig.action ?? 'warn',
-          reviewTimeout: guardConfig.reviewTimeout ?? 3000,
-        },
-        stateDir: config.stateDir,
-        apiKey: anthropicKey,
-      });
-      const registryPath = path.join(config.stateDir, 'topic-session-registry.json');
-      sessionManager.setInputGuard(inputGuard, registryPath);
-      console.log(pc.green(`  Input Guard: enabled (action: ${guardConfig.action ?? 'warn'})`));
-    }
+    // Input Guard is constructed later (after sharedIntelligence is available)
+    // so the topic coherence reviewer can route through the IntelligenceProvider
+    // abstraction instead of calling Anthropic directly.
 
     // TopicResumeMap: persist Claude session UUIDs across session restarts.
     // When a session is killed/restarted, we save its UUID so the next spawn
@@ -2062,11 +2044,55 @@ export async function startServer(options: StartOptions): Promise<void> {
       console.log(pc.gray(`  Intelligence: ${intelligenceSource}`));
     } else {
       console.log(pc.yellow('  Intelligence: none (no Claude CLI, no API key) — LLM-gated features degraded'));
+      // Visible degradation — every downstream LLM-gated feature depends on this.
+      // The DegradationReporter routes to console, disk, Telegram alert, and feedback.
+      // Keep the externally-rendered impact string generic; the detailed
+      // capability-down enumeration (tone gate, input guard, coherence gate, stall
+      // triage, job reflection) stays in the yellow console line above and the
+      // local degradations.json log. We don't broadcast a "which defenses are down"
+      // checklist to Telegram/feedback channels.
+      const { DegradationReporter } = await import('../monitoring/DegradationReporter.js');
+      DegradationReporter.getInstance().report({
+        feature: 'SharedIntelligenceProvider',
+        primary: 'Shared LLM provider (Claude CLI subscription by default, Anthropic API opt-in)',
+        fallback: 'Heuristic-only operation for LLM-gated features',
+        reason: 'No LLM transport configured on this machine (see local startup logs for detail).',
+        impact: 'LLM-gated features degraded; defense-in-depth reduced. See local logs for the affected feature list.',
+      });
     }
 
     // Wire intelligence into git sync for LLM conflict resolution (Tier 1 → 2)
     if (gitSync && sharedIntelligence) {
       gitSync.setIntelligence(sharedIntelligence);
+    }
+
+    // Input Guard — cross-topic injection defense (Layer 1 + 1.5 + 2).
+    // Constructed AFTER sharedIntelligence so the topic-coherence reviewer routes
+    // through the IntelligenceProvider (subscription-first). InputGuard no longer
+    // carries a direct Anthropic API path — all LLM usage flows through the shared
+    // provider abstraction, enforcing the subscription-first principle at the
+    // single provider-selection layer rather than in each consumer.
+    if (config.inputGuard?.enabled !== false) {
+      const guardConfig = config.inputGuard ?? { enabled: true };
+      const { InputGuard } = await import('../core/InputGuard.js');
+      const inputGuard = new InputGuard({
+        config: {
+          enabled: true,
+          provenanceCheck: guardConfig.provenanceCheck ?? true,
+          injectionPatterns: guardConfig.injectionPatterns ?? true,
+          topicCoherenceReview: guardConfig.topicCoherenceReview ?? true,
+          action: guardConfig.action ?? 'warn',
+          reviewTimeout: guardConfig.reviewTimeout ?? 3000,
+        },
+        stateDir: config.stateDir,
+        intelligence: sharedIntelligence,
+      });
+      const registryPath = path.join(config.stateDir, 'topic-session-registry.json');
+      sessionManager.setInputGuard(inputGuard, registryPath);
+      const reviewBackend = sharedIntelligence
+        ? 'via shared IntelligenceProvider'
+        : 'provenance + patterns only (no LLM review)';
+      console.log(pc.green(`  Input Guard: enabled (action: ${guardConfig.action ?? 'warn'}, ${reviewBackend})`));
     }
 
     let relationships: RelationshipManager | undefined;
@@ -4211,6 +4237,8 @@ export async function startServer(options: StartOptions): Promise<void> {
     const COMPACTION_RESUME_PROMPT =
       'Your session just went through context compaction. Read the recent messages in this topic to re-orient, briefly let the user know compaction occurred, then continue where you left off.';
 
+    const { isSystemOrProxyMessage, findLastRealMessage } = await import('../messaging/shared/isSystemOrProxyMessage.js');
+
     const recoverCompactedSession = async (sessionName: string, triggerLabel: string): Promise<boolean> => {
       if (!sessionManager.isSessionAlive(sessionName)) return false;
 
@@ -4218,9 +4246,15 @@ export async function startServer(options: StartOptions): Promise<void> {
       if (telegram) {
         const topicId = telegram.getTopicForSession(sessionName);
         if (topicId) {
-          const history = telegram.getTopicHistory(topicId, 5);
-          const lastMsg = history[history.length - 1];
-          if (lastMsg?.fromUser) {
+          // Walk history backward, skipping PresenceProxy standby messages and
+          // server-emitted delivery/lifecycle acks. Those are from-agent but
+          // they are NOT real responses — treating them as "agent answered"
+          // is what let this recovery path silently decline for 15 minutes
+          // while the user's question sat unanswered. See
+          // isSystemOrProxyMessage / findLastRealMessage for the canonical filter.
+          const history = telegram.getTopicHistory(topicId, 20);
+          const lastReal = findLastRealMessage(history);
+          if (lastReal?.fromUser) {
             console.log(`[CompactionResume] (${triggerLabel}) topic ${topicId} session "${sessionName}" has unanswered message — recovering`);
             // Direct injection with topic tag so InputGuard accepts it.
             const tagged = `[telegram:${topicId}] ${COMPACTION_RESUME_PROMPT}`;
@@ -4494,7 +4528,10 @@ export async function startServer(options: StartOptions): Promise<void> {
         const messagesLogPath = path.join(config.stateDir, 'telegram-messages.jsonl');
         const slackMessagesLogPath = path.join(config.stateDir, 'slack-messages.jsonl');
 
-        // Shared helper: check a messages log file for agent responses after a timestamp
+        // Shared helper: check a messages log file for agent responses after a timestamp.
+        // System/proxy-message filtering is delegated to isSystemOrProxyMessage so all
+        // three callsites (this one, PresenceProxy.isSystemMessage, and the compaction
+        // recoverFn) stay in sync.
         const checkLogForAgentResponse = (logPath: string, topicId: number, sinceIso: string): boolean => {
           try {
             const content = fs.readFileSync(logPath, 'utf-8');
@@ -4507,12 +4544,7 @@ export async function startServer(options: StartOptions): Promise<void> {
                 const matchesTopic = msg.topicId === topicId
                   || (topicId < 0 && msg.channelId && slackChannelToSyntheticId(String(msg.channelId)) === topicId);
                 if (matchesTopic && !msg.fromUser && msg.timestamp > sinceIso) {
-                  const t = (msg.text || '').trim();
-                  const isSystem = t === '✓ Delivered' || t.startsWith('✓ Delivered')
-                    || t.startsWith('🔄 Session restarting') || t === 'Session respawned.'
-                    || t === 'Session terminated.' || t.startsWith('Send a new message to start')
-                    || t.startsWith('🔭');
-                  if (!isSystem) return true;
+                  if (!isSystemOrProxyMessage(msg.text)) return true;
                 }
               } catch { /* skip malformed lines */ }
             }
