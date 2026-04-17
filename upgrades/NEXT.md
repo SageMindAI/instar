@@ -1,59 +1,53 @@
 # Upgrade Guide — vNEXT
 
 <!-- bump: patch -->
+<!-- Valid values: patch, minor, major -->
+<!-- patch = bug fixes, refactors, test additions, doc updates -->
+<!-- minor = new features, new APIs, new capabilities (backwards-compatible) -->
+<!-- major = breaking changes to existing APIs or behavior -->
 
 ## What Changed
 
-Default skills now use a runtime-expandable `${INSTAR_PORT:-NNNN}` pattern in
-their `http://localhost:PORT/...` URLs instead of a port hardcoded at install
-time. This unblocks agents whose server runs on a non-default port.
-
-**Background**: `installBuiltinSkills` templated the server port into each
-generated `.claude/skills/*/SKILL.md` at install time. If the user later
-changed `.instar/config.json#port`, every curl call in every default skill
-continued pointing at the stale port, silently failing with `ECONNREFUSED`.
-One agent running on port 4041 had 25 hardcoded `localhost:4040` references
-across 11 skills, turning short reflection/health-check runs into 75-second
-timeouts.
-
-**The fix is twofold**:
-1. `installBuiltinSkills` in `src/commands/init.ts` now emits URLs as
-   `http://localhost:${INSTAR_PORT:-4040}/...` so the shell expands the port
-   at skill-execute time — respecting `INSTAR_PORT` if set, otherwise
-   falling back to the port configured at install.
-2. A new `PostUpdateMigrator.migrateSkillPortHardcoding()` scans existing
-   default-skill files for hardcoded `localhost:NNNN` URLs and rewrites
-   them to the dynamic pattern. It is idempotent, scoped to the known
-   default-skill set (so custom skills are never touched), and preserves
-   the original port as the fallback default.
+<!-- Describe what changed technically. What new features, APIs, behavioral changes? -->
+<!-- Write this for the AGENT — they need to understand the system deeply. -->
 
 ## What to Tell Your User
 
-- **Skills survive a port change**: "When you change your Instar server port, your default skills keep working. Before, every curl call in every default skill silently failed with a connection-refused error until you hand-edited each file. Now the port is resolved at the moment the skill runs."
+<!-- Write talking points the agent should relay to their user. -->
+<!-- This should be warm, conversational, user-facing — not a changelog. -->
+<!-- Focus on what THEY can now do, not internal plumbing. -->
+<!--                                                                    -->
+<!-- PROHIBITED in this section (will fail validation):                 -->
+<!--   camelCase config keys: silentReject, maxRetries, telegramNotify -->
+<!--   Inline code backtick references like silentReject: false        -->
+<!--   Fenced code blocks                                              -->
+<!--   Instructions to edit files or run commands                      -->
+<!--                                                                    -->
+<!-- CORRECT style: "I can turn that on for you" not "set X to false"  -->
+<!-- The agent relays this to their user — keep it human.              -->
+
+- **[Feature name]**: "[Brief, friendly description of what this means for the user]"
 
 ## Summary of New Capabilities
 
 | Capability | How to Use |
 |-----------|-----------|
-| Runtime port resolution in default skills | automatic — new installs emit the dynamic pattern |
-| Auto-migration of existing skills | automatic — runs on next post-update migration |
-| `INSTAR_PORT` override | `export INSTAR_PORT=4041` before running skill commands |
+| [Capability] | [Endpoint, command, or "automatic"] |
 
 ## Evidence
 
-Reproduction: install instar with server port 4040, then change
-`.instar/config.json#port` to 4041. Before fix: `.claude/skills/reflect/SKILL.md`
-still calls `http://localhost:4040/reflection/record` — every curl returns
-`ECONNREFUSED`, and skills that poll `/sessions`, `/relationships`, or
-`/capabilities` return empty. After fix: the same URL reads
-`http://localhost:${INSTAR_PORT:-4040}/reflection/record`, and shell
-expansion hits the configured port whenever `INSTAR_PORT` is exported.
+<!-- REQUIRED if this release claims to fix a bug. -->
+<!-- Unit tests passing is NOT evidence. Provide ONE of: -->
+<!--   (a) Reproduction steps + observed before/after on a live system. -->
+<!--       Include log excerpts, observed command output, or behavior -->
+<!--       description. Make it specific enough that a future reader can -->
+<!--       re-run it and see the same thing. -->
+<!--   (b) "Not reproducible in dev — [concrete reason]" if the failure -->
+<!--       mode truly can't be exercised locally (race conditions, -->
+<!--       event-driven paths requiring external signals, etc). -->
+<!--                                                                 -->
+<!-- If this release doesn't claim a bug fix (pure feature / refactor), -->
+<!-- leave this section blank or delete it — it's only enforced when -->
+<!-- "What Changed" describes a fix. -->
 
-Verified in unit tests:
-`tests/unit/PostUpdateMigrator-skillPortHardcoding.test.ts` — 6 tests
-covering the migration happy path, idempotency, custom-skill preservation,
-fallback port preservation, and the missing-file branch. All pass.
-
-Template-side verified by invoking `installBuiltinSkills` directly and
-grepping the emitted content: 13 of 14 default skills now contain
-`localhost:${INSTAR_PORT:-4040}` and zero contain bare `localhost:4040`.
+[Describe reproduction + verified fix, OR "Not reproducible in dev — [concrete reason]"]
