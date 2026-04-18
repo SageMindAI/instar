@@ -40,6 +40,8 @@ import { createRoutes } from './routes.js';
 import { createFileRoutes } from './fileRoutes.js';
 import { mountWhatsAppWebhooks } from '../messaging/backends/WhatsAppWebhookRoutes.js';
 import { createMachineRoutes } from './machineRoutes.js';
+import { createWorktreeRoutes, createOidcWorktreeRoutes } from './worktreeRoutes.js';
+import type { WorktreeManager } from '../core/WorktreeManager.js';
 import { corsMiddleware, authMiddleware, requestTimeout, errorHandler, dashboardSecurityHeaders } from './middleware.js';
 import { WebSocketManager } from './WebSocketManager.js';
 
@@ -131,6 +133,12 @@ export class AgentServer {
     sharedStateLedger?: import('../core/SharedStateLedger.js').SharedStateLedger;
     /** Integrated-Being LedgerSessionRegistry (v2). Null/undefined when v2Enabled=false. */
     ledgerSessionRegistry?: import('../core/LedgerSessionRegistry.js').LedgerSessionRegistry;
+    /** Worktree manager — parallel-dev isolation (PARALLEL-DEV-ISOLATION-SPEC.md). */
+    worktreeManager?: WorktreeManager;
+    /** OIDC verification function for the GH-check endpoint (injected for testability). */
+    oidcVerify?: (token: string) => Promise<{ repository: string; workflow_ref: string; ref: string }>;
+    /** Enrolled GitHub repos allowed to call the GH-check endpoint. */
+    oidcEnrolledRepos?: Array<{ owner: string; repo: string }>;
   }) {
     this.config = options.config;
     this.startTime = new Date();
@@ -237,6 +245,20 @@ export class AgentServer {
         messageRouter: options.messageRouter ?? null,
       });
       this.app.use(machineRoutes);
+    }
+
+    // Worktree GH-check endpoint — mounted BEFORE auth middleware because it uses
+    // GitHub OIDC tokens, not bearer tokens. Authority for the parallel-dev isolation
+    // push gate (PARALLEL-DEV-ISOLATION-SPEC.md, "Authoritative push gate" section).
+    if (options.worktreeManager && options.oidcVerify) {
+      const oidcRoutes = createOidcWorktreeRoutes({
+        worktreeManager: options.worktreeManager,
+        oidc: {
+          enrolledRepos: options.oidcEnrolledRepos ?? [],
+          verifyOidcToken: options.oidcVerify,
+        },
+      });
+      this.app.use(oidcRoutes);
     }
 
     // WhatsApp Business API webhook routes — mounted BEFORE auth middleware because
@@ -349,6 +371,15 @@ export class AgentServer {
     // File viewer routes (after auth middleware)
     const fileRoutes = createFileRoutes({ config: options.config, liveConfig: options.liveConfig });
     this.app.use(fileRoutes);
+
+    // Worktree manager (auth-required) routes — bindings, locks, preflight, sign-trailer.
+    if (options.worktreeManager) {
+      const worktreeRoutes = createWorktreeRoutes({
+        worktreeManager: options.worktreeManager,
+        projectDir: options.config.projectDir,
+      });
+      this.app.use(worktreeRoutes);
+    }
 
     // Error handler (must be last)
     this.app.use(errorHandler);
