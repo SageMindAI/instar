@@ -20,6 +20,14 @@ import { rateLimiter, signViewPath } from './middleware.js';
 import type { WriteOperation, WriteToken } from '../core/StateWriteAuthority.js';
 import { validateWriteToken, canPerformOperation } from '../core/StateWriteAuthority.js';
 import { DegradationReporter } from '../monitoring/DegradationReporter.js';
+import {
+  GATE_ROUTE_VERSION,
+  GATE_ROUTE_MINIMUM_VERSION,
+  getHotPathState,
+  setKillSwitch,
+  getKillSwitch,
+  recordSessionStart,
+} from './stopGate.js';
 import { ReflectionMetrics } from '../monitoring/ReflectionMetrics.js';
 import { HomeostasisMonitor } from '../monitoring/HomeostasisMonitor.js';
 import type { TelegramAdapter } from '../messaging/TelegramAdapter.js';
@@ -452,6 +460,10 @@ export function createRoutes(ctx: RouteContext): Router {
       ...(degradations.length > 0 && {
         degradationSummary: degradations.map(e => DegradationReporter.narrativeFor(e)),
       }),
+      // Stop-gate route contract (P0.7). Always present, unauthenticated:
+      // hook-lib reads this on startup before sending the auth token.
+      gateRouteVersion: GATE_ROUTE_VERSION,
+      gateRouteMinimumVersion: GATE_ROUTE_MINIMUM_VERSION,
     };
 
     // Include detailed info only for authenticated callers.
@@ -626,6 +638,44 @@ export function createRoutes(ctx: RouteContext): Router {
   });
 
   /**
+   * Mark degradation events as reported by feature-name match. Used by
+   * the guardian-pulse daily digest after surfacing degradations to the
+   * attention queue (PR0c — context-death-pitfall-prevention spec).
+   * Closes the loop so the next pulse run doesn't re-surface the same
+   * events.
+   *
+   * Body: { feature: string }   exact-match feature name
+   *   OR: { featurePattern: string }   regex source, applied without flags
+   *
+   * Returns: { flipped: number }   count of events actually marked
+   */
+  router.post('/health/degradations/mark-reported', (req, res) => {
+    const reporter = DegradationReporter.getInstance();
+    const { feature, featurePattern } = req.body ?? {};
+    if (typeof feature === 'string' && feature.length > 0) {
+      const flipped = reporter.markReported(feature);
+      res.json({ flipped });
+      return;
+    }
+    if (typeof featurePattern === 'string' && featurePattern.length > 0) {
+      let re: RegExp;
+      try {
+        re = new RegExp(featurePattern);
+      } catch (err) {
+        res.status(400).json({
+          error: 'invalid featurePattern',
+          detail: err instanceof Error ? err.message : String(err),
+        });
+        return;
+      }
+      const flipped = reporter.markReported(re);
+      res.json({ flipped });
+      return;
+    }
+    res.status(400).json({ error: 'feature or featurePattern required' });
+  });
+
+  /**
    * Coherence health — runtime self-awareness report.
    * Checks config drift, state durability, output sanity, and feature readiness.
    * Where possible, issues are self-corrected.
@@ -689,10 +739,46 @@ export function createRoutes(ctx: RouteContext): Router {
     res.json({ ok: true, scheduled: true });
   });
 
+  // ── Stop-gate (UnjustifiedStopGate) — PR0a server infra ─────────────
+  //
+  // Spec: docs/specs/context-death-pitfall-prevention.md
+  // Implements (b) hot-path batched read, kill-switch fast-path, and
+  // session-start timestamp recording. State is in-memory for PR0a;
+  // PR3 migrates to SQLite. All endpoints respect the existing auth
+  // middleware (drift-correction threat model — local auth is enough).
+
+  router.get('/internal/stop-gate/hot-path', (req, res) => {
+    const sessionId = typeof req.query.session === 'string' ? req.query.session : '';
+    const state = getHotPathState({ sessionId: sessionId || undefined });
+    res.json(state);
+  });
+
+  router.get('/internal/stop-gate/kill-switch', (_req, res) => {
+    res.json({ killSwitch: getKillSwitch() });
+  });
+
+  router.post('/internal/stop-gate/kill-switch', (req, res) => {
+    const value = req.body?.value;
+    if (typeof value !== 'boolean') {
+      res.status(400).json({ error: 'value must be boolean' });
+      return;
+    }
+    const prior = setKillSwitch(value);
+    res.json({ killSwitch: value, prior, changed: prior !== value });
+  });
+
   router.post('/hooks/events', (req, res) => {
     if (!ctx.hookEventReceiver) {
       res.status(503).json({ error: 'HookEventReceiver not initialized' });
       return;
+    }
+
+    // Stop-gate: capture SessionStart timestamp (PR0a). Idempotent —
+    // first SessionStart for a session id wins. Read before storing the
+    // event so a malformed payload doesn't break the gate.
+    if (req.body?.event === 'SessionStart') {
+      const sid = (req.body?.sessionId || req.body?.session_id || '').toString();
+      if (sid) recordSessionStart(sid, Date.now());
     }
 
     const payload = req.body;

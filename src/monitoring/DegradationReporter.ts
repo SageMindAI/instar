@@ -204,6 +204,34 @@ export class DegradationReporter {
   }
 
   /**
+   * Mark events as reported by feature-name match. Used by the
+   * guardian-pulse daily digest consumer (PR0c — context-death-pitfall-
+   * prevention spec) after surfacing them to the attention queue. The
+   * built-in feedback / Telegram pipeline marks events automatically;
+   * this method is for *external* consumers that close the loop manually.
+   *
+   * Returns the count of events actually flipped (already-reported events
+   * are not counted again — idempotent).
+   *
+   * `featurePattern` may be either an exact feature-name string or a
+   * RegExp. The string form is exact-match; pass a RegExp for prefixes
+   * (e.g. /^unjustifiedStopGate/).
+   */
+  markReported(featurePattern: string | RegExp): number {
+    const matcher = typeof featurePattern === 'string'
+      ? (name: string) => name === featurePattern
+      : (name: string) => featurePattern.test(name);
+    let flipped = 0;
+    for (const event of this.events) {
+      if (!event.reported && matcher(event.feature)) {
+        event.reported = true;
+        flipped++;
+      }
+    }
+    return flipped;
+  }
+
+  /**
    * Check if any degradations have occurred.
    */
   hasDegradations(): boolean {
