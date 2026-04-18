@@ -2415,6 +2415,7 @@
           <button class="tab" data-tab="systems" onclick="switchTab('systems')">Health</button>
           <button class="tab" data-tab="integrated-being" onclick="switchTab('integrated-being')">Integrated-Being</button>
           <button class="tab" data-tab="pr-pipeline" onclick="switchTab('pr-pipeline')">PR Pipeline</button>
+          <button class="tab" data-tab="initiatives" onclick="switchTab('initiatives')">Initiatives <span class="tab-count" id="tabInitiativeCount">0</span></button>
         </nav>
       </div>
       <div class="vital-signs" id="vitalSigns">
@@ -2777,6 +2778,34 @@
         No PR activity to display.
       </div>
       <div id="prPipelineList" style="display:flex;flex-direction:column;gap:12px"></div>
+    </div>
+
+    <!-- Initiatives Tab — multi-phase long-running work -->
+    <div id="initiativesPanel" style="display:none;flex-direction:column;padding:20px;gap:16px;overflow-y:auto">
+      <div style="display:flex;justify-content:space-between;align-items:center">
+        <h2 style="margin:0">Initiatives</h2>
+        <div style="display:flex;gap:8px;align-items:center">
+          <select id="initiativesFilter" style="padding:6px 10px;background:var(--bg);color:var(--text);border:1px solid var(--border);border-radius:4px" onchange="loadInitiatives()">
+            <option value="active">Active</option>
+            <option value="">All</option>
+            <option value="completed">Completed</option>
+            <option value="archived">Archived</option>
+            <option value="abandoned">Abandoned</option>
+          </select>
+          <button onclick="loadInitiatives()" style="padding:6px 12px">Refresh</button>
+        </div>
+      </div>
+      <div style="font-size:12px;color:var(--text-dim);line-height:1.4">
+        Multi-phase long-running work. Signals: <span style="color:#e27d3b">needs-user</span>,
+        <span style="color:#d65f5f">next-check-due</span>,
+        <span style="color:#4a9a4a">ready-to-advance</span>,
+        <span style="color:#888">stale (&gt;7d)</span>.
+      </div>
+      <div id="initiativesDigest" style="display:none;padding:12px;border:1px solid var(--border);border-radius:6px;background:var(--bg-dim)"></div>
+      <div id="initiativesEmpty" style="padding:40px;text-align:center;color:var(--text-dim);display:none">
+        No initiatives to display. Create one via <code>POST /initiatives</code>.
+      </div>
+      <div id="initiativesList" style="display:flex;flex-direction:column;gap:12px"></div>
     </div>
 
     <!-- Health Tab (was Systems) -->
@@ -3808,6 +3837,12 @@
         panels: ['prPipelinePanel'],
         display: ['flex'],
         onActivate: () => { if (typeof loadPrPipeline === 'function') loadPrPipeline(); },
+      },
+      {
+        id: 'initiatives',
+        panels: ['initiativesPanel'],
+        display: ['flex'],
+        onActivate: () => { if (typeof loadInitiatives === 'function') loadInitiatives(); },
       },
     ];
 
@@ -5693,6 +5728,176 @@
           time.style.marginTop = '4px';
           time.textContent = entry.created_at;
           card.appendChild(time);
+        }
+
+        list.appendChild(card);
+      }
+    }
+
+    // ── Initiatives Tab (INITIATIVE-TRACKER-SPEC v1) ─────────────
+    //
+    // Fetches /initiatives and /initiatives/digest on panel activation.
+    // Read-only: no buttons here mutate the tracker. All content goes
+    // through textContent; no innerHTML. Matches the PR Pipeline tab's
+    // XSS-safe pattern.
+    async function loadInitiatives() {
+      const list = document.getElementById('initiativesList');
+      const empty = document.getElementById('initiativesEmpty');
+      const digestBox = document.getElementById('initiativesDigest');
+      const filter = document.getElementById('initiativesFilter');
+      const countBadge = document.getElementById('tabInitiativeCount');
+
+      while (list.firstChild) list.removeChild(list.firstChild);
+      while (digestBox.firstChild) digestBox.removeChild(digestBox.firstChild);
+      digestBox.style.display = 'none';
+      empty.style.display = 'none';
+
+      let itemsRes = null;
+      let digestRes = null;
+      try {
+        const statusQ = filter && filter.value ? `?status=${encodeURIComponent(filter.value)}` : '';
+        const [a, b] = await Promise.all([
+          apiFetch('/initiatives' + statusQ).catch(() => null),
+          apiFetch('/initiatives/digest').catch(() => null),
+        ]);
+        itemsRes = a;
+        digestRes = b;
+      } catch { /* handled by null check below */ }
+
+      if (!itemsRes) {
+        empty.style.display = 'block';
+        empty.textContent = 'Initiative tracker unavailable.';
+        if (countBadge) countBadge.textContent = '0';
+        return;
+      }
+
+      const items = Array.isArray(itemsRes.items) ? itemsRes.items : [];
+      if (countBadge) countBadge.textContent = String(items.length);
+
+      // Digest summary (actionable signals)
+      if (digestRes && Array.isArray(digestRes.items) && digestRes.items.length > 0) {
+        const title = document.createElement('div');
+        title.style.fontWeight = '600';
+        title.style.marginBottom = '6px';
+        title.textContent = `${digestRes.items.length} signal${digestRes.items.length === 1 ? '' : 's'}`;
+        digestBox.appendChild(title);
+        for (const d of digestRes.items) {
+          const row = document.createElement('div');
+          row.style.fontSize = '13px';
+          row.style.padding = '3px 0';
+          const colorMap = {
+            'needs-user': '#e27d3b',
+            'next-check-due': '#d65f5f',
+            'ready-to-advance': '#4a9a4a',
+            'stale': '#888',
+          };
+          const tag = document.createElement('span');
+          tag.style.color = colorMap[d.reason] || 'var(--text-dim)';
+          tag.style.marginRight = '6px';
+          tag.textContent = `[${d.reason}]`;
+          const label = document.createElement('span');
+          label.textContent = `${d.title} — ${d.detail}`;
+          row.appendChild(tag);
+          row.appendChild(label);
+          digestBox.appendChild(row);
+        }
+        digestBox.style.display = 'block';
+      }
+
+      if (items.length === 0) {
+        empty.style.display = 'block';
+        empty.textContent = 'No initiatives to display. Create one via POST /initiatives.';
+        return;
+      }
+
+      for (const ini of items) {
+        const card = document.createElement('div');
+        card.style.background = 'var(--panel)';
+        card.style.padding = '12px';
+        card.style.borderRadius = '6px';
+        card.style.border = '1px solid var(--border)';
+
+        const header = document.createElement('div');
+        header.style.display = 'flex';
+        header.style.justifyContent = 'space-between';
+        header.style.alignItems = 'center';
+        header.style.marginBottom = '6px';
+
+        const titleEl = document.createElement('div');
+        titleEl.style.fontWeight = '600';
+        titleEl.textContent = ini.title || ini.id || '(untitled)';
+        header.appendChild(titleEl);
+
+        const status = document.createElement('span');
+        status.style.fontSize = '11px';
+        status.style.padding = '2px 8px';
+        status.style.borderRadius = '999px';
+        const statusColors = {
+          active: 'var(--accent)',
+          completed: '#4a9a4a',
+          archived: 'var(--text-dim)',
+          abandoned: '#d65f5f',
+        };
+        status.style.background = statusColors[ini.status] || 'var(--text-dim)';
+        status.style.color = '#fff';
+        status.textContent = ini.status || 'unknown';
+        header.appendChild(status);
+        card.appendChild(header);
+
+        if (ini.description) {
+          const desc = document.createElement('div');
+          desc.style.fontSize = '13px';
+          desc.style.color = 'var(--text-dim)';
+          desc.style.marginBottom = '8px';
+          desc.textContent = ini.description;
+          card.appendChild(desc);
+        }
+
+        // Phase pills
+        if (Array.isArray(ini.phases) && ini.phases.length > 0) {
+          const phaseRow = document.createElement('div');
+          phaseRow.style.display = 'flex';
+          phaseRow.style.gap = '6px';
+          phaseRow.style.flexWrap = 'wrap';
+          phaseRow.style.marginBottom = '8px';
+          const phaseColors = {
+            pending: 'var(--text-dim)',
+            'in-progress': 'var(--accent)',
+            done: '#4a9a4a',
+            blocked: '#d65f5f',
+          };
+          for (const p of ini.phases) {
+            const pill = document.createElement('span');
+            pill.style.fontSize = '11px';
+            pill.style.padding = '2px 8px';
+            pill.style.borderRadius = '4px';
+            pill.style.border = `1px solid ${phaseColors[p.status] || 'var(--border)'}`;
+            pill.style.color = phaseColors[p.status] || 'var(--text)';
+            pill.textContent = `${p.name} · ${p.status}`;
+            phaseRow.appendChild(pill);
+          }
+          card.appendChild(phaseRow);
+        }
+
+        // Meta row
+        const meta = document.createElement('div');
+        meta.style.fontSize = '11px';
+        meta.style.color = 'var(--text-dim)';
+        const lastTouched = ini.lastTouchedAt ? ini.lastTouchedAt.slice(0, 10) : '';
+        const needsUser = ini.needsUser ? ' · needs you' : '';
+        const blockerCount = Array.isArray(ini.blockers) && ini.blockers.length > 0
+          ? ` · ${ini.blockers.length} blocker${ini.blockers.length === 1 ? '' : 's'}`
+          : '';
+        meta.textContent = `Last touched: ${lastTouched}${needsUser}${blockerCount}`;
+        card.appendChild(meta);
+
+        if (ini.needsUser && ini.needsUserReason) {
+          const reason = document.createElement('div');
+          reason.style.fontSize = '12px';
+          reason.style.marginTop = '4px';
+          reason.style.color = '#e27d3b';
+          reason.textContent = `→ ${ini.needsUserReason}`;
+          card.appendChild(reason);
         }
 
         list.appendChild(card);

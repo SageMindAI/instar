@@ -255,6 +255,8 @@ export interface RouteContext {
   sharedStateLedger: import('../core/SharedStateLedger.js').SharedStateLedger | null;
   /** Integrated-Being LedgerSessionRegistry (v2). Null when v2Enabled=false. */
   ledgerSessionRegistry: import('../core/LedgerSessionRegistry.js').LedgerSessionRegistry | null;
+  /** Initiative tracker — persisted record of multi-phase long-running work. */
+  initiativeTracker: import('../core/InitiativeTracker.js').InitiativeTracker | null;
   /** Pending reply waiters for threadline relay-send waitForReply support.
    *  Key: threadId (UUID — unique per conversation, unlike agent names which
    *  can collide when multiple agents share a name). Value: resolve callback
@@ -4501,6 +4503,131 @@ export function createRoutes(ctx: RouteContext): Router {
       // Security logging failure is non-fatal
     }
 
+    res.json({ id: req.params.id, deleted: true });
+  });
+
+  // ── Initiatives (multi-phase long-running work tracker) ─────────
+
+  const initiativeIdRe = /^[a-z0-9][a-z0-9-]{0,62}$/;
+
+  router.get('/initiatives', (req, res) => {
+    if (!ctx.initiativeTracker) {
+      res.status(503).json({ error: 'Initiative tracker not configured' });
+      return;
+    }
+    const status = typeof req.query.status === 'string' ? req.query.status : undefined;
+    const items = status
+      ? ctx.initiativeTracker.list({ status: status as 'active' | 'completed' | 'archived' | 'abandoned' })
+      : ctx.initiativeTracker.list();
+    res.json({ items, count: items.length });
+  });
+
+  router.get('/initiatives/digest', (_req, res) => {
+    if (!ctx.initiativeTracker) {
+      res.status(503).json({ error: 'Initiative tracker not configured' });
+      return;
+    }
+    res.json(ctx.initiativeTracker.digest());
+  });
+
+  router.get('/initiatives/:id', (req, res) => {
+    if (!ctx.initiativeTracker) {
+      res.status(503).json({ error: 'Initiative tracker not configured' });
+      return;
+    }
+    if (!initiativeIdRe.test(req.params.id)) {
+      res.status(400).json({ error: 'invalid initiative id' });
+      return;
+    }
+    const initiative = ctx.initiativeTracker.get(req.params.id);
+    if (!initiative) {
+      res.status(404).json({ error: 'initiative not found' });
+      return;
+    }
+    res.json(initiative);
+  });
+
+  router.post('/initiatives', (req, res) => {
+    if (!ctx.initiativeTracker) {
+      res.status(503).json({ error: 'Initiative tracker not configured' });
+      return;
+    }
+    const { id, title, description, phases, links, nextCheckAt, needsUser, needsUserReason, blockers } = req.body ?? {};
+    if (typeof id !== 'string' || !initiativeIdRe.test(id)) {
+      res.status(400).json({ error: '"id" must be lowercase kebab-case, 1–63 chars' });
+      return;
+    }
+    if (typeof title !== 'string' || !title.trim() || title.length > 200) {
+      res.status(400).json({ error: '"title" required, ≤200 chars' });
+      return;
+    }
+    if (typeof description !== 'string' || description.length > 4000) {
+      res.status(400).json({ error: '"description" required, ≤4000 chars' });
+      return;
+    }
+    if (!Array.isArray(phases) || phases.length === 0) {
+      res.status(400).json({ error: '"phases" must be a non-empty array' });
+      return;
+    }
+    try {
+      const created = ctx.initiativeTracker.create({
+        id, title, description, phases, links, nextCheckAt,
+        needsUser, needsUserReason, blockers,
+      });
+      res.status(201).json(created);
+    } catch (err) {
+      res.status(400).json({ error: err instanceof Error ? err.message : String(err) });
+    }
+  });
+
+  router.patch('/initiatives/:id', (req, res) => {
+    if (!ctx.initiativeTracker) {
+      res.status(503).json({ error: 'Initiative tracker not configured' });
+      return;
+    }
+    if (!initiativeIdRe.test(req.params.id)) {
+      res.status(400).json({ error: 'invalid initiative id' });
+      return;
+    }
+    try {
+      const updated = ctx.initiativeTracker.update(req.params.id, req.body ?? {});
+      res.json(updated);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      const status = msg.includes('not found') ? 404 : 400;
+      res.status(status).json({ error: msg });
+    }
+  });
+
+  router.post('/initiatives/:id/phase/:phaseId', (req, res) => {
+    if (!ctx.initiativeTracker) {
+      res.status(503).json({ error: 'Initiative tracker not configured' });
+      return;
+    }
+    const { status } = req.body ?? {};
+    if (!['pending', 'in-progress', 'done', 'blocked'].includes(status)) {
+      res.status(400).json({ error: '"status" must be one of pending|in-progress|done|blocked' });
+      return;
+    }
+    try {
+      const updated = ctx.initiativeTracker.setPhaseStatus(req.params.id, req.params.phaseId, status);
+      res.json(updated);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      res.status(msg.includes('not found') ? 404 : 400).json({ error: msg });
+    }
+  });
+
+  router.delete('/initiatives/:id', (req, res) => {
+    if (!ctx.initiativeTracker) {
+      res.status(503).json({ error: 'Initiative tracker not configured' });
+      return;
+    }
+    const removed = ctx.initiativeTracker.remove(req.params.id);
+    if (!removed) {
+      res.status(404).json({ error: 'initiative not found' });
+      return;
+    }
     res.json({ id: req.params.id, deleted: true });
   });
 
