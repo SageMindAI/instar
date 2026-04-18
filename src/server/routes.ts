@@ -638,6 +638,44 @@ export function createRoutes(ctx: RouteContext): Router {
   });
 
   /**
+   * Mark degradation events as reported by feature-name match. Used by
+   * the guardian-pulse daily digest after surfacing degradations to the
+   * attention queue (PR0c — context-death-pitfall-prevention spec).
+   * Closes the loop so the next pulse run doesn't re-surface the same
+   * events.
+   *
+   * Body: { feature: string }   exact-match feature name
+   *   OR: { featurePattern: string }   regex source, applied without flags
+   *
+   * Returns: { flipped: number }   count of events actually marked
+   */
+  router.post('/health/degradations/mark-reported', (req, res) => {
+    const reporter = DegradationReporter.getInstance();
+    const { feature, featurePattern } = req.body ?? {};
+    if (typeof feature === 'string' && feature.length > 0) {
+      const flipped = reporter.markReported(feature);
+      res.json({ flipped });
+      return;
+    }
+    if (typeof featurePattern === 'string' && featurePattern.length > 0) {
+      let re: RegExp;
+      try {
+        re = new RegExp(featurePattern);
+      } catch (err) {
+        res.status(400).json({
+          error: 'invalid featurePattern',
+          detail: err instanceof Error ? err.message : String(err),
+        });
+        return;
+      }
+      const flipped = reporter.markReported(re);
+      res.json({ flipped });
+      return;
+    }
+    res.status(400).json({ error: 'feature or featurePattern required' });
+  });
+
+  /**
    * Coherence health — runtime self-awareness report.
    * Checks config drift, state durability, output sanity, and feature readiness.
    * Where possible, issues are self-corrected.

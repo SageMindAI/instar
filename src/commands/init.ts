@@ -2249,9 +2249,36 @@ If any job has been skipped more than 10 times by its gate, the gate may be misc
 
 Check queueLength from the jobs endpoint. If queue is perpetually > 0, jobs are backing up. This means maxParallelJobs is too low or jobs are running too long.
 
-### 4. Degradation Reporter Health
+### 4. Degradation Reporter Health + DegradationReport consumer
 
-Read \\\`.instar/state/degradation-events.json\\\` — if events exist but none have \\\`reported:true\\\` or \\\`alerted:true\\\`, the downstream connections (FeedbackManager, Telegram) never initialized. The reporter is collecting but not communicating.
+Two parts: pipeline health AND active consumption.
+
+**Pipeline health.** Read \\\`.instar/state/degradation-events.json\\\` — if events exist but none have \\\`reported:true\\\` or \\\`alerted:true\\\`, the downstream connections (FeedbackManager, Telegram) never initialized. The reporter is collecting but not communicating. Report this as CRITICAL.
+
+**Active consumption (PR0c — context-death pitfall spec).** Pulse is the daily digest consumer for any DegradationReport that didn't get auto-routed by the FeedbackManager / Telegram alerter (e.g., reports from the unjustified-stop gate, or any future feature that emits via DegradationReporter without wiring its own alert channel).
+
+\\\`\\\`\\\`
+# Read everything that's still unreported
+UNREPORTED=$(curl -s -H "Authorization: Bearer $AUTH" http://localhost:\${INSTAR_PORT:-${port}}/health/degradations | jq -c '.events[] | select(.reported == false)')
+\\\`\\\`\\\`
+
+For each unreported event, surface it to the attention queue using a stable id (so re-runs are idempotent):
+
+\\\`\\\`\\\`
+curl -X POST -H "Authorization: Bearer $AUTH" -H 'Content-Type: application/json' \\\\
+  http://localhost:\${INSTAR_PORT:-${port}}/attention \\\\
+  -d "{\\"id\\": \\"degradation:\${FEATURE}:\${TIMESTAMP}\\", \\"title\\": \\"Degradation: \${FEATURE}\\", \\"summary\\": \\"\${NARRATIVE}\\", \\"category\\": \\"degradation\\", \\"priority\\": \\"NORMAL\\"}"
+\\\`\\\`\\\`
+
+Then close the loop so next pulse doesn't re-surface the same event:
+
+\\\`\\\`\\\`
+curl -X POST -H "Authorization: Bearer $AUTH" -H 'Content-Type: application/json' \\\\
+  http://localhost:\${INSTAR_PORT:-${port}}/health/degradations/mark-reported \\\\
+  -d "{\\"feature\\": \\"\${FEATURE}\\"}"
+\\\`\\\`\\\`
+
+If the attention POST fails (Telegram down, etc.), do NOT call mark-reported — leave the event in the queue for the next pulse.
 
 ### 5. Session Monitor
 
