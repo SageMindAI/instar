@@ -118,6 +118,7 @@ Instar solves the six dimensions of agent coherence:
 | **AutoUpdater** | Built-in update engine. Checks npm, auto-applies, self-restarts | [→](https://instar.sh/features/autoupdater/) |
 | **Build Pipeline** | `/build` skill with worktree isolation, 6-phase pipeline, quality gates, stop-hook enforcement | |
 | **Behavioral Hooks** | 9 automatic hooks: command guards, safety gates, identity grounding, topic context | [→](https://instar.sh/reference/hooks/) |
+| **Initiative Tracker** | Persisted multi-phase long-running work tracker. Phases, blockers, links, digest alerts. HTTP API at `/initiatives/*` | |
 | **Default Jobs** | Health checks, reflection, evolution, relationship maintenance | [→](https://instar.sh/reference/default-jobs/) |
 
 > **Reference:** [CLI Commands](https://instar.sh/reference/cli/) · [API Endpoints](https://instar.sh/reference/api/) · [Configuration](https://instar.sh/reference/configuration/) · [File Structure](https://instar.sh/reference/file-structure/)
