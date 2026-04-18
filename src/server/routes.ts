@@ -28,6 +28,7 @@ import {
   getKillSwitch,
   recordSessionStart,
   getMode,
+  setMode,
 } from './stopGate.js';
 import {
   UnjustifiedStopGate,
@@ -849,6 +850,22 @@ export function createRoutes(ctx: RouteContext): Router {
     }
     const prior = setKillSwitch(value);
     res.json({ killSwitch: value, prior, changed: prior !== value });
+  });
+
+  // Mode flip endpoint (PR4 — context-death spec § rollout PR4).
+  // Used by `instar gate set unjustified-stop --mode <mode>`.
+  // Multi-machine fanout (`--wait-sync`, `--skip-machine`,
+  // `--allow-partial`) lands in PR4b; this endpoint covers the local
+  // flip only.
+  router.post('/internal/stop-gate/mode', (req, res) => {
+    const mode = req.body?.mode;
+    if (mode !== 'off' && mode !== 'shadow' && mode !== 'enforce') {
+      res.status(400).json({ error: 'mode must be off | shadow | enforce' });
+      return;
+    }
+    const prior = getMode();
+    setMode(mode);
+    res.json({ mode, prior, changed: prior !== mode });
   });
 
   // ── Stop-gate evaluate + log + annotations (PR3 — context-death

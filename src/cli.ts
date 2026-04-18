@@ -2086,4 +2086,49 @@ playbookCmd
     return playbookUserAudit(userId, opts);
   });
 
+// ── `instar gate` — UnjustifiedStopGate operator tooling (PR4) ──────
+const gateCmd = program
+  .command('gate')
+  .description('Operator tooling for the UnjustifiedStopGate (context-death-pitfall-prevention)');
+
+gateCmd
+  .command('status')
+  .description('Show gate mode, kill-switch state, autonomous flag')
+  .option('-d, --dir <path>', 'Project directory')
+  .action(async (opts) => {
+    const { gateStatus } = await import('./commands/gate.js');
+    return gateStatus(opts);
+  });
+
+gateCmd
+  .command('set <subject>')
+  .description('Set a gate mode. Subjects: unjustified-stop')
+  .requiredOption('--mode <mode>', 'off | shadow | enforce')
+  .option('-d, --dir <path>', 'Project directory')
+  .action(async (subject, opts) => {
+    const { gateSet } = await import('./commands/gate.js');
+    return gateSet(subject, opts);
+  });
+
+gateCmd
+  .command('kill-switch')
+  .description('Set or clear the gate kill-switch (fast-path allow-everything override)')
+  .option('--set', 'Set the kill-switch (all evaluations short-circuit to allow)')
+  .option('--clear', 'Clear the kill-switch (restore normal evaluation)')
+  .option('-d, --dir <path>', 'Project directory')
+  .action(async (opts) => {
+    const { gateKillSwitch } = await import('./commands/gate.js');
+    return gateKillSwitch(opts);
+  });
+
+gateCmd
+  .command('log')
+  .description('Show the most recent gate evaluation events')
+  .option('--tail <n>', 'Number of events to show (default 20)')
+  .option('-d, --dir <path>', 'Project directory')
+  .action(async (opts) => {
+    const { gateLog } = await import('./commands/gate.js');
+    return gateLog(opts);
+  });
+
 program.parse();
