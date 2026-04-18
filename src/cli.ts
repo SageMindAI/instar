@@ -396,6 +396,32 @@ removeAdapterCmd
     return removeSlack();
   });
 
+// ── Worktree (parallel-dev isolation) ────────────────────────────
+
+const worktreeCmd = program
+  .command('worktree')
+  .description('Operator tools for parallel-dev topic-worktree isolation');
+
+worktreeCmd
+  .command('register-keypair')
+  .description('Move a migration-generated Ed25519 keypair into the configured keyvault backend')
+  .requiredOption('--private <path>', 'Path to the private-key PEM file (usually the .NEW file from migrate-incident-2026-04-17.mjs)')
+  .option('--keep-input', 'Do NOT delete the input private-key file after registration (default: delete)')
+  .option('--backend <name>', 'Force backend: keychain | flatfile (default: auto-detect)')
+  .action(async (opts) => {
+    const { registerKeypair } = await import('./commands/worktree.js');
+    try {
+      await registerKeypair({
+        privatePath: opts.private,
+        keepInputFile: !!opts.keepInput,
+        forceBackend: opts.backend,
+      });
+    } catch (err) {
+      console.error(pc.red(`register-keypair failed: ${(err as Error).message}`));
+      process.exit(1);
+    }
+  });
+
 // ── Backup ───────────────────────────────────────────────────────
 
 const backupCmd = program

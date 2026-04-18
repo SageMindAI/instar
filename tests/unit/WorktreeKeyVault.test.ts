@@ -88,4 +88,73 @@ describe('WorktreeKeyVault', () => {
     const st = fs.statSync(flatFilePath);
     expect(st.mode & 0o777).toBe(0o600);
   }, 30_000);
+
+  it('importKeyMaterial round-trips through flat-file', async () => {
+    const vault = new WorktreeKeyVault({
+      stateDir: tmp,
+      headlessAllowed: true,
+      passphraseResolver: () => 'import-test-passphrase-xyz',
+      forceBackend: 'flatfile',
+    });
+
+    const { generateKeyPairSync, randomBytes, randomUUID } = await import('node:crypto');
+    const { publicKey, privateKey } = generateKeyPairSync('ed25519', {
+      publicKeyEncoding: { type: 'spki', format: 'pem' },
+      privateKeyEncoding: { type: 'pkcs8', format: 'pem' },
+    });
+    const expected = {
+      signing: { privateKeyPem: privateKey, publicKeyPem: publicKey, keyVersion: 1 },
+      hmacKey: randomBytes(32),
+      machineId: randomUUID(),
+    };
+
+    await vault.importKeyMaterial(expected);
+
+    const vault2 = new WorktreeKeyVault({
+      stateDir: tmp,
+      headlessAllowed: true,
+      passphraseResolver: () => 'import-test-passphrase-xyz',
+      forceBackend: 'flatfile',
+    });
+    const loaded = await vault2.loadOrInit();
+    expect(loaded.signing.privateKeyPem).toBe(expected.signing.privateKeyPem);
+    expect(loaded.signing.publicKeyPem).toBe(expected.signing.publicKeyPem);
+    expect(loaded.signing.keyVersion).toBe(1);
+    expect(loaded.hmacKey.equals(expected.hmacKey)).toBe(true);
+    expect(loaded.machineId).toBe(expected.machineId);
+  }, 30_000);
+
+  it('decodeFromKeychain: base64-wrapped PEM survives a multi-line roundtrip', async () => {
+    // Direct test of the encode/decode helpers via a fake in-memory "keychain"
+    // — we can't invoke macOS `security` in CI reliably, so unit-test the wrap.
+    const { encodeForKeychain, decodeFromKeychain } = await import(
+      '../../src/core/WorktreeKeyVault.js'
+    );
+    const multiLinePem =
+      '-----BEGIN PRIVATE KEY-----\n' +
+      'MC4CAQAwBQYDK2VwBCIEIO+o3abc123def456xyz==\n' +
+      '-----END PRIVATE KEY-----\n';
+    const encoded = encodeForKeychain(multiLinePem);
+    expect(encoded.startsWith('b64:')).toBe(true);
+    // Encoded value has no newlines — that's the whole point; macOS
+    // `security -w` returns printable text without hex fallback.
+    expect(encoded).not.toMatch(/\n/);
+    const decoded = decodeFromKeychain(encoded);
+    expect(decoded).toBe(multiLinePem);
+  });
+
+  it('decodeFromKeychain: legacy hex-encoded fallback decodes correctly', async () => {
+    const { decodeFromKeychain } = await import('../../src/core/WorktreeKeyVault.js');
+    const original = '-----BEGIN KEY-----\nmulti line data\n-----END KEY-----\n';
+    const hex = Buffer.from(original, 'utf-8').toString('hex');
+    expect(decodeFromKeychain(hex)).toBe(original);
+  });
+
+  it('decodeFromKeychain: passes short single-line values through unchanged', async () => {
+    const { decodeFromKeychain } = await import('../../src/core/WorktreeKeyVault.js');
+    // UUID, key-version etc. — no newlines, no hex-looking, no prefix.
+    expect(decodeFromKeychain('8a589411-7a62-45bd-a140-6d610a516746'))
+      .toBe('8a589411-7a62-45bd-a140-6d610a516746');
+    expect(decodeFromKeychain('1')).toBe('1');
+  });
 });
