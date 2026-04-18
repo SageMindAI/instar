@@ -1,104 +1,43 @@
-# Upgrade guide — parallel-dev isolation + per-agent messaging style
+# Upgrade Guide — vNEXT (TelegramLifeline sends auth on /internal/* calls)
 
-This release lands the composition-root wiring that turns on per-topic
-worktree isolation when configured, script fixes discovered during the live
-Day-2 rollout, and a generic per-agent messaging-style rule in the outbound
-tone gate.
-
-## Summary of New Capabilities
-
-- **Parallel-dev isolation is now flippable via config.** Set
-  `parallelDev: { phase: "shadow" }` in `.instar/config.json` and topic
-  sessions spawn into per-topic worktrees with Ed25519-signed commit
-  trailers. Default stays "off" — behavior unchanged for deployments that
-  don't opt in.
-- **Outbound messages now honor a per-agent style preference.** A new
-  `messagingStyle` free-text config field describes how the agent should
-  write for its user — e.g. `"ELI10, short sentences, plain words"` or
-  `"Technical and terse"`. The `MessagingToneGate` blocks significant
-  mismatches via a new `B11_STYLE_MISMATCH` rule. When `messagingStyle` is
-  unset, the rule does not apply.
-- **Two live-rollout script fixes** for parallel-dev ops tooling: the Day-2
-  migration script scans stash labels instead of requiring the
-  incident-snapshot at `@{0}`, and the GH ruleset installer now pipes JSON
-  bodies correctly and supports non-Enterprise plans.
+<!-- bump: patch -->
 
 ## What Changed
 
-### `src/core/ParallelDevWiring.ts` (new)
+Fixes a critical regression introduced in 0.28.53: inbound Telegram messages from users were silently dropped on every agent after update. The 0.28.53 release tightened `/internal/*` routes to require bearer auth (previously localhost-only), but the matching client-side change in `TelegramLifeline` was missed — the lifeline continued to POST to `/internal/telegram-forward` and `/internal/telegram-callback` with only a `Content-Type` header, so every forward attempt returned 401 and the user's message never reached the session.
 
-Small composition helper `wireParallelDev()` that reads
-`InstarConfig.parallelDev`, loads keys from the `WorktreeKeyVault`, and
-returns a ready-to-use `WorktreeManager` plus the shim-root path for
-`SessionManager`. Returns `null` when phase is `"off"` so the composition
-root can skip wiring entirely.
+The fix is surgical: both internal fetches now include `Authorization: Bearer <authToken>` when the token is configured. No other behavior changes. The auth header is backwards-compatible — server versions that don't require auth on `/internal/*` simply ignore it.
 
-### `src/commands/server.ts`
+**Affected surfaces:**
+- `forwardToServer()` — inbound user messages from Telegram topics to their bound session
+- `handleCallbackQuery()` — inline-button callbacks from dashboard-link messages
 
-Calls `wireParallelDev(...)` before instantiating `AgentServer`. When a
-manager comes back, the server is handed the manager + OIDC-enrolled repo
-list, and `sessionManager.setWorktreeManager(manager, shimRoot)` flips
-session spawn onto worktree isolation.
-
-### `src/core/MessagingToneGate.ts`
-
-Adds `B11_STYLE_MISMATCH` to `VALID_RULES` and a new
-`ToneReviewContext.targetStyle?: string` plumbing field. A new
-`renderTargetStyle()` method emits the style block into the LLM prompt
-inside a `STYLE_BOUNDARY` so it's treated as configuration, not
-instructions. The existing fail-open-on-LLM-error semantics are preserved.
-
-### `src/core/types.ts`
-
-Adds `InstarConfig.parallelDev?: ParallelDevConfig` and
-`InstarConfig.messagingStyle?: string`.
-
-### `src/server/routes.ts`
-
-One-line change: the tone gate's `review()` call now receives
-`targetStyle: ctx.config.messagingStyle` so the per-agent style reaches the
-authority.
-
-### `scripts/migrate-incident-2026-04-17.mjs`
-
-Stash verification now scans the full list for the expected label instead
-of requiring it at `@{0}`. Integrity invariant — the label must still be
-present and unchanged — is preserved.
-
-### `scripts/gh-ruleset-install.mjs`
-
-Switches from `gh api --field` (stringifies nested JSON → 422) to
-`gh api --input -` with a real JSON body. Adds `--mode disabled` and
-`--skip-trust-root` for operators on Team/Pro plans where the
-`file_path_restriction` rule and `evaluate` mode are not available.
+**Scope:** Every agent on v0.28.53 where inbound Telegram messages stopped reaching the session. Outbound (agent → user) was never affected because it goes direct to the Telegram Bot API, not through `/internal/*`.
 
 ## What to Tell Your User
 
-Two new knobs are available in `.instar/config.json`. Both are optional and
-default to "off" — existing deployments keep working unchanged.
+Telegram messages from you to me were getting silently dropped on v0.28.53 — a security tightening landed without its matching client-side update, so every inbound message hit a 401 and never reached the session. This patch wires the auth header through the lifeline so the forward actually lands. After updating, send any new topic a quick test message to confirm the round-trip works.
 
-- **`parallelDev`** — controls whether topic sessions spawn in isolated
-  git worktrees. Phase `"off"` is the default. Phase `"shadow"` turns on
-  the per-topic worktrees and signs commits locally. Phase `"enforce"`
-  also turns on the GitHub-side push gate; don't flip to enforce until a
-  working OIDC verifier is configured on the server.
-- **`messagingStyle`** — a free-text description of how the agent should
-  write for this user. The outbound tone gate uses this as the criterion
-  for blocking significantly mismatched messages. Every agent sets its own
-  string; there is no universal default.
+## Summary of New Capabilities
 
-If you're an instar agent whose user has just asked for a different
-communication style ("write to me like I'm a 10-year-old" / "be terse and
-technical" / "formal business tone"), you can set `messagingStyle`
-accordingly and the outbound path will enforce it automatically — no code
-changes required.
+| Capability | How to Use |
+|-----------|-----------|
+| TelegramLifeline authenticates `/internal/*` forwards | automatic on update |
 
-If you want the agent to start isolating parallel sessions so they can't
-step on each other's uncommitted work, flip `parallelDev.phase` to
-`"shadow"` and restart the server.
+## Evidence
 
-## Migration notes
+**Reproduction (pre-fix, v0.28.53):** Created a new Telegram topic, sent a message, observed the Telegram bot reply "Server is restarting — please try again in a moment." instead of the session responding. Server log showed the forward attempt hitting `/internal/telegram-forward` and returning 401 because no `Authorization` header was present. The middleware in `src/server/middleware.ts` requires bearer auth on `/internal/*` (introduced in commit `42cb9ee` as part of PR3's security hardening), but `src/lifeline/TelegramLifeline.ts` was building the fetch with only `{ 'Content-Type': 'application/json' }`.
 
-None. All new behavior is opt-in via config. Existing deployments keep
-working unchanged until an operator sets `parallelDev` or `messagingStyle`
-explicitly.
+**Post-fix behavior:** Both fetches now compute headers as `{ 'Content-Type': 'application/json', 'Authorization': 'Bearer <token>' }` when `projectConfig.authToken` is set. Request lands, middleware verifies the token, `/internal/telegram-forward` dispatches the message to the bound session as designed. Verified in the shadow-install on the echo agent — after patching `node_modules/instar/dist/lifeline/TelegramLifeline.js` with the same edit and restarting, inbound messages began reaching sessions again.
+
+Unit tests are not in scope for this patch per the user's explicit "skip testing — I know it's working" instruction during an urgent-deploy request. A regression test asserting that `forwardToServer` includes the bearer header is tracked as a follow-up.
+
+## Deployment Notes
+
+- No operator action required on update. The fix activates on next server start after upgrade.
+- Agents with `authToken` set (the standard configuration) will immediately recover inbound Telegram routing.
+- Agents without an `authToken` configured are unaffected — they were already falling through on localhost-only semantics from older middleware.
+
+## Rollback
+
+Downgrading to 0.28.53 reintroduces the bug — inbound Telegram messages will again be dropped with 401. There is no state to migrate; the fix is purely client-side header construction.
