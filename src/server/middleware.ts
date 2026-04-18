@@ -71,15 +71,32 @@ export function authMiddleware(authToken?: string) {
       return;
     }
 
-    // Internal endpoints: enforce localhost at the network layer (P0-4 defense-in-depth)
+    // Internal endpoints: enforce localhost AND bearer token.
+    //
+    // Per context-death-pitfall-prevention spec § P0.5 (PR3 fix):
+    // /internal/* routes are bearer-token authenticated using the
+    // same .instar/config.json#authToken. The prior localhost-only
+    // check left a gap: any process on the local machine could flip
+    // the stop-gate kill-switch or drive /internal/stop-gate/evaluate
+    // without credentials. Drift-correction threat model accepts that
+    // a truly adversarial session with token access can still bypass;
+    // this closes the casual-process gap.
+    //
+    // Additionally: reject /internal/* when X-Forwarded-For is set
+    // (spec P0.5: advisory defense-in-depth against tunnel
+    // misconfiguration; a Cloudflare tunnel accidentally routing
+    // internal paths to the LAN should not succeed).
     if (req.path.startsWith('/internal/')) {
       const remote = req.socket.remoteAddress;
       if (remote !== '127.0.0.1' && remote !== '::1' && remote !== '::ffff:127.0.0.1') {
         res.status(403).json({ error: 'Internal routes are localhost-only' });
         return;
       }
-      next();
-      return;
+      if (req.headers['x-forwarded-for']) {
+        res.status(403).json({ error: 'Internal routes reject X-Forwarded-For requests' });
+        return;
+      }
+      // Fall through to the standard bearer check below.
     }
 
     // Secret drop routes — the token in the URL IS the auth.

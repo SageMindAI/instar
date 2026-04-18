@@ -139,6 +139,10 @@ export class AgentServer {
     oidcVerify?: (token: string) => Promise<{ repository: string; workflow_ref: string; ref: string }>;
     /** Enrolled GitHub repos allowed to call the GH-check endpoint. */
     oidcEnrolledRepos?: Array<{ owner: string; repo: string }>;
+    /** UnjustifiedStopGate authority (PR3 — context-death spec). */
+    unjustifiedStopGate?: import('../core/UnjustifiedStopGate.js').UnjustifiedStopGate;
+    /** Stop-gate SQLite persistence (PR3). */
+    stopGateDb?: import('../core/StopGateDb.js').StopGateDb;
   }) {
     this.config = options.config;
     this.startTime = new Date();
@@ -362,6 +366,8 @@ export class AgentServer {
       threadlineReplyWaiters: options.threadlineReplyWaiters ?? new Map(),
       sharedStateLedger: options.sharedStateLedger ?? null,
       ledgerSessionRegistry: options.ledgerSessionRegistry ?? null,
+      unjustifiedStopGate: options.unjustifiedStopGate ?? null,
+      stopGateDb: options.stopGateDb ?? null,
       startTime: this.startTime,
     };
     this.routeContext = routeCtx;

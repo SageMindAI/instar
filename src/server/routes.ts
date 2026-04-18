@@ -27,7 +27,83 @@ import {
   setKillSwitch,
   getKillSwitch,
   recordSessionStart,
+  getMode,
 } from './stopGate.js';
+import {
+  UnjustifiedStopGate,
+  assembleReminder,
+  type EvaluateInput,
+  type AuthorityOutcome,
+  type EvidenceMetadata,
+  type EvidencePointer,
+} from '../core/UnjustifiedStopGate.js';
+import { StopGateDb, dayKeyFor, type EvalMode } from '../core/StopGateDb.js';
+import { randomUUID as cryptoRandomUUID } from 'node:crypto';
+import { execFile as execFileCb } from 'node:child_process';
+import { promisify } from 'node:util';
+
+const execFile = promisify(execFileCb);
+
+/**
+ * Per-session continue-ceiling (spec § (b) Outcomes).
+ * If an authority judgement of `continue` would push this session's
+ * counter to >= this value, the evaluate route force-allows + flags
+ * stuck-state instead. Catches runaway authority judgment without
+ * requiring operator intervention.
+ */
+const CONTINUE_CEILING = 2;
+
+/**
+ * Server-side post-verifier for a continue decision (spec § (b) lines 273-281).
+ * Runs three of the five structural checks (#1 git object exists,
+ * #3 descendant relationship, #5 ≥1 non-session-created artifact).
+ * Checks #2 (ctime unchanged) and #4 (`.git/HEAD` unchanged) require
+ * T0 state the hook router will collect — deferred to PR3b when the
+ * router lands.
+ *
+ * Returns null on success; failure-detail string on any check that fails.
+ * Fail-open path: caller converts a failed verify into `invalidEvidence`.
+ */
+async function postVerifyEvidence(
+  projectDir: string,
+  evidence: EvidenceMetadata,
+  pointer: EvidencePointer
+): Promise<string | null> {
+  // Check #5 first — cheap, doesn't spawn git.
+  const hasPreSessionArtifact = evidence.artifacts.some(a => !a.createdThisSession);
+  if (!hasPreSessionArtifact) {
+    return 'all enumerated artifacts were created this session';
+  }
+
+  const planSha = pointer.plan_commit_sha;
+  const incSha = pointer.incremental_commit_sha;
+
+  try {
+    // Check #1: plan_commit_sha exists in the git object DB.
+    if (planSha) {
+      await execFile('git', ['-C', projectDir, 'cat-file', '-e', planSha], { timeout: 500 });
+    }
+
+    // Check #3: incremental_commit_sha is a descendant of plan_commit_sha.
+    //   `git merge-base --is-ancestor <plan> <incremental>` exits 0 if
+    //   plan IS an ancestor of incremental (i.e. incremental is a descendant).
+    if (planSha && incSha && planSha !== incSha) {
+      try {
+        await execFile(
+          'git',
+          ['-C', projectDir, 'merge-base', '--is-ancestor', planSha, incSha],
+          { timeout: 500 }
+        );
+      } catch {
+        return `incremental ${incSha} is not a descendant of plan ${planSha}`;
+      }
+    }
+  } catch (err) {
+    return `git structural check failed: ${err instanceof Error ? err.message : String(err)}`;
+  }
+
+  return null;
+}
 import { ReflectionMetrics } from '../monitoring/ReflectionMetrics.js';
 import { HomeostasisMonitor } from '../monitoring/HomeostasisMonitor.js';
 import type { TelegramAdapter } from '../messaging/TelegramAdapter.js';
@@ -183,6 +259,14 @@ export interface RouteContext {
    *  can collide when multiple agents share a name). Value: resolve callback
    *  with reply text. */
   threadlineReplyWaiters: Map<string, { resolve: (reply: string) => void; threadId: string; senderAgent: string; timer: ReturnType<typeof setTimeout> }>;
+  /** UnjustifiedStopGate authority (PR3 — context-death spec). Null
+   *  when no intelligence provider is configured; the evaluate route
+   *  fail-opens in that case. */
+  unjustifiedStopGate: UnjustifiedStopGate | null;
+  /** Stop-gate SQLite persistence (PR3). Null when not initialized;
+   *  the evaluate route will still produce a response, just without
+   *  persistence. */
+  stopGateDb: StopGateDb | null;
   startTime: Date;
 }
 
@@ -765,6 +849,319 @@ export function createRoutes(ctx: RouteContext): Router {
     }
     const prior = setKillSwitch(value);
     res.json({ killSwitch: value, prior, changed: prior !== value });
+  });
+
+  // ── Stop-gate evaluate + log + annotations (PR3 — context-death
+  //    spec § (b),(d)) ─────────────────────────────────────────────
+  //
+  // evaluate: invoked by the stop-hook router in shadow+ modes. Takes
+  // the evidence_metadata + untrusted_content payload, runs the
+  // UnjustifiedStopGate authority, writes the event to SQLite, and
+  // returns the decision plus a server-assembled reminder (for
+  // `continue` decisions). Fails open on any error path — the response
+  // always includes `decision: 'allow'` fallback if the authority
+  // couldn't run.
+
+  router.post('/internal/stop-gate/evaluate', async (req, res) => {
+    const body = (req.body ?? {}) as Partial<{
+      sessionId: string;
+      evidenceMetadata: EvaluateInput['evidenceMetadata'];
+      untrustedContent: EvaluateInput['untrustedContent'];
+    }>;
+
+    const sessionId = typeof body.sessionId === 'string' ? body.sessionId : '';
+    if (!sessionId) {
+      res.status(400).json({ error: 'sessionId required' });
+      return;
+    }
+    if (!body.evidenceMetadata || !body.untrustedContent) {
+      res.status(400).json({ error: 'evidenceMetadata and untrustedContent required' });
+      return;
+    }
+
+    const mode = getMode() as EvalMode;
+    const agentId = ctx.config.projectName ?? 'unknown';
+    const eventId = cryptoRandomUUID();
+    const ts = Date.now();
+    const reasonPreview = (body.untrustedContent.stopReason ?? '').slice(0, 200);
+
+    // Kill-switch or mode=off: short-circuit to allow, no authority
+    // call, no event logged (caller already knows not to call us here,
+    // but belt-and-suspenders).
+    if (getKillSwitch() || mode === 'off') {
+      res.json({
+        eventId,
+        decision: 'allow',
+        rule: null,
+        reminder: '',
+        shortCircuit: getKillSwitch() ? 'kill-switch' : 'mode-off',
+      });
+      return;
+    }
+
+    const authority = ctx.unjustifiedStopGate;
+    const db = ctx.stopGateDb;
+
+    // Per-session continue-ceiling (spec § (b) Outcomes).
+    //
+    // If this session has already received >= CONTINUE_CEILING `continue`
+    // decisions, force_allow. The authority may be consistently wrong
+    // on this session; keep letting it stop and let the operator see
+    // the stuck-state flag. No authority call on the force-allow path.
+    const priorCount = db?.getContinueCount(sessionId)?.count ?? 0;
+    if (priorCount >= CONTINUE_CEILING) {
+      if (db) {
+        db.setStuck(sessionId, ts);
+        db.recordEvent({
+          eventId,
+          sessionId,
+          agentId,
+          ts,
+          mode,
+          decision: 'force_allow',
+          rule: null,
+          invalidKind: null,
+          evidencePointerJson: null,
+          latencyMs: 0,
+          reasonPreview,
+        });
+        db.rollupAggregate({
+          agentId,
+          dayKey: dayKeyFor(ts),
+          triggeredDelta: 1,
+          shadowDelta: mode === 'shadow' ? 1 : 0,
+          allowDelta: 1,
+        });
+      }
+      res.json({
+        eventId,
+        decision: 'force_allow',
+        rule: null,
+        reminder: '',
+        shortCircuit: 'continue-ceiling',
+        priorCount,
+      });
+      return;
+    }
+
+    let outcome: AuthorityOutcome | null = null;
+    if (authority) {
+      try {
+        outcome = await authority.evaluate({
+          evidenceMetadata: body.evidenceMetadata,
+          untrustedContent: body.untrustedContent,
+        });
+      } catch (err) {
+        outcome = {
+          ok: false,
+          failure: {
+            kind: 'llmUnavailable',
+            detail: err instanceof Error ? err.message : String(err),
+            latencyMs: 0,
+          },
+        };
+      }
+    } else {
+      outcome = {
+        ok: false,
+        failure: { kind: 'llmUnavailable', detail: 'authority not configured', latencyMs: 0 },
+      };
+    }
+
+    // Log + respond. Failures fail-open to allow.
+    if (outcome.ok) {
+      const r = outcome.result;
+
+      // Server-side post-verifier for `continue` decisions (spec §
+      // "Evidence pointer" lines 273-281). On any structural check
+      // failure: fail-open → allow + invalidEvidence log. The
+      // authority's stated rule is discarded.
+      if (r.decision === 'continue') {
+        const verifyFailure = await postVerifyEvidence(
+          ctx.config.projectDir,
+          body.evidenceMetadata,
+          r.evidencePointer
+        );
+        if (verifyFailure) {
+          if (db) {
+            db.recordEvent({
+              eventId,
+              sessionId,
+              agentId,
+              ts,
+              mode,
+              decision: null,
+              rule: null,
+              invalidKind: 'invalidEvidence',
+              evidencePointerJson: JSON.stringify(r.evidencePointer),
+              latencyMs: r.latencyMs,
+              reasonPreview,
+            });
+            db.rollupAggregate({
+              agentId,
+              dayKey: dayKeyFor(ts),
+              triggeredDelta: 1,
+              shadowDelta: mode === 'shadow' ? 1 : 0,
+              failureDelta: 1,
+            });
+          }
+          DegradationReporter.getInstance().report({
+            feature: 'unjustifiedStopGate.postVerifier',
+            primary: 'Server-side evidence pointer structural verification',
+            fallback: 'fail-open → allow',
+            reason: verifyFailure,
+            impact: 'Stop event allowed (authority continue rejected as unverifiable)',
+          });
+          res.json({
+            eventId,
+            decision: 'allow',
+            rule: null,
+            reminder: '',
+            failOpen: 'invalidEvidence',
+            postVerifyFailure: verifyFailure,
+            latencyMs: r.latencyMs,
+          });
+          return;
+        }
+      }
+
+      // Record + count. On `continue`, increment the session counter
+      // (the NEXT call hitting CONTINUE_CEILING will short-circuit to
+      // force_allow above). Atomic via SQLite UPSERT.
+      if (db && r.decision === 'continue') {
+        db.incrementContinueCount(sessionId, ts);
+      }
+
+      const reminder = r.decision === 'continue' ? assembleReminder(r.rule, r.evidencePointer) : '';
+      if (db) {
+        db.recordEvent({
+          eventId,
+          sessionId,
+          agentId,
+          ts,
+          mode,
+          decision: r.decision,
+          rule: r.rule,
+          invalidKind: null,
+          evidencePointerJson: JSON.stringify(r.evidencePointer),
+          latencyMs: r.latencyMs,
+          reasonPreview,
+        });
+        db.rollupAggregate({
+          agentId,
+          dayKey: dayKeyFor(ts),
+          triggeredDelta: 1,
+          shadowDelta: mode === 'shadow' ? 1 : 0,
+          continueDelta: r.decision === 'continue' ? 1 : 0,
+          allowDelta: r.decision === 'allow' ? 1 : 0,
+          escalateDelta: r.decision === 'escalate' ? 1 : 0,
+        });
+      }
+      res.json({
+        eventId,
+        decision: r.decision,
+        rule: r.rule,
+        reminder,
+        latencyMs: r.latencyMs,
+      });
+    } else {
+      // Fail-open: allow. Log with the failure kind so guardian-pulse
+      // can surface patterns.
+      if (db) {
+        db.recordEvent({
+          eventId,
+          sessionId,
+          agentId,
+          ts,
+          mode,
+          decision: null,
+          rule: null,
+          invalidKind: outcome.failure.kind,
+          evidencePointerJson: null,
+          latencyMs: outcome.failure.latencyMs,
+          reasonPreview,
+        });
+        db.rollupAggregate({
+          agentId,
+          dayKey: dayKeyFor(ts),
+          triggeredDelta: 1,
+          shadowDelta: mode === 'shadow' ? 1 : 0,
+          failureDelta: 1,
+        });
+      }
+      DegradationReporter.getInstance().report({
+        feature: `unjustifiedStopGate.${outcome.failure.kind}`,
+        primary: 'Authority evaluation',
+        fallback: 'fail-open → allow',
+        reason: outcome.failure.detail,
+        impact: 'Stop event allowed without authority ruling (drift correction not applied)',
+      });
+      res.json({
+        eventId,
+        decision: 'allow',
+        rule: null,
+        reminder: '',
+        failOpen: outcome.failure.kind,
+        latencyMs: outcome.failure.latencyMs,
+      });
+    }
+  });
+
+  router.get('/internal/stop-gate/log', (req, res) => {
+    const limit = Math.min(1000, Math.max(1, parseInt(String(req.query.tail ?? '100'), 10) || 100));
+    const db = ctx.stopGateDb;
+    if (!db) {
+      res.json({ events: [] });
+      return;
+    }
+    const events = db.recentEvents(limit);
+    res.json({ events });
+  });
+
+  router.post('/internal/stop-gate/annotations', (req, res) => {
+    const db = ctx.stopGateDb;
+    if (!db) {
+      res.status(503).json({ error: 'stop-gate DB not initialized' });
+      return;
+    }
+    const body = (req.body ?? {}) as Partial<{
+      eventId: string;
+      operator: string;
+      verdict: string;
+      rationale: string;
+      dwellMs: number;
+    }>;
+    if (!body.eventId || !body.operator || !body.verdict) {
+      res.status(400).json({ error: 'eventId, operator, verdict required' });
+      return;
+    }
+    if (!['correct', 'incorrect', 'unclear'].includes(body.verdict)) {
+      res.status(400).json({ error: 'verdict must be correct|incorrect|unclear' });
+      return;
+    }
+    const dwellMs = typeof body.dwellMs === 'number' ? body.dwellMs : 0;
+    // Per spec PR5: ≥15s dwell time on each annotation. We don't reject
+    // low-dwell writes at this layer — the CLI review tool enforces
+    // per-submit; this endpoint just records what it gets.
+    db.addAnnotation({
+      eventId: body.eventId,
+      operator: body.operator,
+      verdict: body.verdict as 'correct' | 'incorrect' | 'unclear',
+      rationale: body.rationale ?? '',
+      dwellMs,
+      createdAt: Date.now(),
+    });
+    res.json({ ok: true });
+  });
+
+  router.get('/internal/stop-gate/annotations/:eventId', (req, res) => {
+    const db = ctx.stopGateDb;
+    if (!db) {
+      res.json({ annotations: [] });
+      return;
+    }
+    const annotations = db.annotationsFor(req.params.eventId);
+    res.json({ annotations });
   });
 
   router.post('/hooks/events', (req, res) => {
