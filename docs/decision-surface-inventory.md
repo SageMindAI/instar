@@ -31,6 +31,7 @@
 | `core/InputGuard.ts` — topic-coherence review (Layer 2) | Whether a message fits the topic | LLM-backed | **Authority — OK** |
 | `core/MessageSentinel.ts` — fast-path classifier | Whether a short user message is an emergency stop/cancel signal | Deterministic (regex, word-count gate ≤ 4 words) | **Authority — OK** (constrained: only acts on short-word messages matching specific imperative patterns. Longer messages route to LLM. Good hybrid.) |
 | `core/MessageSentinel.ts` — LLM classifier | Intent class for non-short messages | LLM-backed | **Authority — OK** |
+| `core/MessageSentinel.ts` — continue-ping intent classifier (P0.4) | Whether a message is a pure-resume (`intent_a`), resume+scope (`intent_b`), or resume+question (`intent_c`) continue-ping | Deterministic (regex token match + additive/question pattern detection, word-count gate ≤ 50 words) | **Signal — OK** (side-channel only; emits `continuePingIntent` on `SentinelClassification`; does not block or modify routing; `intent_a` consumed by downstream gate telemetry as an unjustified-stop signal) |
 | `threadline/InboundMessageGate.ts` — rate-limit and trust-level checks | Whether an inter-agent message passes transport-layer constraints | Deterministic (sliding window per fingerprint) | **Authority — OK** (transport-layer mechanics — idempotency / rate limiting, not judgment) |
 
 ## 3. Session lifecycle
