@@ -1,7 +1,0 @@
-name = "instar-telemetry"
-main = "worker.js"
-compatibility_date = "2024-12-01"
-
-[[kv_namespaces]]
-binding = "TELEMETRY_KV"
-id = "587c114cdfc742e38fafb85222d8ce9c"
