@@ -1,0 +1,17 @@
+{
+  "sessionId": "echo-parallel-dev-composition-root",
+  "timestamp": "2026-04-18T17:40:00.000Z",
+  "artifactPath": "upgrades/side-effects/parallel-dev-composition-root.md",
+  "artifactSha256": "0613d6c73322701c1b4ff8b6e9845e601c4fe19fd6ec5fccfa7d9d86a2799b79",
+  "specPath": "docs/specs/PARALLEL-DEV-ISOLATION-SPEC.md",
+  "coveredFiles": [
+    "src/commands/server.ts",
+    "src/core/ParallelDevWiring.ts",
+    "src/core/types.ts",
+    "tests/unit/ParallelDevWiring.test.ts"
+  ],
+  "phase": "complete",
+  "secondPass": "in-scope-followup",
+  "reviewerConcurred": true,
+  "convergenceNote": "Follow-up composition-root wiring for the already-converged PARALLEL-DEV-ISOLATION-SPEC.md (iter 4, approved 2026-04-17). This PR is an implementation of the spec, not a new spec — it wires the shipped WorktreeManager into server startup behind a feature flag that defaults to 'off'. 7 new regression tests pass; 20 pre-existing parallel-dev tests still pass; typecheck clean."
+}

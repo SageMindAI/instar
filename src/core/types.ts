@@ -1507,6 +1507,41 @@ export interface InstarConfig {
    * docs/specs/PR-REVIEW-HARDENING-SPEC.md §"Rollout plan".
    */
   prGate?: PrGateConfig;
+  /**
+   * PARALLEL-DEV-ISOLATION rollout phase. Default 'off' (no WorktreeManager
+   * instantiated, sessions share one working tree). Flipping to 'shadow' or
+   * 'enforce' spins up the WorktreeManager and gives each topic session its
+   * own isolated worktree — see docs/specs/PARALLEL-DEV-ISOLATION-SPEC.md.
+   */
+  parallelDev?: ParallelDevConfig;
+}
+
+// ── Parallel-dev isolation (PARALLEL-DEV-ISOLATION-SPEC) ────────────
+
+export interface ParallelDevConfig {
+  /**
+   * Rollout phase.
+   *   'off'      — no WorktreeManager; sessions share one working tree (legacy).
+   *   'shadow'   — WorktreeManager active locally; sessions spawn in isolated
+   *                worktrees, but the GitHub workflow check is advisory only.
+   *   'enforce'  — WorktreeManager active AND the push gate at GitHub Actions
+   *                blocks unsigned commits. Requires a working OIDC verifier
+   *                and installed GH rulesets.
+   */
+  phase: 'off' | 'shadow' | 'enforce';
+  /**
+   * Allow the headless AES-GCM + scrypt flat-file fallback when no OS keychain
+   * is reachable. When true, `INSTAR_WORKTREE_PASSPHRASE` (≥12 chars) must be
+   * set in the server's environment. See WorktreeKeyVault K1.
+   */
+  headlessAllowed?: boolean;
+  /**
+   * Repos enrolled for OIDC-authenticated push-gate calls, e.g.
+   * `[{ owner: 'JKHeadley', repo: 'instar' }]`. Empty = accept no OIDC tokens.
+   */
+  oidcEnrolledRepos?: Array<{ owner: string; repo: string }>;
+  /** Maximum commit→push delay before a trailer nonce expires (seconds). */
+  maxPushDelaySeconds?: number;
 }
 
 // ── PR-gate (PR-REVIEW-HARDENING-SPEC Phase A) ────────────────────
