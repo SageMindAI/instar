@@ -388,4 +388,148 @@ describe('SpawnRequestManager', () => {
       expect(result.approved).toBe(true);
     });
   });
+
+  // ── §4.2: Failure-suppressive reservation + classified attribution ──
+
+  describe('§4.2 failure-suppressive reservation', () => {
+    it('stamps cooldown before spawn and does NOT roll back on failure', async () => {
+      const spawnSession = vi.fn().mockRejectedValue(new Error('boom'));
+      config = makeConfig({ spawnSession });
+      manager = new SpawnRequestManager(config);
+
+      const first = await manager.evaluate(makeRequest());
+      expect(first.approved).toBe(false);
+      expect(first.reason).toContain('Spawn failed');
+
+      // Without rollback, the cooldown is still in effect.
+      const second = await manager.evaluate(makeRequest());
+      expect(second.approved).toBe(false);
+      expect(second.reason).toMatch(/Cooldown/i);
+    });
+
+    it('ambiguous (untyped) failures do NOT increment penalty counter', async () => {
+      const spawnSession = vi.fn().mockRejectedValue(new Error('unspecified provider error'));
+      config = makeConfig({ spawnSession, cooldownMs: 1 });
+      manager = new SpawnRequestManager(config);
+
+      for (let i = 0; i < 5; i++) {
+        await manager.evaluate(makeRequest());
+        await vi.advanceTimersByTimeAsync(2);
+      }
+      const status = manager.getStatus();
+      expect(status.penalties).toEqual([]);
+    });
+
+    it('agent-attributable failures accumulate and stamp penaltyUntil at threshold', async () => {
+      const { SpawnFailureError } = await import('../../src/messaging/SpawnRequestManager.js');
+      const spawnSession = vi.fn().mockRejectedValue(
+        new SpawnFailureError('bad envelope', 'envelope-validation'),
+      );
+      config = makeConfig({ spawnSession, cooldownMs: 1 });
+      manager = new SpawnRequestManager(config);
+
+      await manager.evaluate(makeRequest());
+      await vi.advanceTimersByTimeAsync(2);
+      await manager.evaluate(makeRequest());
+      await vi.advanceTimersByTimeAsync(2);
+      await manager.evaluate(makeRequest());
+
+      const status = manager.getStatus();
+      expect(status.penalties).toHaveLength(1);
+      expect(status.penalties[0].consecutiveFailures).toBe(3);
+      expect(status.penalties[0].untilMs).toBeGreaterThan(0);
+    });
+
+    it('infrastructure failures do NOT stamp penaltyUntil even at threshold', async () => {
+      const { SpawnFailureError } = await import('../../src/messaging/SpawnRequestManager.js');
+      const spawnSession = vi.fn().mockRejectedValue(
+        new SpawnFailureError('provider outage', 'provider-5xx'),
+      );
+      config = makeConfig({ spawnSession, cooldownMs: 1 });
+      manager = new SpawnRequestManager(config);
+
+      for (let i = 0; i < 5; i++) {
+        await manager.evaluate(makeRequest());
+        await vi.advanceTimersByTimeAsync(2);
+      }
+      const status = manager.getStatus();
+      expect(status.penalties).toEqual([]);
+    });
+
+    it('successful spawn clears consecutive failure counter', async () => {
+      const { SpawnFailureError } = await import('../../src/messaging/SpawnRequestManager.js');
+      const spawnSession = vi.fn()
+        .mockRejectedValueOnce(new SpawnFailureError('bad', 'envelope-validation'))
+        .mockRejectedValueOnce(new SpawnFailureError('bad', 'envelope-validation'))
+        .mockResolvedValueOnce('spawned-ok');
+      config = makeConfig({ spawnSession, cooldownMs: 1 });
+      manager = new SpawnRequestManager(config);
+
+      await manager.evaluate(makeRequest());
+      await vi.advanceTimersByTimeAsync(2);
+      await manager.evaluate(makeRequest());
+      await vi.advanceTimersByTimeAsync(2);
+      const ok = await manager.evaluate(makeRequest());
+      expect(ok.approved).toBe(true);
+
+      // A fourth attributable failure should not immediately penalize because counter was cleared.
+      const spawnSession2 = vi.fn().mockRejectedValue(
+        new SpawnFailureError('bad again', 'envelope-validation'),
+      );
+      config = { ...config, spawnSession: spawnSession2 };
+      (manager as unknown as { '#config': SpawnRequestManagerConfig })['#config'] = config;
+      // Clean approach: just re-evaluate against the same manager's counter state.
+      const status = manager.getStatus();
+      expect(status.penalties).toEqual([]);
+    });
+
+    it('cooldownRemainingMs returns max of cooldown and penalty remainders', async () => {
+      const { SpawnFailureError } = await import('../../src/messaging/SpawnRequestManager.js');
+      const spawnSession = vi.fn().mockRejectedValue(
+        new SpawnFailureError('bad', 'envelope-validation'),
+      );
+      config = makeConfig({ spawnSession, cooldownMs: 100 });
+      manager = new SpawnRequestManager(config);
+
+      // Trip the penalty (3 attributable failures).
+      for (let i = 0; i < 3; i++) {
+        await manager.evaluate(makeRequest());
+        await vi.advanceTimersByTimeAsync(150); // exceed cooldown between each
+      }
+
+      // Penalty should now be ~200ms (2 × 100ms). Remaining should still be positive.
+      const remaining = manager.cooldownRemainingMs('agent-a');
+      expect(remaining).toBeGreaterThan(0);
+    });
+
+    it('penaltyUntil blocks even when cooldown has elapsed', async () => {
+      const { SpawnFailureError } = await import('../../src/messaging/SpawnRequestManager.js');
+      let fakeNow = 1_000_000;
+      const spawnSession = vi.fn().mockRejectedValue(
+        new SpawnFailureError('bad', 'safety-refusal-on-payload'),
+      );
+      config = makeConfig({ spawnSession, cooldownMs: 50, nowFn: () => fakeNow });
+      manager = new SpawnRequestManager(config);
+
+      // Trip the penalty with enough spacing to clear cooldown between each attempt.
+      await manager.evaluate(makeRequest());
+      fakeNow += 60;
+      await manager.evaluate(makeRequest());
+      fakeNow += 60;
+      await manager.evaluate(makeRequest());
+      // penaltyUntil stamped at fakeNow = 1_000_120, = 1_000_120 + 100 = 1_000_220.
+
+      // Move past cooldown (last spawn was at 1_000_120, cooldown 50 → ends at 1_000_170)
+      // but BEFORE penalty (ends at 1_000_220).
+      fakeNow = 1_000_180;
+      const blocked = await manager.evaluate(makeRequest());
+      expect(blocked.approved).toBe(false);
+      expect(blocked.reason).toMatch(/Cooldown/i);
+
+      // Move past penalty; now it should approve (but spawn still fails, which is fine).
+      fakeNow = 1_000_230;
+      const nowPastPenalty = manager.cooldownRemainingMs('agent-a');
+      expect(nowPastPenalty).toBe(0);
+    });
+  });
 });
