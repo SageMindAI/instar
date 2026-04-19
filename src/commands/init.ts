@@ -1649,6 +1649,27 @@ curl -s http://localhost:\${INSTAR_PORT:-${port}}/evolution/actions/overdue
 ## The Commitment Check
 
 The commitment-check job runs every 4 hours and surfaces overdue items. If you create an action and forget it, the system won't.
+
+## Promise Beacon (follow-through heartbeats)
+
+If you're committing to a user on Telegram and want the system to auto-emit \`⏳\` status lines while you work silently, pass \`nextUpdateDueAt\` and \`topicId\`:
+
+\`\`\`bash
+curl -s -X POST http://localhost:\${INSTAR_PORT:-${port}}/commitments \\
+  -H 'Content-Type: application/json' \\
+  -d '{
+    "userRequest":"user asked for X",
+    "agentResponse":"I will ship X in about 30 min",
+    "type":"one-time-action",
+    "topicId":TOPIC_ID,
+    "beaconEnabled":true,
+    "cadenceMs":600000,
+    "nextUpdateDueAt":"2026-04-19T18:30:00Z",
+    "source":"skill"
+  }'
+\`\`\`
+
+PromiseBeacon will then post a heartbeat on the configured cadence until you \`POST /commitments/:id/deliver\` with the delivery message id. See docs/specs/PROMISE-BEACON-SPEC.md.
 `,
     },
     'feedback': {
