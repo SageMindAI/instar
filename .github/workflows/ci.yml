@@ -21,11 +21,14 @@ jobs:
       - run: npm run lint
 
   unit:
-    name: Unit Tests
+    name: Unit Tests (node ${{ matrix.node-version }}, shard ${{ matrix.shard }}/4)
     runs-on: ubuntu-latest
     strategy:
+      # Don't cancel other shards if one fails — we want the full picture.
+      fail-fast: false
       matrix:
         node-version: [20, 22]
+        shard: [1, 2, 3, 4]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -35,7 +38,10 @@ jobs:
       - name: Install tmux
         run: sudo apt-get update && sudo apt-get install -y tmux
       - run: npm ci
-      - run: npm run test:push
+      # vitest shard syntax: --shard=<index>/<total>. Each runner executes a
+      # deterministic disjoint slice of the test files; union is the full suite.
+      # fileParallelism stays off within each shard to preserve isolation.
+      - run: npm run test:push -- --shard=${{ matrix.shard }}/4
 
   integration:
     name: Integration Tests
