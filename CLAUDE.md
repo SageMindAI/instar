@@ -29,8 +29,24 @@ src/
                   # CrashLoopPauser (auto-pause runaway jobs),
                   # CompactionSentinel (verified compaction recovery lifecycle —
                   # dedupe across triggers, JSONL-growth verification, retry with
-                  # backoff, zombie-kill veto while recovery is in flight)
-  messaging/      # TelegramAdapter (long-polling, JSONL history)
+                  # backoff, zombie-kill veto while recovery is in flight),
+                  # PresenceProxy (standby heartbeat — fires when a user message
+                  # goes unanswered past the tier threshold),
+                  # PromiseBeacon (commitment follow-through — cadenced heartbeats
+                  # on open beacon-enabled commitments; atRisk non-terminal state;
+                  # boot-cap enforcement via maxActiveBeacons),
+                  # CommitmentTracker (commitment lifecycle + single-writer CAS
+                  # mutate(); feeds PromiseBeacon and /commitments/* routes),
+                  # LlmQueue (rate-limited, priority-laned LLM call queue shared
+                  # across PresenceProxy and PromiseBeacon; enforces daily spend cap),
+                  # SessionWatchdog (stuck-process detection + escalating kill
+                  # sequence; watchdog-notifications for user-facing messages)
+  messaging/      # TelegramAdapter (long-polling, JSONL history),
+                  # WhatsAppAdapter, SlackAdapter, iMessage (platform adapters);
+                  # MessageRouter (topic → adapter routing),
+                  # DeliveryRetryManager (retry on failed delivery),
+                  # SpawnRequestManager (cross-session spawn coordination),
+                  # MessageStore (cross-platform message persistence)
   users/          # Multi-user identity resolution and permissions
   server/         # HTTP server, routes, middleware (auth, CORS)
   scaffold/       # Identity bootstrap, template file generation
