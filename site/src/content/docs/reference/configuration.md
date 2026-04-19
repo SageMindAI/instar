@@ -135,6 +135,7 @@ Configures the Threadline relay for inter-agent communication. See [Threadline P
 
 | Key | Description |
 |-----|-------------|
+| `messagingStyle` | Free-text description of how outbound messages should be written for this agent's user (e.g. `"ELI10, short sentences, plain words"`). Consumed by the outbound tone gate's `B11_STYLE_MISMATCH` rule — replies that clearly violate the style are blocked with HTTP 422. When unset, the style rule does not apply. |
 | `monitoring` | Health monitoring configuration |
 | `relationships` | Relationship tracking config |
 | `feedback` | Feedback loop config |
