@@ -46,6 +46,7 @@ import { QuotaNotifier } from '../monitoring/QuotaNotifier.js';
 import { QuotaManager } from '../monitoring/QuotaManager.js';
 import { classifySessionDeath } from '../monitoring/QuotaExhaustionDetector.js';
 import { SessionWatchdog } from '../monitoring/SessionWatchdog.js';
+import { formatWatchdogUserMessage } from '../monitoring/watchdog-notifications.js';
 import { StallTriageNurse } from '../monitoring/StallTriageNurse.js';
 import { TriageOrchestrator } from '../monitoring/TriageOrchestrator.js';
 import { SessionMonitor } from '../monitoring/SessionMonitor.js';
@@ -3501,32 +3502,25 @@ export async function startServer(options: StartOptions): Promise<void> {
       watchdog.intelligence = sharedIntelligence ?? null;
 
       watchdog.on('intervention', (event: any) => {
-        const levelNames = ['Monitoring', 'Ctrl+C', 'SIGTERM', 'SIGKILL', 'Kill Session'];
-        const levelName = levelNames[event.level] || `Level ${event.level}`;
-        const msg = `🔧 Watchdog [${levelName}]: ${event.action}\nStuck: \`${event.stuckCommand.slice(0, 60)}\``;
+        // Routine recovery (Ctrl+C, SIGTERM) stays as console diagnostics only.
+        // The user only hears when we had to force-kill (SIGKILL / session-kill) —
+        // that's the "actual issue" threshold. See watchdog-notifications.ts.
+        const userMsg = formatWatchdogUserMessage(event);
+        if (!userMsg) return;
 
         if (telegram) {
           const topicId = telegram.getTopicForSession(event.sessionName);
-          if (topicId) telegram.sendToTopic(topicId, msg).catch(() => {});
+          if (topicId) telegram.sendToTopic(topicId, userMsg).catch(() => {});
         }
         if (_slackAdapter) {
           const channelId = _slackAdapter.getChannelForSession(event.sessionName);
-          if (channelId) _slackAdapter.sendToChannel(channelId, msg).catch(() => {});
+          if (channelId) _slackAdapter.sendToChannel(channelId, userMsg).catch(() => {});
         }
       });
 
-      watchdog.on('recovery', (sessionName: string, fromLevel: number) => {
-        const msg = `✅ Watchdog: session recovered (was at escalation level ${fromLevel})`;
-
-        if (telegram) {
-          const topicId = telegram.getTopicForSession(sessionName);
-          if (topicId) telegram.sendToTopic(topicId, msg).catch(() => {});
-        }
-        if (_slackAdapter) {
-          const channelId = _slackAdapter.getChannelForSession(sessionName);
-          if (channelId) _slackAdapter.sendToChannel(channelId, msg).catch(() => {});
-        }
-      });
+      // Recovery events stay silent to the user. If we didn't announce the
+      // problem (Ctrl+C / SIGTERM are now silent), announcing recovery is
+      // noise. Intervention log still records it for diagnostics.
 
       watchdog.start();
       console.log(pc.green('  Session Watchdog enabled'));
