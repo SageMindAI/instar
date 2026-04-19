@@ -1,3 +1,4 @@
 # Plan
-- Step 1
-- Step 2
+
+- Slice 1: done
+- Slice 2: in progress
