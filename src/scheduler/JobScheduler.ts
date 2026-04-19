@@ -1136,7 +1136,13 @@ export class JobScheduler {
 
     // All attempts failed
     const stderr = (lastErr as { stderr?: string })?.stderr?.trim() || '';
-    const exitCode = (lastErr as { status?: number })?.status ?? null;
+    // execFileAsync (promisified execFile) rejects with an error whose exit code
+    // lives on `.code`, not `.status`. `.status` is the shape for synchronous
+    // spawnSync/execSync. Reading `.status` always resolved to undefined → null,
+    // making legitimate non-zero skips look like process crashes in the activity
+    // feed. Prefer signal (kill reason), then code, then legacy status.
+    const errShape = lastErr as { code?: number; signal?: string | null; status?: number };
+    const exitCode = errShape?.signal ?? errShape?.code ?? errShape?.status ?? null;
     const gateCmd = job.gate!.length > 200 ? job.gate!.slice(0, 200) + '…' : job.gate!;
 
     this.skipLedger.recordSkip(job.slug, 'gate');

@@ -72,13 +72,24 @@ export interface WatchdogStats {
   llmGateOverrides: number; // times LLM said "legitimate"
 }
 
-// Processes that are long-running by design
-const EXCLUDED_PATTERNS = [
-  'playwright-mcp', 'playwright-persistent', '@playwright/mcp',
-  'chrome-native-host', 'claude-in-chrome-mcp', 'payments-mcp',
-  'mcp-remote', '/mcp/', '.mcp/', 'caffeinate', 'exa-mcp-server',
-  // Any MCP stdio server (threadline MCP, custom MCP entries, etc.)
-  // is long-running by design — it waits on stdin for the host client.
+// Processes that are long-running by design.
+// Entries can be strings (substring match via `includes`) or regex (token match).
+const EXCLUDED_PATTERNS: Array<string | RegExp> = [
+  'playwright-persistent',
+  'chrome-native-host', 'caffeinate',
+  // Any *-mcp executable is an MCP stdio server, long-running by design
+  // (waits on stdin for the host client). This catches workspace-mcp,
+  // exa-mcp-server, foo-mcp, claude-in-chrome-mcp, bar-mcp-server.js, etc.
+  // Character class includes `-` so multi-hyphen names (claude-in-chrome-mcp)
+  // are consumed whole. Trailing lookahead allows end, whitespace, slash,
+  // or `.` (so `-mcp-server.js` style entry points match).
+  /(?:^|[\s/@])[\w.@-]+-mcp(?:-server)?(?=$|[\s/.])/,
+  // Package-style "@scope/mcp" where the last token is bare "mcp"
+  // (e.g. @playwright/mcp, @modelcontextprotocol/mcp). Covered by the
+  // existing "/mcp/" literal when inside a longer path, but a trailing
+  // bare "/mcp" also needs catching.
+  /(?:^|\s)[@\w./-]+\/mcp(?=$|[\s/])/,
+  'mcp-remote', '/mcp/', '.mcp/',
   'mcp-stdio-entry', 'mcp-stdio.js', '/mcp-stdio',
   // Shell-snapshot sourcing is session initialization, not a stuck command
   '.claude/shell-snapshots',
@@ -715,7 +726,11 @@ export class SessionWatchdog extends EventEmitter {
 
   private isExcluded(command: string): boolean {
     for (const pattern of EXCLUDED_PATTERNS) {
-      if (command.includes(pattern)) return true;
+      if (typeof pattern === 'string') {
+        if (command.includes(pattern)) return true;
+      } else if (pattern.test(command)) {
+        return true;
+      }
     }
     for (const prefix of EXCLUDED_PREFIXES) {
       if (command.startsWith(prefix)) return true;
