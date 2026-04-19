@@ -91,6 +91,7 @@ export type DeliveryPhase =
   | 'sent'           // Written to sender's store
   | 'received'       // Target server acknowledged receipt
   | 'queued'         // Received but awaiting delivery (editor active, session unavailable)
+  | 'undelivered'    // SpawnRequestManager queued but process is disposing; hand off to DeliveryRetryManager
   | 'delivered'      // Injected into target session's tmux input buffer
   | 'read'           // Target session acknowledged processing
   | 'expired'        // Delivery TTL elapsed without reaching 'delivered'
@@ -156,11 +157,18 @@ export const VALID_TRANSITIONS: ReadonlyArray<[DeliveryPhase, DeliveryPhase]> = 
   ['queued', 'expired'],
   ['expired', 'dead-lettered'],
   ['failed', 'dead-lettered'],
+  // SpawnRequestManager dispose handoff: queued entries → undelivered for DeliveryRetryManager sweep.
+  ['queued', 'undelivered'],
+  ['received', 'undelivered'],
+  ['undelivered', 'delivered'],
+  ['undelivered', 'expired'],
+  ['undelivered', 'queued'],    // DeliveryRetryManager may promote back to queued on pickup
   // Any phase can transition to 'failed' on unrecoverable error
   ['created', 'failed'],
   ['sent', 'failed'],
   ['received', 'failed'],
   ['queued', 'failed'],
+  ['undelivered', 'failed'],
   ['delivered', 'failed'],
 ];
 
@@ -418,6 +426,17 @@ export interface IMessageStore {
 
   /** Update the delivery state of an envelope */
   updateDelivery(messageId: string, delivery: DeliveryState): Promise<void>;
+
+  /**
+   * Mark many messages as 'undelivered' in batches.
+   * Used by SpawnRequestManager.dispose() to hand off queued entries to
+   * DeliveryRetryManager before process shutdown.
+   *
+   * Yields between chunks via setImmediate so the event loop stays
+   * responsive during SIGTERM. Returns the count of messages updated.
+   * Missing/already-terminal messages are skipped silently.
+   */
+  markManyUndelivered(messageIds: string[], chunkSize?: number): Promise<number>;
 
   /** Query inbox messages with filters */
   queryInbox(agentName: string, filter?: MessageFilter): Promise<MessageEnvelope[]>;

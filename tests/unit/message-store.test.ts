@@ -604,4 +604,88 @@ describe('MessageStore', () => {
       expect(threads.length).toBe(1);
     });
   });
+
+  // ── markManyUndelivered (SpawnRequestManager dispose handoff) ──
+  describe('markManyUndelivered', () => {
+    async function saveWithPhase(phase: DeliveryState['phase']): Promise<string> {
+      const env = makeEnvelope();
+      env.delivery.phase = phase;
+      await store.save(env);
+      return env.message.id;
+    }
+
+    it('transitions queued messages to undelivered', async () => {
+      const id = await saveWithPhase('queued');
+      const updated = await store.markManyUndelivered([id]);
+      expect(updated).toBe(1);
+      const after = await store.get(id);
+      expect(after?.delivery.phase).toBe('undelivered');
+      expect(after?.delivery.transitions.at(-1)).toMatchObject({
+        from: 'queued',
+        to: 'undelivered',
+        reason: 'SpawnRequestManager dispose handoff',
+      });
+    });
+
+    it('transitions received messages to undelivered', async () => {
+      const id = await saveWithPhase('received');
+      const updated = await store.markManyUndelivered([id]);
+      expect(updated).toBe(1);
+      expect((await store.get(id))?.delivery.phase).toBe('undelivered');
+    });
+
+    it('skips messages in terminal phases without incrementing count', async () => {
+      const delivered = await saveWithPhase('delivered');
+      const read = await saveWithPhase('read');
+      const expired = await saveWithPhase('expired');
+      const failed = await saveWithPhase('failed');
+
+      const updated = await store.markManyUndelivered([delivered, read, expired, failed]);
+      expect(updated).toBe(0);
+      expect((await store.get(delivered))?.delivery.phase).toBe('delivered');
+      expect((await store.get(read))?.delivery.phase).toBe('read');
+    });
+
+    it('skips missing message IDs silently', async () => {
+      const real = await saveWithPhase('queued');
+      const updated = await store.markManyUndelivered([real, 'does-not-exist']);
+      expect(updated).toBe(1);
+    });
+
+    it('skips messages already in undelivered without re-transitioning', async () => {
+      const id = await saveWithPhase('undelivered');
+      const before = (await store.get(id))?.delivery.transitions.length ?? 0;
+      const updated = await store.markManyUndelivered([id]);
+      expect(updated).toBe(0);
+      const after = (await store.get(id))?.delivery.transitions.length ?? 0;
+      expect(after).toBe(before);
+    });
+
+    it('processes large batches across multiple chunks', async () => {
+      const ids: string[] = [];
+      for (let i = 0; i < 120; i++) {
+        ids.push(await saveWithPhase('queued'));
+      }
+      const updated = await store.markManyUndelivered(ids, 50);
+      expect(updated).toBe(120);
+      for (const id of ids) {
+        expect((await store.get(id))?.delivery.phase).toBe('undelivered');
+      }
+    });
+
+    it('is resilient to corrupt files mid-batch', async () => {
+      const good1 = await saveWithPhase('queued');
+      const good2 = await saveWithPhase('queued');
+      // Insert a corrupt file that would parse-fail
+      const corrupt = makeEnvelope();
+      corrupt.delivery.phase = 'queued';
+      await store.save(corrupt);
+      fs.writeFileSync(path.join(tmpDir, 'store', `${corrupt.message.id}.json`), 'not valid json{{{');
+
+      const updated = await store.markManyUndelivered([good1, corrupt.message.id, good2]);
+      expect(updated).toBe(2);
+      expect((await store.get(good1))?.delivery.phase).toBe('undelivered');
+      expect((await store.get(good2))?.delivery.phase).toBe('undelivered');
+    });
+  });
 });

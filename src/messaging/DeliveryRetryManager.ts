@@ -120,8 +120,10 @@ export class DeliveryRetryManager {
         continue;
       }
 
-      // ── Layer 2 Retry: queued messages ────────────────────
-      if (phase === 'queued') {
+      // ── Layer 2 Retry: queued or undelivered messages ─────
+      // 'undelivered' is entered by SpawnRequestManager.dispose() handoff.
+      // It participates in Layer-2 retry identically to 'queued'.
+      if (phase === 'queued' || phase === 'undelivered') {
         const state = this.retryState.get(messageId) ?? {
           attempts: 0,
           firstAttemptAt: Date.now(),
@@ -150,10 +152,10 @@ export class DeliveryRetryManager {
         this.retryState.set(messageId, state);
 
         if (result.success) {
-          // Advance to delivered
+          const fromPhase = phase;
           envelope.delivery.phase = 'delivered';
           envelope.delivery.transitions.push({
-            from: 'queued',
+            from: fromPhase,
             to: 'delivered',
             at: new Date().toISOString(),
             reason: `Retry attempt ${state.attempts}`,

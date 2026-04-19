@@ -166,6 +166,30 @@ describe('DeliveryRetryManager', () => {
       const result2 = await manager.tick();
       expect(result2.retried).toBe(0);
     });
+
+    it('retries undelivered messages identically to queued (SpawnRequestManager handoff)', async () => {
+      const env = makeEnvelope();
+      env.delivery.phase = 'undelivered';
+      env.delivery.transitions.push({
+        from: 'queued',
+        to: 'undelivered',
+        at: new Date().toISOString(),
+        reason: 'SpawnRequestManager dispose handoff',
+      });
+      await store.save(env);
+
+      const result = await manager.tick();
+      expect(result.retried).toBe(1);
+
+      const updated = await store.get(env.message.id);
+      expect(updated!.delivery.phase).toBe('delivered');
+      // Transition must record the actual from-phase (undelivered), not hardcode 'queued'.
+      const lastTransition = updated!.delivery.transitions.at(-1);
+      expect(lastTransition).toMatchObject({
+        from: 'undelivered',
+        to: 'delivered',
+      });
+    });
   });
 
   // ── TTL Expiry ──────────────────────────────────────────────

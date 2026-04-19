@@ -90,6 +90,64 @@ export class MessageStore implements IMessageStore {
   }
 
   /**
+   * Mark many messages as 'undelivered' in chunks, yielding between chunks.
+   *
+   * Transitions: queued → undelivered, received → undelivered. Messages already
+   * in a terminal phase (delivered/read/expired/dead-lettered/failed) or already
+   * 'undelivered' are skipped silently. Missing files are skipped silently.
+   *
+   * Returns the count of messages actually transitioned.
+   */
+  async markManyUndelivered(messageIds: string[], chunkSize: number = 50): Promise<number> {
+    let updated = 0;
+    const { VALID_TRANSITIONS } = await import('./types.js');
+    const allowedFrom = new Set(
+      VALID_TRANSITIONS.filter(([, to]) => to === 'undelivered').map(([from]) => from)
+    );
+
+    for (let i = 0; i < messageIds.length; i += chunkSize) {
+      const chunk = messageIds.slice(i, i + chunkSize);
+      for (const id of chunk) {
+        const filePath = this.messageFilePath(id);
+        if (!fs.existsSync(filePath)) continue;
+
+        let envelope: MessageEnvelope;
+        try {
+          envelope = JSON.parse(fs.readFileSync(filePath, 'utf-8')) as MessageEnvelope;
+        } catch {
+          continue; // Corrupt file; skip rather than crash dispose
+        }
+
+        if (!allowedFrom.has(envelope.delivery.phase)) continue;
+
+        const now = new Date().toISOString();
+        const transition = {
+          from: envelope.delivery.phase,
+          to: 'undelivered' as const,
+          at: now,
+          reason: 'SpawnRequestManager dispose handoff',
+        };
+        envelope.delivery = {
+          ...envelope.delivery,
+          phase: 'undelivered',
+          transitions: [...envelope.delivery.transitions, transition],
+        };
+
+        const tmpPath = filePath + '.tmp';
+        fs.writeFileSync(tmpPath, JSON.stringify(envelope, null, 2));
+        fs.renameSync(tmpPath, filePath);
+        updated++;
+      }
+      // Yield between chunks so dispose doesn't block the event loop.
+      if (i + chunkSize < messageIds.length) {
+        await new Promise<void>(resolve => setImmediate(resolve));
+      }
+    }
+
+    return updated;
+  }
+
+  /**
    * Overwrite a stored envelope entirely.
    * Used after cross-machine routing updates transport fields (signature, relayChain).
    */
