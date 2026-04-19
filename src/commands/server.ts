@@ -5269,6 +5269,10 @@ export async function startServer(options: StartOptions): Promise<void> {
     messageRouter.setSummarySentinel(summarySentinel);
 
     // On-demand session spawning for message delivery (Phase 5)
+    // §4.4: spawn knobs are read from config.threadline.spawn — see
+    // ThreadlineSpawnConfig in core/types.ts. All fields are optional and
+    // fall through to manager-level defaults if absent.
+    const spawnConfig = config.threadline?.spawn;
     const spawnManager = new SpawnRequestManager({
       maxSessions: config.sessions.maxSessions ?? 5,
       getActiveSessions: () => sessionManager.listRunningSessions(),
@@ -5291,7 +5295,22 @@ export async function startServer(options: StartOptions): Promise<void> {
       onEscalate: (request, reason) => {
         notify('IMMEDIATE', 'messaging', `Spawn escalation: ${reason}\n  Requester: ${request.requester.agent}\n  Target: ${request.target.agent}`);
       },
+      // §4.4: optional knobs from config.
+      cooldownMs: spawnConfig?.cooldownMs,
+      maxDrainsPerTick: spawnConfig?.maxDrainsPerTick,
+      maxEnvelopeBytes: spawnConfig?.maxEnvelopeBytes,
+      maxGlobalQueued: spawnConfig?.maxGlobalQueued,
+      degradedMaxQueuedPerAgent: spawnConfig?.degradedMaxQueuedPerAgent,
     });
+
+    // §4.4 kill switch: drain loop runs unless explicitly disabled in config.
+    // Wired here so emergency rollback is a config flip, not a code change.
+    if (spawnConfig?.drainEnabled !== false) {
+      spawnManager.start();
+      console.log(`[spawn-manager] drain loop started (tick=${spawnManager.getDrainTickMs()}ms)`);
+    } else {
+      console.log('[spawn-manager] drain loop disabled by config.threadline.spawn.drainEnabled=false');
+    }
 
     // Threadline Router — handles threaded cross-agent conversations via relay
     const threadlineRouter = new ThreadlineRouter(
@@ -6135,6 +6154,7 @@ export async function startServer(options: StartOptions): Promise<void> {
       await notificationBatcher.flushAll(); // Drain pending notifications before exit
       notificationBatcher.stop();
       retryManager.stop();
+      spawnManager.dispose(); // §4.4: stop drain loop + clear DRR state
       summarySentinel.stop();
       memoryMonitor.stop();
       caffeinateManager.stop();

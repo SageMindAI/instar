@@ -1885,6 +1885,33 @@ export interface ThreadlineConfig {
   firstContactPolicy?: 'supervised' | 'auto';
   /** Listener daemon configuration */
   listener?: ThreadlineListenerConfig;
+  /** §4.4: Spawn manager / drain loop configuration */
+  spawn?: ThreadlineSpawnConfig;
+}
+
+/**
+ * §4.4: Configuration for the SpawnRequestManager and its drain loop.
+ *
+ * All fields are optional — sensible defaults are baked into the manager.
+ * The whole subtree can be omitted to keep prior behavior.
+ *
+ * The `drainEnabled` flag is the kill switch: setting `false` skips the
+ * `start()` call at server boot, leaving the drain loop dormant. Useful
+ * for emergency rollback without code changes.
+ */
+export interface ThreadlineSpawnConfig {
+  /** Cooldown between spawn requests per agent (ms). Default: 30000. */
+  cooldownMs?: number;
+  /** Max drains per tick. Default: 8. */
+  maxDrainsPerTick?: number;
+  /** Max envelope context size in UTF-8 bytes. Default: 262144 (256 KiB). */
+  maxEnvelopeBytes?: number;
+  /** Max queued messages across ALL agents. Default: 1000. */
+  maxGlobalQueued?: number;
+  /** Per-agent queue cap while in soft-limiter degradation. Default: 1. */
+  degradedMaxQueuedPerAgent?: number;
+  /** Kill switch: set false to skip starting the drain loop. Default: true. */
+  drainEnabled?: boolean;
 }
 
 // ── Input Guard ─────────────────────────────────────────────────────
