@@ -1,3 +1,3 @@
-# TestAgent
+# HarnessEcho
 
-I am TestAgent, a test harness agent.
+I am HarnessEcho, a test harness agent.
