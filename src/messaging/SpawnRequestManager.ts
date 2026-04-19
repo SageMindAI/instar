@@ -151,6 +151,13 @@ export interface SpawnRequestManagerConfig {
    * with bulk content. Default: 256 KiB.
    */
   maxEnvelopeBytes?: number;
+  /**
+   * §4.3: global cap on total queued messages across ALL agents. Refuses new
+   * enqueues with `global-queue-full` reason when the cap is reached. Bounds
+   * total memory regardless of how many distinct peers are queueing.
+   * Default: 1000.
+   */
+  maxGlobalQueued?: number;
 }
 
 // ── Constants ───────────────────────────────────────────────────
@@ -175,6 +182,8 @@ const PENALTY_COOLDOWN_MULTIPLIER = 2;
  */
 /** §4.3: default payload byte-size cap. */
 const DEFAULT_MAX_ENVELOPE_BYTES = 256 * 1024; // 256 KiB
+/** §4.3: default global queue cap. */
+const DEFAULT_MAX_GLOBAL_QUEUED = 1000;
 
 const INFRA_FAILURE_WINDOW_MS = 10 * 60_000;       // 10 min
 const INFRA_FAILURE_THRESHOLD = 5;                  // failures within window to trigger
@@ -275,6 +284,15 @@ export class SpawnRequestManager {
 
   /** §4.2: rolling timestamps of infra-attributable failures per agent. */
   readonly #infraFailureWindow = new Map<string, number[]>();
+
+  /**
+   * §4.3: per-agent truncation marker. Set when a queue write evicts an
+   * older entry due to per-agent or degraded admission cap. Cleared when
+   * the queue is fully drained for that agent. Lets downstream code report
+   * to the operator (or to the spawned session) that some messages were
+   * dropped.
+   */
+  readonly #truncated = new Set<string>();
 
   constructor(config: SpawnRequestManagerConfig) {
     this.#config = config;
@@ -528,8 +546,28 @@ export class SpawnRequestManager {
       + queuedSection;
   }
 
-  /** Queue a message for an agent during cooldown */
-  #queueMessage(agent: string, context: string, threadId?: string): void {
+  /**
+   * Queue a message for an agent during cooldown.
+   *
+   * §4.3 admission policy:
+   * 1. Stale-entry pruning by age (existing).
+   * 2. Per-agent cap (or degraded cap if peer is in soft-limiter degradation).
+   *    If exceeded, drop oldest AND set the per-agent truncation marker.
+   * 3. Global cap across all agents. If reached, refuse the new entry
+   *    silently (returns false). The caller's `evaluate` already returned
+   *    a denial earlier, so this is just a defensive bound.
+   *
+   * Returns true if the message was queued; false if rejected by the
+   * global cap. (Per-agent truncation still queues the new entry.)
+   */
+  #queueMessage(agent: string, context: string, threadId?: string): boolean {
+    // §4.3 global cap: refuse new enqueues when total queued is at the
+    // global limit. Computed before any local mutation.
+    const maxGlobal = this.#config.maxGlobalQueued ?? DEFAULT_MAX_GLOBAL_QUEUED;
+    let totalQueued = 0;
+    for (const q of this.#pendingMessages.values()) totalQueued += q.length;
+    if (totalQueued >= maxGlobal) return false;
+
     let queue = this.#pendingMessages.get(agent);
     if (!queue) {
       queue = [];
@@ -542,11 +580,15 @@ export class SpawnRequestManager {
       queue.shift();
     }
 
-    // §4.2 infra soft limiter: respect degraded admission cap if active.
+    // §4.2 infra soft limiter + §4.3 truncation marker.
+    // Per-agent cap (degraded if soft-limited). Drop oldest on overflow.
     const cap = this.effectiveMaxQueuedPerAgent(agent);
+    let truncatedAny = false;
     while (queue.length >= cap) {
       queue.shift();
+      truncatedAny = true;
     }
+    if (truncatedAny) this.#truncated.add(agent);
 
     queue.push({
       context,
@@ -555,17 +597,27 @@ export class SpawnRequestManager {
       envelopeHash: computeEnvelopeHash({ context, threadId }),
       drainAttempts: 0,
     });
+    return true;
+  }
+
+  /** §4.3: returns true if this agent's queue was truncated since last drain. */
+  isTruncated(agent: string): boolean {
+    return this.#truncated.has(agent);
   }
 
   /** Drain all queued messages for an agent */
   #drainQueue(agent: string): { context: string; threadId?: string }[] {
     const queue = this.#pendingMessages.get(agent);
-    if (!queue || queue.length === 0) return [];
+    if (!queue || queue.length === 0) {
+      this.#truncated.delete(agent); // empty queue can't claim "truncated"
+      return [];
+    }
 
     const now = this.#nowFn();
     const maxAge = SpawnRequestManager.QUEUE_MAX_AGE_MS;
     const valid = queue.filter(m => now - m.receivedAt < maxAge);
     this.#pendingMessages.delete(agent);
+    this.#truncated.delete(agent); // §4.3: drain clears the marker
     return valid;
   }
 
@@ -767,5 +819,6 @@ export class SpawnRequestManager {
     this.#drrDeficit.clear();
     this.#drainAttempts.clear();
     this.#infraFailureWindow.clear();
+    this.#truncated.clear();
   }
 }

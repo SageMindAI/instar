@@ -870,6 +870,69 @@ describe('SpawnRequestManager', () => {
       expect(mgr.getQueuedCount('agent-a')).toBe(0);
     });
 
+    it('isTruncated returns true after per-agent cap forces eviction', async () => {
+      const mgr = new SpawnRequestManager(makeConfig({ cooldownMs: 1_000 }));
+      // First spawn succeeds, sets cooldown.
+      await mgr.evaluate(makeRequest({ context: 'first' }));
+      // Now flood enough to exceed MAX_QUEUED_PER_AGENT (10).
+      for (let i = 0; i < 12; i++) {
+        await mgr.evaluate(makeRequest({ context: `msg-${i}` }));
+      }
+      expect(mgr.isTruncated('agent-a')).toBe(true);
+    });
+
+    it('isTruncated is false after a clean drain', async () => {
+      let now = 1_000_000;
+      const mgr = new SpawnRequestManager(makeConfig({ cooldownMs: 100, nowFn: () => now }));
+      await mgr.evaluate(makeRequest({ context: 'first' }));
+      // Force truncation.
+      for (let i = 0; i < 12; i++) {
+        await mgr.evaluate(makeRequest({ context: `msg-${i}` }));
+      }
+      expect(mgr.isTruncated('agent-a')).toBe(true);
+      // Advance past cooldown so the next evaluate spawns + drains the queue.
+      now += 200;
+      await mgr.evaluate(makeRequest({ context: 'drain-trigger' }));
+      expect(mgr.isTruncated('agent-a')).toBe(false);
+    });
+
+    it('global cap refuses queueing once total queued reaches max', async () => {
+      const mgr = new SpawnRequestManager(makeConfig({
+        cooldownMs: 60_000,
+        maxGlobalQueued: 4, // tiny cap for test
+      }));
+      // Use 5 distinct agents; each first spawn uses cooldown, so subsequent
+      // calls within that agent would queue. Drive 4 successful first-spawns
+      // and then a follow-up from each.
+      for (let i = 0; i < 5; i++) {
+        const reqA = makeRequest({
+          requester: { agent: `peer-${i}`, session: 's', machine: 'm' },
+          context: 'first',
+        });
+        await mgr.evaluate(reqA); // succeeds, sets cooldown
+      }
+      // Now queue follow-ups from each peer; only the first 4 succeed.
+      for (let i = 0; i < 5; i++) {
+        await mgr.evaluate(makeRequest({
+          requester: { agent: `peer-${i}`, session: 's', machine: 'm' },
+          context: `follow-${i}`,
+        }));
+      }
+      // Total queued <= 4 (the global cap).
+      let total = 0;
+      for (let i = 0; i < 5; i++) total += mgr.getQueuedCount(`peer-${i}`);
+      expect(total).toBeLessThanOrEqual(4);
+    });
+
+    it('global cap default is 1000', async () => {
+      // Smoke test — just verify the default-config path doesn't crash and that
+      // a single normal use-case (well below 1000) is unaffected.
+      const mgr = new SpawnRequestManager(makeConfig({ cooldownMs: 60_000 }));
+      await mgr.evaluate(makeRequest({ context: 'first' }));
+      await mgr.evaluate(makeRequest({ context: 'follow' }));
+      expect(mgr.getQueuedCount('agent-a')).toBe(1);
+    });
+
     it('getDrainTickMs honors floor and ceiling', () => {
       // cooldown=100 → 100/4=25 → floor at 1000
       let mgr = new SpawnRequestManager(makeDrainConfig({ cooldownMs: 100 }));
