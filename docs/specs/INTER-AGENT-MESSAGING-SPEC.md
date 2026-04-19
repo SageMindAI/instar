@@ -532,6 +532,7 @@ type DeliveryPhase =
   | 'sent'           // Written to sender's store
   | 'received'       // Target server acknowledged receipt
   | 'queued'         // Received but awaiting delivery (editor active, session unavailable)
+  | 'undelivered'    // SpawnRequestManager disposing; handed off to DeliveryRetryManager for Layer-2 retry
   | 'delivered'      // Injected into target session's tmux input buffer (see Layer 2 notes)
   | 'read'           // Target session acknowledged processing
   | 'expired'        // Delivery TTL elapsed without reaching 'delivered'
@@ -801,13 +802,15 @@ Delivery phases can ONLY advance forward along defined transitions. This prevent
 **Canonical transition graph:**
 
 ```
-created → sent → received → queued → delivered → read
-                    │                    │
-                    │                    └──→ expired → dead-lettered
-                    │                              ↑
-                    └──────────────────→ expired ───┘
-                                           ↑
-                                        failed → dead-lettered
+created → sent → received → queued ──────────────→ delivered → read
+                    │           │                       │
+                    │           └──→ undelivered ───────┘
+                    │                    │              │
+                    │                    └──→ queued    └──→ expired → dead-lettered
+                    │                                              ↑
+                    └──────────────────────────────→ expired ─────┘
+                                                        ↑
+                                                     failed → dead-lettered
 ```
 
 **Valid transitions:**
@@ -819,6 +822,12 @@ created → sent → received → queued → delivered → read
 | `received` | `queued` | Delivery deferred (editor active, session unavailable, context budget) |
 | `received` | `delivered` | Direct delivery succeeded (Layer 2) |
 | `queued` | `delivered` | Deferred delivery succeeded (Layer 2) |
+| `queued` | `undelivered` | SpawnRequestManager.dispose() hands off to DeliveryRetryManager before shutdown |
+| `received` | `undelivered` | SpawnRequestManager.dispose() hands off to DeliveryRetryManager before shutdown |
+| `undelivered` | `delivered` | DeliveryRetryManager Layer-2 retry succeeded |
+| `undelivered` | `queued` | DeliveryRetryManager promotes back to queued on pickup |
+| `undelivered` | `expired` | Delivery TTL elapsed while in undelivered state |
+| `undelivered` | `failed` | Unrecoverable error during retry |
 | `delivered` | `queued` | **Exception**: post-injection watchdog detects session crash within 10s |
 | `delivered` | `read` | Session ACK or reply (Layer 3) |
 | `received` | `expired` | Delivery TTL elapsed while in received state |
