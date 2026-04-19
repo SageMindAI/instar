@@ -1,2 +1,3 @@
-# Memory
-Some memories.
+# Auto-Memory
+
+- Harness marker entry

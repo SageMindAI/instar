@@ -1,0 +1,8 @@
+{
+  "agentName": "TestAgent",
+  "projectName": "TestAgent",
+  "projectDir": "/var/folders/7s/y2tbdryn5jl10h7n_0y2vr700000gn/T/compact-harness-S2P80l/agent-home",
+  "stateDir": "/var/folders/7s/y2tbdryn5jl10h7n_0y2vr700000gn/T/compact-harness-S2P80l/agent-home/.instar",
+  "port": 0,
+  "authToken": "harness-token-b1e3d869"
+}
