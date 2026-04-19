@@ -84,10 +84,18 @@ export interface Commitment {
   escalated: boolean;
   /** Escalation details */
   escalationDetail?: string;
+
+  // ── Concurrency ───────────────────────────────────────
+
+  /**
+   * Monotonically-increasing version for optimistic CAS in mutate().
+   * Back-filled to 0 on records from store v1.
+   */
+  version: number;
 }
 
 export interface CommitmentStore {
-  version: 1;
+  version: 2;
   commitments: Commitment[];
   lastModified: string;
 }
@@ -125,6 +133,18 @@ export interface CommitmentTrackerConfig {
 
 // ── Implementation ────────────────────────────────────────────────
 
+/** Max depth of the per-id mutate queue. Enqueue beyond this rejects. */
+const MUTATE_QUEUE_MAX_DEPTH = 256;
+/** Max CAS retries when the version drifts under an apply. */
+const MUTATE_CAS_MAX_RETRIES = 5;
+
+type MutateFn = (c: Commitment) => Commitment | Promise<Commitment>;
+interface MutateQueueEntry {
+  fn: MutateFn;
+  resolve: (c: Commitment) => void;
+  reject: (err: Error) => void;
+}
+
 export class CommitmentTracker extends EventEmitter {
   private config: CommitmentTrackerConfig;
   private store: CommitmentStore;
@@ -132,6 +152,15 @@ export class CommitmentTracker extends EventEmitter {
   private rulesPath: string;
   private interval: ReturnType<typeof setInterval> | null = null;
   private nextId: number;
+
+  /**
+   * Single-writer FIFO queues, keyed by commitment id. Every write path
+   * (record/withdraw/verifyOne/expire/auto-correct/escalate) serialises
+   * through mutate(), which CAS-retries on the commitment's `version`
+   * field. p99 target for the caller-supplied fn is 50ms under load.
+   */
+  private mutateQueues: Map<string, MutateQueueEntry[]> = new Map();
+  private mutateRunning: Set<string> = new Set();
 
   constructor(config: CommitmentTrackerConfig) {
     super();
@@ -210,10 +239,12 @@ export class CommitmentTracker extends EventEmitter {
       correctionCount: 0,
       correctionHistory: [],
       escalated: false,
+      version: 0,
     };
 
-    this.store.commitments.push(commitment);
-    this.saveStore();
+    // Insert via the same discipline future writes use: under the single-
+    // writer surface, initial version is 0 and future mutations CAS from there.
+    this.insertNew(commitment);
 
     // Regenerate behavioral rules file if this is a behavioral commitment
     if (input.type === 'behavioral') {
@@ -223,34 +254,39 @@ export class CommitmentTracker extends EventEmitter {
     console.log(`[CommitmentTracker] Recorded ${id}: "${input.userRequest}" (${input.type})`);
     this.emit('recorded', commitment);
 
-    // Run immediate verification for config-change commitments
+    // Run immediate verification for config-change commitments.
+    // verifyOne goes through mutateSync, which replaces the store entry
+    // with a new object — return the freshest snapshot so callers see
+    // the post-verification status.
     if (input.type === 'config-change') {
       this.verifyOne(id);
     }
 
-    return commitment;
+    return this.get(id) ?? commitment;
   }
 
   /**
    * Withdraw a commitment (user changed their mind).
    */
   withdraw(id: string, reason: string): boolean {
-    const commitment = this.store.commitments.find(c => c.id === id);
-    if (!commitment || commitment.status === 'withdrawn' || commitment.status === 'expired') {
+    const existing = this.store.commitments.find(c => c.id === id);
+    if (!existing || existing.status === 'withdrawn' || existing.status === 'expired') {
       return false;
     }
 
-    commitment.status = 'withdrawn';
-    commitment.resolvedAt = new Date().toISOString();
-    commitment.resolution = reason;
-    this.saveStore();
+    const updated = this.mutateSync(id, c => ({
+      ...c,
+      status: 'withdrawn',
+      resolvedAt: new Date().toISOString(),
+      resolution: reason,
+    }));
 
-    if (commitment.type === 'behavioral') {
+    if (updated.type === 'behavioral') {
       this.writeBehavioralRules();
     }
 
     console.log(`[CommitmentTracker] Withdrawn ${id}: ${reason}`);
-    this.emit('withdrawn', commitment);
+    this.emit('withdrawn', updated);
     return true;
   }
 
@@ -356,43 +392,49 @@ export class CommitmentTracker extends EventEmitter {
         result = { passed: false, detail: `Unknown commitment type: ${commitment.type}` };
     }
 
-    // Update commitment status based on result
-    if (result.passed) {
-      const wasFirstVerification = commitment.status === 'pending';
-      const wasViolated = commitment.status === 'violated';
+    // Update commitment status based on result — route through the
+    // single-writer mutateSync surface so concurrent write paths can't
+    // clobber each other.
+    const wasFirstVerification = commitment.status === 'pending';
+    const wasViolated = commitment.status === 'violated';
+    const wasVerified = commitment.status === 'verified';
 
-      commitment.status = 'verified';
-      commitment.lastVerifiedAt = new Date().toISOString();
-      commitment.verificationCount++;
-
-      if (wasFirstVerification && this.config.onVerified) {
-        this.config.onVerified(commitment);
-      }
-
-      if (wasViolated) {
-        console.log(`[CommitmentTracker] ${id} recovered: "${commitment.userRequest}"`);
-      }
-
-      // Close one-time actions after first verification
-      if (commitment.type === 'one-time-action') {
-        commitment.resolvedAt = new Date().toISOString();
-        commitment.resolution = 'Verified complete';
-      }
-    } else {
-      const wasVerified = commitment.status === 'verified';
-      commitment.status = 'violated';
-      commitment.violationCount++;
-
-      if (wasVerified) {
-        // Regression — was verified, now violated
-        console.warn(`[CommitmentTracker] VIOLATION ${id}: "${commitment.userRequest}" — ${result.detail}`);
-        if (this.config.onViolation) {
-          this.config.onViolation(commitment, result.detail);
+    const updated = this.mutateSync(id, c => {
+      if (result.passed) {
+        const next: Commitment = {
+          ...c,
+          status: 'verified',
+          lastVerifiedAt: new Date().toISOString(),
+          verificationCount: c.verificationCount + 1,
+        };
+        if (c.type === 'one-time-action') {
+          next.resolvedAt = new Date().toISOString();
+          next.resolution = 'Verified complete';
         }
+        return next;
+      }
+      return {
+        ...c,
+        status: 'violated',
+        violationCount: c.violationCount + 1,
+      };
+    });
+
+    if (result.passed) {
+      if (wasFirstVerification && this.config.onVerified) {
+        this.config.onVerified(updated);
+      }
+      if (wasViolated) {
+        console.log(`[CommitmentTracker] ${id} recovered: "${updated.userRequest}"`);
+      }
+    } else if (wasVerified) {
+      // Regression — was verified, now violated
+      console.warn(`[CommitmentTracker] VIOLATION ${id}: "${updated.userRequest}" — ${result.detail}`);
+      if (this.config.onViolation) {
+        this.config.onViolation(updated, result.detail);
       }
     }
 
-    this.saveStore();
     return result;
   }
 
@@ -530,21 +572,21 @@ export class CommitmentTracker extends EventEmitter {
       // Re-verify after correction
       const recheck = this.verifyConfigChange(commitment);
       if (recheck.passed) {
-        commitment.status = 'verified';
-        commitment.lastVerifiedAt = new Date().toISOString();
-        commitment.verificationCount++;
-
-        // Track correction for escalation detection
         const now = new Date().toISOString();
-        commitment.correctionCount = (commitment.correctionCount ?? 0) + 1;
-        commitment.correctionHistory = [...(commitment.correctionHistory ?? []), now];
+        const updated = this.mutateSync(commitment.id, c => ({
+          ...c,
+          status: 'verified',
+          lastVerifiedAt: now,
+          verificationCount: c.verificationCount + 1,
+          correctionCount: (c.correctionCount ?? 0) + 1,
+          correctionHistory: [...(c.correctionHistory ?? []), now],
+        }));
 
         // Check for escalation: too many corrections in a time window suggests a bug
-        this.checkForEscalation(commitment);
+        this.checkForEscalation(updated);
 
-        this.saveStore();
-        console.log(`[CommitmentTracker] Auto-corrected ${commitment.id}: ${commitment.configPath} → ${JSON.stringify(commitment.configExpectedValue)} (correction #${commitment.correctionCount})`);
-        this.emit('corrected', commitment);
+        console.log(`[CommitmentTracker] Auto-corrected ${updated.id}: ${updated.configPath} → ${JSON.stringify(updated.configExpectedValue)} (correction #${updated.correctionCount})`);
+        this.emit('corrected', updated);
         return true;
       }
     } catch (err) {
@@ -578,15 +620,19 @@ export class CommitmentTracker extends EventEmitter {
     });
 
     if (recentCorrections.length >= threshold) {
-      commitment.escalated = true;
       const detail = `Commitment ${commitment.id} ("${commitment.userRequest}") has been auto-corrected ${recentCorrections.length} times in the last ${Math.round(windowMs / 60_000)} minutes. Config path: ${commitment.configPath}. This pattern suggests something is actively overwriting the value — likely a bug in initialization, a conflicting process, or a default value that resets on restart.`;
-      commitment.escalationDetail = detail;
 
-      console.warn(`[CommitmentTracker] ESCALATION ${commitment.id}: ${detail}`);
-      this.emit('escalation', commitment, detail);
+      const updated = this.mutateSync(commitment.id, c => ({
+        ...c,
+        escalated: true,
+        escalationDetail: detail,
+      }));
+
+      console.warn(`[CommitmentTracker] ESCALATION ${updated.id}: ${detail}`);
+      this.emit('escalation', updated, detail);
 
       if (this.config.onEscalation) {
-        this.config.onEscalation(commitment, detail);
+        this.config.onEscalation(updated, detail);
       }
     }
   }
@@ -623,20 +669,152 @@ export class CommitmentTracker extends EventEmitter {
     const now = new Date().toISOString();
     let changed = false;
 
-    for (const c of this.store.commitments) {
-      if (c.expiresAt && c.expiresAt < now && c.status !== 'expired' && c.status !== 'withdrawn') {
-        c.status = 'expired';
-        c.resolvedAt = now;
-        c.resolution = 'Expired';
-        changed = true;
-        console.log(`[CommitmentTracker] Expired ${c.id}: "${c.userRequest}"`);
-      }
+    // Snapshot ids before mutating so we don't iterate a live array under
+    // concurrent mutateSync() index-preserving writes.
+    const targets = this.store.commitments
+      .filter(c => c.expiresAt && c.expiresAt < now && c.status !== 'expired' && c.status !== 'withdrawn')
+      .map(c => c.id);
+
+    for (const id of targets) {
+      this.mutateSync(id, c => ({
+        ...c,
+        status: 'expired',
+        resolvedAt: now,
+        resolution: 'Expired',
+      }));
+      changed = true;
+      const c = this.get(id);
+      if (c) console.log(`[CommitmentTracker] Expired ${c.id}: "${c.userRequest}"`);
     }
 
     if (changed) {
-      this.saveStore();
       this.writeBehavioralRules();
     }
+  }
+
+  // ── Single-writer mutation ─────────────────────────────────────
+
+  /**
+   * Single-writer mutate surface. Every write path routes through here so
+   * concurrent writers (CommitmentSentinel, PresenceProxy, future
+   * PromiseBeacon) can't clobber each other.
+   *
+   * Contract:
+   *   - FIFO queue per commitment id, max depth 256.
+   *   - Optimistic CAS on the `version` field: read → fn(clone) → write if
+   *     version unchanged, else retry (max 5). On success, version is
+   *     incremented and the store is persisted atomically.
+   *   - Caller-supplied fn p99 target: 50ms. Long work belongs outside.
+   *
+   * Returns the persisted commitment snapshot (post-increment).
+   */
+  async mutate(id: string, fn: MutateFn): Promise<Commitment> {
+    return new Promise<Commitment>((resolve, reject) => {
+      let queue = this.mutateQueues.get(id);
+      if (!queue) {
+        queue = [];
+        this.mutateQueues.set(id, queue);
+      }
+      if (queue.length >= MUTATE_QUEUE_MAX_DEPTH) {
+        reject(new Error(
+          `CommitmentTracker.mutate: queue full for ${id} (depth ${queue.length} >= ${MUTATE_QUEUE_MAX_DEPTH})`
+        ));
+        return;
+      }
+      queue.push({ fn, resolve, reject });
+      // Fire-and-forget drain; errors already propagate via entry.reject.
+      void this.drainMutateQueue(id);
+    });
+  }
+
+  private async drainMutateQueue(id: string): Promise<void> {
+    if (this.mutateRunning.has(id)) return;
+    this.mutateRunning.add(id);
+    try {
+      const queue = this.mutateQueues.get(id);
+      while (queue && queue.length > 0) {
+        const entry = queue.shift()!;
+        try {
+          const result = await this.applyMutationWithCAS(id, entry.fn);
+          entry.resolve(result);
+        } catch (err) {
+          entry.reject(err instanceof Error ? err : new Error(String(err)));
+        }
+      }
+      // Clean up empty queue so Maps don't grow unbounded.
+      if (queue && queue.length === 0) this.mutateQueues.delete(id);
+    } finally {
+      this.mutateRunning.delete(id);
+    }
+  }
+
+  private async applyMutationWithCAS(id: string, fn: MutateFn): Promise<Commitment> {
+    let attempt = 0;
+    while (attempt <= MUTATE_CAS_MAX_RETRIES) {
+      const idx = this.store.commitments.findIndex(c => c.id === id);
+      if (idx === -1) {
+        throw new Error(`CommitmentTracker.mutate: unknown commitment id ${id}`);
+      }
+      const current = this.store.commitments[idx];
+      const observedVersion = current.version ?? 0;
+
+      // Provide a shallow clone so fn mutations don't prematurely touch store.
+      const draft: Commitment = { ...current };
+      const next = await fn(draft);
+
+      // CAS check: the record's version must not have drifted underneath us.
+      const latestIdx = this.store.commitments.findIndex(c => c.id === id);
+      if (latestIdx === -1) {
+        throw new Error(`CommitmentTracker.mutate: commitment ${id} disappeared mid-apply`);
+      }
+      const latest = this.store.commitments[latestIdx];
+      if ((latest.version ?? 0) !== observedVersion) {
+        attempt++;
+        continue;
+      }
+
+      const committed: Commitment = { ...next, version: observedVersion + 1 };
+      this.store.commitments[latestIdx] = committed;
+      this.saveStore();
+      return committed;
+    }
+    throw new Error(
+      `CommitmentTracker.mutate: CAS retry budget exhausted for ${id} after ${MUTATE_CAS_MAX_RETRIES} retries`
+    );
+  }
+
+  /**
+   * Synchronous mutation helper used by existing sync write paths
+   * (withdraw, verifyOne, expireCommitments, attemptAutoCorrection,
+   * checkForEscalation). Since JS is single-threaded, synchronous fn
+   * bodies cannot race against each other — this path does a straight
+   * read → apply → version++ → persist. Async callers must use
+   * mutate() for proper queueing across awaits.
+   */
+  private mutateSync(id: string, fn: (c: Commitment) => Commitment): Commitment {
+    const idx = this.store.commitments.findIndex(c => c.id === id);
+    if (idx === -1) {
+      throw new Error(`CommitmentTracker.mutateSync: unknown commitment id ${id}`);
+    }
+    const current = this.store.commitments[idx];
+    const observedVersion = current.version ?? 0;
+    const next = fn({ ...current });
+    const committed: Commitment = { ...next, version: observedVersion + 1 };
+    this.store.commitments[idx] = committed;
+    this.saveStore();
+    return committed;
+  }
+
+  /**
+   * Insert a brand-new commitment under the mutate discipline. Used by
+   * record(); creates an initial version-0 record, then serialises future
+   * writes through mutate(id, fn).
+   */
+  private insertNew(commitment: Commitment): Commitment {
+    const withVersion: Commitment = { ...commitment, version: commitment.version ?? 0 };
+    this.store.commitments.push(withVersion);
+    this.saveStore();
+    return withVersion;
   }
 
   // ── Persistence ────────────────────────────────────────────────
@@ -645,20 +823,24 @@ export class CommitmentTracker extends EventEmitter {
     try {
       if (fs.existsSync(this.storePath)) {
         const data = JSON.parse(fs.readFileSync(this.storePath, 'utf-8'));
-        if (data.version === 1 && Array.isArray(data.commitments)) {
+        if ((data.version === 1 || data.version === 2) && Array.isArray(data.commitments)) {
           // Migrate: add self-healing fields to existing commitments
           for (const c of data.commitments) {
             if (c.correctionCount === undefined) c.correctionCount = 0;
             if (c.correctionHistory === undefined) c.correctionHistory = [];
             if (c.escalated === undefined) c.escalated = false;
+            // v1 → v2: back-fill version field on every commitment.
+            if (typeof c.version !== 'number') c.version = 0;
           }
+          // Bump on-disk version tag; persisted on next saveStore().
+          data.version = 2;
           return data as CommitmentStore;
         }
       }
     } catch {
       // Start fresh on corruption
     }
-    return { version: 1, commitments: [], lastModified: new Date().toISOString() };
+    return { version: 2, commitments: [], lastModified: new Date().toISOString() };
   }
 
   private saveStore(): void {

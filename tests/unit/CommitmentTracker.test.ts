@@ -173,7 +173,7 @@ describe('CommitmentTracker', () => {
       const storePath = path.join(stateDir, 'state', 'commitments.json');
       expect(fs.existsSync(storePath)).toBe(true);
       const data = JSON.parse(fs.readFileSync(storePath, 'utf-8'));
-      expect(data.version).toBe(1);
+      expect(data.version).toBe(2);
       expect(data.commitments).toHaveLength(1);
       expect(data.commitments[0].id).toBe('CMT-001');
     });
