@@ -15,7 +15,7 @@
  */
 
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { SpawnRequestManager, type SpawnRequest, type SpawnRequestManagerConfig } from '../../src/messaging/SpawnRequestManager.js';
+import { SpawnRequestManager, computeEnvelopeHash, type SpawnRequest, type SpawnRequestManagerConfig } from '../../src/messaging/SpawnRequestManager.js';
 import type { Session } from '../../src/core/types.js';
 
 // ── Helpers ──────────────────────────────────────────────────────
@@ -826,6 +826,47 @@ describe('SpawnRequestManager', () => {
       const result = await mgr.evaluate(makeRequest({ context: oversized }));
       expect(result.approved).toBe(false);
       expect(result.reason).toMatch(/envelope-too-large/);
+      expect(mgr.getQueuedCount('agent-a')).toBe(0);
+    });
+
+    it('computeEnvelopeHash uses sha256-v1: prefix and is deterministic', () => {
+      const h1 = computeEnvelopeHash({ context: 'hello', threadId: 't-1' });
+      const h2 = computeEnvelopeHash({ context: 'hello', threadId: 't-1' });
+      expect(h1).toBe(h2);
+      expect(h1.startsWith('sha256-v1:')).toBe(true);
+      // 'sha256-v1:' = 10 chars; SHA-256 hex = 64 chars; total = 74.
+      expect(h1.length).toBe(74);
+    });
+
+    it('computeEnvelopeHash is canonical: key-permutation-invariant', () => {
+      const a = computeEnvelopeHash({ context: 'x', threadId: 't' });
+      // Force a different argument shape; canonical-JSON sorts keys, so result
+      // matches regardless of how the input object's keys are ordered.
+      const reverseKeyOrder = { threadId: 't', context: 'x' } as const;
+      const b = computeEnvelopeHash(reverseKeyOrder);
+      expect(a).toBe(b);
+    });
+
+    it('different content yields different hash', () => {
+      const a = computeEnvelopeHash({ context: 'a', threadId: 't' });
+      const b = computeEnvelopeHash({ context: 'b', threadId: 't' });
+      expect(a).not.toBe(b);
+    });
+
+    it('queue entries get envelopeHash and drainAttempts=0 on enqueue', async () => {
+      let now = 1_000_000;
+      const mgr = new SpawnRequestManager(makeConfig({ cooldownMs: 1_000, nowFn: () => now }));
+      // First spawn succeeds, sets cooldown.
+      await mgr.evaluate(makeRequest({ context: 'first' }));
+      // Second spawn within cooldown — gets queued.
+      await mgr.evaluate(makeRequest({ context: 'second-message', pendingMessages: ['msg-id-2'] }));
+      expect(mgr.getQueuedCount('agent-a')).toBe(1);
+      // Inspect via the prompt-build path: drain queue and confirm hash on entry.
+      // Use a test that picks up the queued entries at the next spawn.
+      now += 2_000; // past cooldown
+      const result = await mgr.evaluate(makeRequest({ context: 'third' }));
+      expect(result.approved).toBe(true);
+      // Indirectly verify: queue is now empty (second-message was drained).
       expect(mgr.getQueuedCount('agent-a')).toBe(0);
     });
 

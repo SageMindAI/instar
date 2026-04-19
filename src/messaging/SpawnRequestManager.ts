@@ -24,7 +24,40 @@
  *   bypass the helpers. tsconfig target is ES2022; private fields are native.
  */
 
+import { createHash } from 'node:crypto';
 import type { Session } from '../core/types.js';
+
+/**
+ * §4.3: hash version prefix. Stored on every queued entry's `envelopeHash`
+ * so future algorithm upgrades can ship without invalidating queued entries
+ * (forward-compat, matches subresource-integrity pattern).
+ */
+const ENVELOPE_HASH_PREFIX = 'sha256-v1:';
+
+/**
+ * Stable canonical-JSON serialization with sorted keys. Permuting input
+ * object keys yields the same hash. Only handles plain objects, arrays,
+ * primitives — no class instances, dates, or undefined values (which
+ * JSON.stringify drops anyway).
+ */
+function canonicalJson(value: unknown): string {
+  if (value === null || typeof value !== 'object') return JSON.stringify(value);
+  if (Array.isArray(value)) return '[' + value.map(canonicalJson).join(',') + ']';
+  const obj = value as Record<string, unknown>;
+  const keys = Object.keys(obj).sort();
+  return '{' + keys.map(k => JSON.stringify(k) + ':' + canonicalJson(obj[k])).join(',') + '}';
+}
+
+/**
+ * §4.3: compute the versioned envelope hash for a queue entry's payload.
+ * Hashes a canonical JSON of `{ context, threadId }` so two requests with
+ * the same payload but differently-ordered keys produce the same hash.
+ */
+export function computeEnvelopeHash(input: { context?: string; threadId?: string }): string {
+  const payload = canonicalJson({ context: input.context ?? '', threadId: input.threadId ?? '' });
+  const sha = createHash('sha256').update(payload, 'utf8').digest('hex');
+  return ENVELOPE_HASH_PREFIX + sha;
+}
 
 // ── Types ───────────────────────────────────────────────────────
 
@@ -201,7 +234,26 @@ export class SpawnRequestManager {
   }>();
 
   /** Queue messages that arrive during cooldown, keyed by agent */
-  readonly #pendingMessages = new Map<string, { context: string; threadId?: string; receivedAt: number }[]>();
+  /**
+   * Per-agent queue of pending messages.
+   *
+   * §4.3 entry shape:
+   * - `context` / `threadId`: the payload (existing).
+   * - `receivedAt`: enqueue timestamp (existing, used for TTL pruning).
+   * - `envelopeHash`: SHA-256 of canonical JSON of payload, prefixed
+   *   `sha256-v1:`. Computed at enqueue. Lets the drain loop verify
+   *   integrity and lets future code dedupe identical re-sends.
+   * - `drainAttempts`: count of times the drain loop has attempted to
+   *   process this entry. Bumped before each drain; reset on success.
+   *   Used by DRR's age-boost.
+   */
+  readonly #pendingMessages = new Map<string, {
+    context: string;
+    threadId?: string;
+    receivedAt: number;
+    envelopeHash: string;
+    drainAttempts: number;
+  }[]>();
 
   /** Max queued messages per agent before oldest are dropped */
   static readonly MAX_QUEUED_PER_AGENT = 10;
@@ -496,7 +548,13 @@ export class SpawnRequestManager {
       queue.shift();
     }
 
-    queue.push({ context, threadId, receivedAt: now });
+    queue.push({
+      context,
+      threadId,
+      receivedAt: now,
+      envelopeHash: computeEnvelopeHash({ context, threadId }),
+      drainAttempts: 0,
+    });
   }
 
   /** Drain all queued messages for an agent */
