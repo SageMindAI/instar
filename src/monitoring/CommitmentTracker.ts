@@ -28,7 +28,7 @@ import { DegradationReporter } from './DegradationReporter.js';
 // ── Types ─────────────────────────────────────────────────────────
 
 export type CommitmentType = 'config-change' | 'behavioral' | 'one-time-action';
-export type CommitmentStatus = 'pending' | 'verified' | 'violated' | 'expired' | 'withdrawn';
+export type CommitmentStatus = 'pending' | 'verified' | 'violated' | 'expired' | 'withdrawn' | 'delivered';
 
 export interface Commitment {
   /** Unique identifier (CMT-xxx) */
@@ -92,6 +92,52 @@ export interface Commitment {
    * Back-filled to 0 on records from store v1.
    */
   version: number;
+
+  // ── Promise Beacon (Phase 1 — PROMISE-BEACON-SPEC.md) ──
+  /** When set, this commitment is watched by PromiseBeacon. Requires topicId. */
+  beaconEnabled?: boolean;
+  /** Heartbeat cadence in ms. Server clamps to [60_000, 21_600_000]. */
+  cadenceMs?: number;
+  /**
+   * Soft "I'll check in by X" marker. Past it, one atRisk notice is emitted
+   * and cadence continues (see Round 3 clarification #4).
+   */
+  nextUpdateDueAt?: string;
+  /** Soft deadline — past it, cadence doubles (no terminal transition). */
+  softDeadlineAt?: string;
+  /** Hard deadline — past it, commitment transitions to `expired`. */
+  hardDeadlineAt?: string;
+  /** Last heartbeat emission (ISO). */
+  lastHeartbeatAt?: string;
+  /** Count of heartbeats emitted so far. */
+  heartbeatCount?: number;
+  /**
+   * Claude Code session UUID at declaration. On mismatch, commitment is
+   * violated with reason `"session-lost"` (Round 3 #3).
+   */
+  sessionEpoch?: string;
+  /**
+   * Non-terminal flag — Tier-3 "stalled" verdicts set this; still heartbeating
+   * with a softer tone. Only corroborated signals transition to `violated`.
+   */
+  atRisk?: boolean;
+  /**
+   * Non-terminal flag — boot-cap / daily-spend-cap suppression. Status stays
+   * `pending`, no heartbeats fire (Round 3 #2).
+   */
+  beaconSuppressed?: boolean;
+  /** Reason accompanying `beaconSuppressed`. */
+  beaconSuppressionReason?: string;
+  /** SHA-256 of the last tmux snapshot used for a heartbeat. */
+  lastSnapshotHash?: string;
+  /** Machine owning the beacon for this commitment. */
+  ownerMachineId?: string;
+  /** Provenance of the beacon-enabling mutation. */
+  beaconCreatedBySource?: 'skill' | 'api-loopback' | 'sentinel' | 'manual';
+  /** Idempotency key for skill retries. */
+  externalKey?: string;
+  /** Verified delivery message id (set by POST /commitments/:id/deliver). */
+  deliveryMessageId?: string;
 }
 
 export interface CommitmentStore {
@@ -216,6 +262,16 @@ export class CommitmentTracker extends EventEmitter {
     expiresAt?: string;
     verificationMethod?: 'config-value' | 'file-exists' | 'manual';
     verificationPath?: string;
+    // Promise Beacon (Phase 1) — all optional & additive.
+    beaconEnabled?: boolean;
+    cadenceMs?: number;
+    nextUpdateDueAt?: string;
+    softDeadlineAt?: string;
+    hardDeadlineAt?: string;
+    sessionEpoch?: string;
+    ownerMachineId?: string;
+    externalKey?: string;
+    beaconCreatedBySource?: 'skill' | 'api-loopback' | 'sentinel' | 'manual';
   }): Commitment {
     const id = `CMT-${String(this.nextId++).padStart(3, '0')}`;
 
@@ -240,6 +296,17 @@ export class CommitmentTracker extends EventEmitter {
       correctionHistory: [],
       escalated: false,
       version: 0,
+      // Promise Beacon fields (Phase 1).
+      beaconEnabled: input.beaconEnabled,
+      cadenceMs: input.cadenceMs,
+      nextUpdateDueAt: input.nextUpdateDueAt,
+      softDeadlineAt: input.softDeadlineAt,
+      hardDeadlineAt: input.hardDeadlineAt,
+      sessionEpoch: input.sessionEpoch,
+      ownerMachineId: input.ownerMachineId,
+      externalKey: input.externalKey,
+      beaconCreatedBySource: input.beaconCreatedBySource,
+      heartbeatCount: 0,
     };
 
     // Insert via the same discipline future writes use: under the single-
@@ -288,6 +355,29 @@ export class CommitmentTracker extends EventEmitter {
     console.log(`[CommitmentTracker] Withdrawn ${id}: ${reason}`);
     this.emit('withdrawn', updated);
     return true;
+  }
+
+  /**
+   * Mark a beacon-enabled commitment as delivered (distinct from verified).
+   * Per PROMISE-BEACON-SPEC.md Round 3 #18: `delivered` is terminal; no more
+   * heartbeats, no more verify attempts.
+   */
+  deliver(id: string, deliveryMessageId?: string): Commitment | null {
+    const existing = this.store.commitments.find(c => c.id === id);
+    if (!existing) return null;
+    // Terminal statuses reject.
+    if (['verified', 'violated', 'expired', 'withdrawn', 'delivered'].includes(existing.status)) {
+      return null;
+    }
+    const updated = this.mutateSync(id, c => ({
+      ...c,
+      status: 'delivered' as CommitmentStatus,
+      resolvedAt: new Date().toISOString(),
+      deliveryMessageId: deliveryMessageId ?? c.deliveryMessageId,
+    }));
+    console.log(`[CommitmentTracker] Delivered ${id}`);
+    this.emit('delivered', updated);
+    return updated;
   }
 
   /**

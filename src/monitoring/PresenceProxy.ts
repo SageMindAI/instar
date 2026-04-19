@@ -44,6 +44,15 @@ export interface PresenceProxyConfig {
   isTriageMutexHeld?: (sessionName: string) => string | null; // returns holder name or null
   triggerManualTriage?: (topicId: number, sessionName: string) => Promise<void>;
 
+  /**
+   * Optional shared per-topic proxy mutex (per PROMISE-BEACON-SPEC.md §A10).
+   * When present, PresenceProxy acquires this before sending a tier message
+   * so PromiseBeacon (⏳) and PresenceProxy (🔭) don't double-post to the
+   * same topic within the same second.
+   */
+  acquireProxyMutex?: (topicId: number, holder: 'presence-proxy' | 'promise-beacon') => boolean;
+  releaseProxyMutex?: (topicId: number, holder: 'presence-proxy' | 'promise-beacon') => void;
+
   // Optional: context exhaustion auto-recovery
   recoverContextExhaustion?: (topicId: number, sessionName: string) => Promise<{ recovered: boolean }>;
 
@@ -1190,6 +1199,17 @@ IMPORTANT BIAS: Default to "working" or "waiting" unless there is STRONG evidenc
   }
 
   private async sendProxyMessage(topicId: number, text: string, tier: number): Promise<void> {
+    // Spec A10: acquire shared per-topic proxy mutex if one is wired.
+    // PromiseBeacon consumes the same coordinator; the acquire here guarantees
+    // only one proxy-class emitter fires per topic at a time.
+    let heldMutex = false;
+    if (this.config.acquireProxyMutex) {
+      heldMutex = this.config.acquireProxyMutex(topicId, 'presence-proxy');
+      if (!heldMutex) {
+        console.log(`[PresenceProxy] Proxy mutex held for topic ${topicId} — skipping send`);
+        return;
+      }
+    }
     try {
       await this.config.sendMessage(topicId, text, {
         source: 'presence-proxy',
@@ -1198,6 +1218,10 @@ IMPORTANT BIAS: Default to "working" or "waiting" unless there is STRONG evidenc
       });
     } catch (err) {
       console.error(`[PresenceProxy] Failed to send message to topic ${topicId}:`, (err as Error).message);
+    } finally {
+      if (heldMutex && this.config.releaseProxyMutex) {
+        this.config.releaseProxyMutex(topicId, 'presence-proxy');
+      }
     }
   }
 

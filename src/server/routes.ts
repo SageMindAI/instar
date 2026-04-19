@@ -8837,7 +8837,11 @@ export function createRoutes(ctx: RouteContext): Router {
     }
     const { type, userRequest, agentResponse, topicId, source,
             configPath, configExpectedValue, behavioralRule,
-            expiresAt, verificationMethod, verificationPath } = req.body;
+            expiresAt, verificationMethod, verificationPath,
+            // Promise Beacon fields (PROMISE-BEACON-SPEC.md Phase 1)
+            beaconEnabled, cadenceMs, nextUpdateDueAt,
+            softDeadlineAt, hardDeadlineAt, sessionEpoch,
+            ownerMachineId, externalKey, beaconCreatedBySource } = req.body;
 
     if (!type || !userRequest || !agentResponse) {
       res.status(400).json({ error: 'type, userRequest, and agentResponse are required' });
@@ -8847,12 +8851,28 @@ export function createRoutes(ctx: RouteContext): Router {
       res.status(400).json({ error: 'type must be config-change, behavioral, or one-time-action' });
       return;
     }
+    // Beacon validation: must have topicId and at least one deadline marker.
+    if (beaconEnabled) {
+      if (!topicId) {
+        res.status(400).json({ error: 'beaconEnabled commitments require topicId' });
+        return;
+      }
+      if (!nextUpdateDueAt && !softDeadlineAt && !hardDeadlineAt) {
+        res.status(400).json({
+          error: 'beaconEnabled commitments require at least one of nextUpdateDueAt, softDeadlineAt, hardDeadlineAt',
+        });
+        return;
+      }
+    }
 
     try {
       const commitment = ctx.commitmentTracker.record({
         type, userRequest, agentResponse, topicId, source,
         configPath, configExpectedValue, behavioralRule,
         expiresAt, verificationMethod, verificationPath,
+        beaconEnabled, cadenceMs, nextUpdateDueAt,
+        softDeadlineAt, hardDeadlineAt, sessionEpoch,
+        ownerMachineId, externalKey, beaconCreatedBySource,
       });
       res.status(201).json(commitment);
     } catch (err) {
@@ -8875,6 +8895,28 @@ export function createRoutes(ctx: RouteContext): Router {
   /**
    * Withdraw a commitment.
    */
+  /**
+   * POST /commitments/:id/deliver
+   * Marks a beacon-enabled commitment as `delivered` (distinct from `verified`).
+   * Stops the PromiseBeacon timer for this commitment. Per PROMISE-BEACON-SPEC.md
+   * Round 3 #18: `delivered` is a terminal status meaning "the agent actually
+   * came back with the promised update," separate from `verified` which means
+   * "config state is as promised."
+   */
+  router.post('/commitments/:id/deliver', (req, res) => {
+    if (!ctx.commitmentTracker) {
+      res.status(404).json({ error: 'CommitmentTracker not configured' });
+      return;
+    }
+    const { deliveryMessageId } = req.body ?? {};
+    const updated = ctx.commitmentTracker.deliver(req.params.id, deliveryMessageId);
+    if (!updated) {
+      res.status(404).json({ error: `Commitment ${req.params.id} not found or already in terminal status` });
+      return;
+    }
+    res.json({ delivered: true, id: updated.id, commitment: updated });
+  });
+
   router.post('/commitments/:id/withdraw', (req, res) => {
     if (!ctx.commitmentTracker) {
       res.status(404).json({ error: 'CommitmentTracker not configured' });

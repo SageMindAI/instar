@@ -4551,6 +4551,27 @@ export async function startServer(options: StartOptions): Promise<void> {
       console.log(pc.green('  Compaction auto-resume registered (Slack channels)'));
     }
 
+    // ── ProxyCoordinator (shared between PresenceProxy and PromiseBeacon) ──
+    // Per PROMISE-BEACON-SPEC.md §A10: a per-topic mutex that prevents
+    // ⏳ (PromiseBeacon) and 🔭 (PresenceProxy) from double-posting.
+    const { ProxyCoordinator } = await import('../monitoring/ProxyCoordinator.js');
+    const proxyCoordinator = new ProxyCoordinator();
+
+    // ── Shared LlmQueue (priority-laned, daily-spend-capped) ──
+    const { LlmQueue: SharedLlmQueueCls } = await import('../monitoring/LlmQueue.js');
+    const promiseBeaconCfg = ((config as any).promiseBeacon ?? {}) as {
+      prefix?: string;
+      maxDailyLlmSpendCents?: number;
+      sentinelAutoEnable?: boolean;
+      quietHours?: { start: string; end: string; timezone?: string };
+    };
+    const sharedLlmQueue = new SharedLlmQueueCls({
+      maxConcurrent: 3,
+      interactiveReservePct: 0.4,
+      maxDailyCents: promiseBeaconCfg.maxDailyLlmSpendCents ?? 100,
+    });
+    void sharedLlmQueue; // Wired into PromiseBeacon below; PresenceProxy refactor tracked as follow-up.
+
     let presenceProxy: import('../monitoring/PresenceProxy.js').PresenceProxy | undefined;
     if (sharedIntelligence && telegram) {
       try {
@@ -4695,6 +4716,9 @@ export async function startServer(options: StartOptions): Promise<void> {
                 return { recovered: result.recovered };
               }
             : undefined,
+          // Shared per-topic mutex — coordinates with PromiseBeacon.
+          acquireProxyMutex: (topicId, holder) => proxyCoordinator.tryAcquire(topicId, holder),
+          releaseProxyMutex: (topicId, holder) => proxyCoordinator.release(topicId, holder),
         });
 
         // Hook into Telegram's onMessageLogged callback (always active, unlike EventBus which requires a feature flag)
@@ -4719,6 +4743,43 @@ export async function startServer(options: StartOptions): Promise<void> {
         };
 
         presenceProxy.start();
+
+        // ── PromiseBeacon ────────────────────────────────────────────────
+        // Watches beacon-enabled commitments and emits ⏳ heartbeats so the
+        // user knows the agent hasn't gone silent on an open promise.
+        // Spec: docs/specs/PROMISE-BEACON-SPEC.md
+        try {
+          const { PromiseBeacon } = await import('../monitoring/PromiseBeacon.js');
+          const promiseBeacon = new PromiseBeacon({
+            stateDir: config.stateDir,
+            commitmentTracker,
+            llmQueue: sharedLlmQueue,
+            proxyCoordinator,
+            captureSessionOutput: (name, lines) => sessionManager.captureOutput(name, lines),
+            getSessionForTopic: (topicId) => telegram!.getSessionForTopic(topicId),
+            isSessionAlive: (name) => sessionManager.isSessionAlive(name),
+            sendMessage: async (topicId, text, metadata) => {
+              const url = `http://localhost:${config.port}/telegram/reply/${topicId}`;
+              const response = await fetch(url, {
+                method: 'POST',
+                headers: {
+                  'Content-Type': 'application/json',
+                  'Authorization': `Bearer ${config.authToken}`,
+                },
+                body: JSON.stringify({ text, metadata }),
+              });
+              if (!response.ok) throw new Error(`Beacon reply failed: ${response.status}`);
+            },
+            prefix: promiseBeaconCfg.prefix ?? '⏳',
+            maxDailyLlmSpendCents: promiseBeaconCfg.maxDailyLlmSpendCents ?? 100,
+            sentinelAutoEnable: promiseBeaconCfg.sentinelAutoEnable ?? false,
+            quietHours: promiseBeaconCfg.quietHours ?? { start: '22:00', end: '08:00' },
+          });
+          promiseBeacon.start();
+          (globalThis as Record<string, unknown>).__instarPromiseBeacon = promiseBeacon;
+        } catch (err) {
+          console.warn('[PromiseBeacon] init failed:', (err as Error).message);
+        }
 
         // Wire Slack's onMessageLogged into PresenceProxy + TopicMemory (if Slack is active)
         if (_slackAdapter) {
