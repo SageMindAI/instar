@@ -5273,7 +5273,10 @@ export async function startServer(options: StartOptions): Promise<void> {
     // ThreadlineSpawnConfig in core/types.ts. All fields are optional and
     // fall through to manager-level defaults if absent.
     const spawnConfig = config.threadline?.spawn;
-    const spawnManager = new SpawnRequestManager({
+    // Forward-declared `let` so the onDrainReady callback can reference the
+    // manager it belongs to (for re-entrant evaluate() calls during drain).
+    let spawnManager: SpawnRequestManager;
+    spawnManager = new SpawnRequestManager({
       maxSessions: config.sessions.maxSessions ?? 5,
       getActiveSessions: () => sessionManager.listRunningSessions(),
       spawnSession: async (prompt, opts) => {
@@ -5303,6 +5306,30 @@ export async function startServer(options: StartOptions): Promise<void> {
       maxEnvelopeBytes: spawnConfig?.maxEnvelopeBytes,
       maxGlobalQueued: spawnConfig?.maxGlobalQueued,
       degradedMaxQueuedPerAgent: spawnConfig?.degradedMaxQueuedPerAgent,
+      // §4.4 commit 2 + §4.5: drain-loop consumer wiring.
+      // When the drain loop finds an agent ready (cooldown cleared + queued
+      // messages present), this callback re-invokes evaluate() with a
+      // synthetic SpawnRequest tagged `triggeredBy: 'spawn-request-drain'`.
+      // The real queued context is reattached by SpawnRequestManager.evaluate
+      // via its internal drainQueue() call. Stub session/machine values:
+      // requester.session/machine isn't preserved per-message — those fields
+      // are only used in the spawn prompt template for display.
+      onDrainReady: async (agent: string) => {
+        try {
+          const result = await spawnManager.evaluate({
+            requester: { agent, session: 'drain', machine: 'drain' },
+            target: { agent: config.projectName, machine: os.hostname() },
+            reason: `Drain re-attempt for queued messages from ${agent}`,
+            priority: 'medium',
+            triggeredBy: 'spawn-request-drain',
+          });
+          if (!result.approved) {
+            console.log(`[spawn-manager] drain re-attempt for ${agent} not approved: ${result.reason}`);
+          }
+        } catch (err) {
+          console.warn(`[spawn-manager] drain re-attempt for ${agent} threw: ${err instanceof Error ? err.message : String(err)}`);
+        }
+      },
     });
 
     // §4.4 kill switch: drain loop runs unless explicitly disabled in config.

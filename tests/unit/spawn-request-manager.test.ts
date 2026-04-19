@@ -953,6 +953,52 @@ describe('SpawnRequestManager', () => {
       );
     });
 
+    it('drain → re-evaluate → spawn pipeline ships queued messages (§4.4 commit 2 + §4.5 end-to-end)', async () => {
+      let fakeNow = 1_000_000;
+      const spawnSession = vi.fn().mockResolvedValue('drain-spawn-1');
+
+      // Forward-declared so onDrainReady can call evaluate on the real manager.
+      let mgr: SpawnRequestManager;
+      mgr = new SpawnRequestManager({
+        maxSessions: 5,
+        getActiveSessions: () => [],
+        spawnSession,
+        cooldownMs: 100,
+        nowFn: () => fakeNow,
+        // Same wiring shape as server.ts.
+        onDrainReady: async (agent: string) => {
+          await mgr.evaluate({
+            requester: { agent, session: 'drain', machine: 'drain' },
+            target: { agent: 'local', machine: 'local' },
+            reason: `Drain re-attempt for ${agent}`,
+            priority: 'medium',
+            triggeredBy: 'spawn-request-drain',
+          });
+        },
+      });
+
+      // Step 1: queue a message by sending two requests within cooldown.
+      await mgr.evaluate(makeRequest({ context: 'first' }));
+      const queued = await mgr.evaluate(makeRequest({ context: 'queued-during-cooldown' }));
+      expect(queued.approved).toBe(false);
+      expect(queued.reason).toMatch(/Cooldown/i);
+      expect(mgr.getQueuedCount('agent-a')).toBe(1);
+
+      // Step 2: advance past cooldown so the agent is "ready".
+      fakeNow += 200;
+
+      // Step 3: tick the drain loop manually. Should fire onDrainReady, which
+      // re-invokes evaluate(), which spawns + drains the queue.
+      const drained = await mgr.runTick();
+      expect(drained).toBe(1);
+      expect(mgr.getQueuedCount('agent-a')).toBe(0);
+
+      // Step 4: assert spawnSession was called with the drain provenance tag.
+      expect(spawnSession).toHaveBeenCalledTimes(2); // once from step 1, once from drain
+      const lastCall = spawnSession.mock.calls[spawnSession.mock.calls.length - 1];
+      expect(lastCall[1]).toMatchObject({ triggeredBy: 'spawn-request-drain' });
+    });
+
     it('getDrainTickMs honors floor and ceiling', () => {
       // cooldown=100 → 100/4=25 → floor at 1000
       let mgr = new SpawnRequestManager(makeDrainConfig({ cooldownMs: 100 }));
