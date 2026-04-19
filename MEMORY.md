@@ -1,3 +1,2 @@
-# Auto-Memory
-
-- Harness marker entry
+# Custom memory
+- Entry A
