@@ -129,6 +129,8 @@ export class AgentServer {
     discoveryEvaluator?: import('../core/DiscoveryEvaluator.js').DiscoveryEvaluator;
     unifiedTrust?: import('../threadline/UnifiedTrustWiring.js').UnifiedTrustSystem;
     liveConfig?: { set(path: string, value: unknown): void };
+    /** Shared proxy coordinator (PresenceProxy ↔ PromiseBeacon ↔ /build heartbeat). */
+    proxyCoordinator?: import('../monitoring/ProxyCoordinator.js').ProxyCoordinator;
     /** Integrated-Being shared-state ledger (v1). Null/undefined when disabled. */
     sharedStateLedger?: import('../core/SharedStateLedger.js').SharedStateLedger;
     /** Integrated-Being LedgerSessionRegistry (v2). Null/undefined when v2Enabled=false. */
@@ -366,6 +368,7 @@ export class AgentServer {
       discoveryEvaluator: options.discoveryEvaluator ?? null,
       unifiedTrust: options.unifiedTrust ?? null,
       threadlineReplyWaiters: options.threadlineReplyWaiters ?? new Map(),
+      proxyCoordinator: options.proxyCoordinator ?? null,
       sharedStateLedger: options.sharedStateLedger ?? null,
       ledgerSessionRegistry: options.ledgerSessionRegistry ?? null,
       unjustifiedStopGate: options.unjustifiedStopGate ?? null,

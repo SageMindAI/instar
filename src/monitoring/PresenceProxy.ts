@@ -54,6 +54,29 @@ export interface PresenceProxyConfig {
   acquireProxyMutex?: (topicId: number, holder: 'presence-proxy' | 'promise-beacon') => boolean;
   releaseProxyMutex?: (topicId: number, holder: 'presence-proxy' | 'promise-beacon') => void;
 
+  /**
+   * BUILD-STALL-VISIBILITY-SPEC Fix 2 "Routing" — when a /build heartbeat has
+   * landed on this topic recently, PresenceProxy suppresses its generic
+   * Tier 2/3 standby so the user hears one progress voice per channel.
+   * Returns true if a build heartbeat was recorded within the suppression
+   * window (default 6 min). Absent/undefined = no build active = no suppression.
+   */
+  hasRecentBuildHeartbeat?: (topicId: number, windowMs?: number) => boolean;
+
+  /**
+   * BUILD-STALL-VISIBILITY-SPEC Fix 3 — long-tool-wait detector.
+   * When enabled, detects "agent blocked on a long-running tool with no
+   * interleaved text" via snapshot-hash diff + Cogitated-line presence,
+   * and swaps the Tier 2/3 templated message to a tool-specific one.
+   * Feature-flagged off by default for the introduction release.
+   */
+  longToolWaitDetector?: {
+    enabled?: boolean;
+    enterThresholdMs?: number;   // Default 8 min
+    exitHysteresisMs?: number;   // Default 60 s
+    escalationCapMs?: number;    // Default 30 min
+  };
+
   // Optional: context exhaustion auto-recovery
   recoverContextExhaustion?: (topicId: number, sessionName: string) => Promise<{ recovered: boolean }>;
 
@@ -322,6 +345,29 @@ function isLongRunningProcess(processes: ProcessInfo[]): boolean {
   );
 }
 
+// ─── Long-Tool-Wait Detector (Fix 3) ────────────────────────────────────────
+
+/**
+ * Matches Claude Code's "Cogitated for Nm Ns" line — a strong signal that
+ * the agent is sitting in a single tool call with no new agent text.
+ */
+const COGITATED_RE = /Cogitated for \d+m \d+s/;
+
+interface ToolWaitState {
+  /** Last time agent emitted new text (snapshot hash changed). */
+  lastAgentTextAt: number;
+  /** When the current tool wait started (snapshot first detected unchanged with Cogitated). */
+  toolStartedAt: number | null;
+  /** Tool name extracted from snapshot, or 'unknown'. */
+  toolName: string | null;
+  /** When we entered long-wait state. */
+  longWaitEnteredAt: number | null;
+  /** When the one-time escalation message fired. */
+  longWaitEscalatedAt: number | null;
+  /** Sustained-text-recovery cursor — when uninterrupted new-text first started. */
+  sustainedTextSince: number | null;
+}
+
 // ─── LLM Concurrency Queue ─────────────────────────────────────────────────
 
 class LlmQueue {
@@ -385,6 +431,13 @@ export class PresenceProxy {
   private maxConversationHistory: number;
   private rateLimit: { perTopicPerHour: number; tier3MaxRechecks: number; autoSilenceMinutes: number };
 
+  // Long-tool-wait detector (Fix 3) — per-topic state, off by default
+  private toolWaitState: Map<number, ToolWaitState> = new Map();
+  private toolWaitEnabled: boolean;
+  private toolWaitEnterMs: number;
+  private toolWaitExitHysteresisMs: number;
+  private toolWaitEscalationCapMs: number;
+
   constructor(config: PresenceProxyConfig) {
     this.config = config as any;
     const m = config.__dev_timerMultiplier ?? 1.0;
@@ -401,6 +454,12 @@ export class PresenceProxy {
       tier3MaxRechecks: config.llmRateLimit?.tier3MaxRechecks ?? 5,
       autoSilenceMinutes: config.llmRateLimit?.autoSilenceMinutes ?? 30,
     };
+
+    // BUILD-STALL-VISIBILITY-SPEC Fix 3 — long-tool-wait detector defaults
+    this.toolWaitEnabled = config.longToolWaitDetector?.enabled ?? false;
+    this.toolWaitEnterMs = config.longToolWaitDetector?.enterThresholdMs ?? 8 * 60_000;
+    this.toolWaitExitHysteresisMs = config.longToolWaitDetector?.exitHysteresisMs ?? 60_000;
+    this.toolWaitEscalationCapMs = config.longToolWaitDetector?.escalationCapMs ?? 30 * 60_000;
 
     this.llmQueue = new LlmQueue(config.concurrentLlmCalls ?? 3);
     this.stateDir = path.join(config.stateDir, 'state', 'presence-proxy');
@@ -601,6 +660,22 @@ export class PresenceProxy {
     // Check silence
     if (state.silencedUntil && Date.now() < state.silencedUntil) return;
 
+    // BUILD-STALL-VISIBILITY-SPEC Fix 2 "Routing": when a /build heartbeat
+    // landed recently for this topic, the user is already hearing a progress
+    // voice — suppress generic Tier 2/3 standby for this cycle. Tier 1 is
+    // not suppressed (it's the first signal of life and useful even for builds).
+    if (tier > 1 && this.config.hasRecentBuildHeartbeat?.(topicId)) {
+      console.log(`[PresenceProxy] Suppressing Tier ${tier} for topic ${topicId} — recent /build heartbeat`);
+      // Reschedule the next tier so we re-check after the heartbeat window passes.
+      const nextTier = (tier + 1) as 2 | 3;
+      if (nextTier <= 3) {
+        const remaining = (nextTier === 2 ? this.tier2DelayMs : this.tier3DelayMs)
+          - (Date.now() - state.userMessageAt);
+        if (remaining > 0) this.scheduleTier(topicId, nextTier, remaining);
+      }
+      return;
+    }
+
     // Rate limit check
     if (!this.checkRateLimit(state)) return;
 
@@ -721,6 +796,24 @@ export class PresenceProxy {
     state.tier2Snapshot = snapshot;
     state.tier2SnapshotHash = hash;
 
+    // ── Long-tool-wait detector (Fix 3) ──
+    // Update detector state from snapshot diff vs Tier 1 hash, then check
+    // if it's tripped. Heartbeat suppression already ran above (in fireTier),
+    // so reaching here means no live /build heartbeat is taking the floor.
+    this.updateToolWaitFromSnapshot(topicId, hash, state.tier1SnapshotHash, snapshot);
+    {
+      const swap = this.getLongToolWaitMessage(topicId);
+      if (swap) {
+        if (state.cancelled) return;
+        state.tier2FiredAt = Date.now();
+        await this.sendProxyMessage(topicId, swap, 2);
+        this.persistState(topicId, state);
+        // Do not schedule Tier 3 — long-wait already explained. The escalation
+        // cap path will cover the only remaining alert.
+        return;
+      }
+    }
+
     // ── Quota exhaustion: check before LLM call ──
     if (snapshot) {
       const quotaMessage = detectQuotaExhaustion(snapshot);
@@ -835,6 +928,31 @@ export class PresenceProxy {
     const lines = this.config.maxTmuxLines?.t3 ?? 200;
     const raw = alive ? this.config.captureSessionOutput(state.sessionName, lines) : null;
     const snapshot = raw ? sanitizeTmuxOutput(raw, this.config.credentialPatterns) : null;
+    const tier3Hash = snapshot ? crypto.createHash('sha256').update(snapshot).digest('hex') : null;
+
+    // ── Long-tool-wait detector (Fix 3) ──
+    // Compare against the freshest known snapshot hash (tier 2 if present,
+    // else tier 1). Same swap-message contract as Tier 2.
+    this.updateToolWaitFromSnapshot(
+      topicId,
+      tier3Hash,
+      state.tier2SnapshotHash ?? state.tier1SnapshotHash,
+      snapshot,
+    );
+    {
+      const swap = this.getLongToolWaitMessage(topicId);
+      if (swap) {
+        if (state.cancelled) {
+          this.config.releaseTriageMutex?.(state.sessionName, 'presence-proxy');
+          return;
+        }
+        state.tier3FiredAt = Date.now();
+        await this.sendProxyMessage(topicId, swap, 3);
+        this.config.releaseTriageMutex?.(state.sessionName, 'presence-proxy');
+        this.persistState(topicId, state);
+        return;
+      }
+    }
 
     // ── Quota exhaustion: check before LLM call ──
     if (snapshot) {
@@ -1417,5 +1535,153 @@ IMPORTANT BIAS: Default to "working" or "waiting" unless there is STRONG evidenc
       const s = this.states.get(id);
       return s && !s.cancelled;
     });
+  }
+
+  // ─── Long-Tool-Wait Detector (Fix 3) ─────────────────────────────────────
+
+  private getOrCreateToolWaitState(topicId: number): ToolWaitState {
+    let s = this.toolWaitState.get(topicId);
+    if (!s) {
+      s = {
+        lastAgentTextAt: Date.now(),
+        toolStartedAt: null,
+        toolName: null,
+        longWaitEnteredAt: null,
+        longWaitEscalatedAt: null,
+        sustainedTextSince: null,
+      };
+      this.toolWaitState.set(topicId, s);
+    }
+    return s;
+  }
+
+  /**
+   * Record that the agent emitted new text (snapshot hash differs from last
+   * tier capture). Resets the tool-wait timer; if currently in long-wait,
+   * starts/extends a sustained-text window for hysteresis-based exit.
+   */
+  recordAgentText(topicId: number, _snapshotHash: string | null): void {
+    if (!this.toolWaitEnabled) return;
+    const s = this.getOrCreateToolWaitState(topicId);
+    const now = Date.now();
+    s.lastAgentTextAt = now;
+
+    if (s.longWaitEnteredAt !== null) {
+      // We're in long-wait; track sustained new-text for hysteresis exit.
+      if (s.sustainedTextSince === null) {
+        s.sustainedTextSince = now;
+      }
+      if (now - s.sustainedTextSince >= this.toolWaitExitHysteresisMs) {
+        // Exit long-wait state.
+        s.longWaitEnteredAt = null;
+        s.longWaitEscalatedAt = null;
+        s.sustainedTextSince = null;
+        s.toolStartedAt = null;
+        s.toolName = null;
+      }
+    } else {
+      // No long-wait active — sustained-text cursor stays cleared.
+      s.sustainedTextSince = null;
+      // New text means any prior tool-wait baseline is gone.
+      s.toolStartedAt = null;
+      s.toolName = null;
+    }
+  }
+
+  /**
+   * Record that a tool appears to be running (caller-driven path). Optional —
+   * snapshot-diff path in fireTier* derives the same signal.
+   */
+  recordToolWait(topicId: number, toolName: string): ToolWaitState | null {
+    if (!this.toolWaitEnabled) return null;
+    const s = this.getOrCreateToolWaitState(topicId);
+    const now = Date.now();
+    if (s.toolName !== toolName) {
+      // Different tool started — reset.
+      s.toolName = toolName;
+      s.toolStartedAt = now;
+      s.longWaitEnteredAt = null;
+      s.longWaitEscalatedAt = null;
+      s.sustainedTextSince = null;
+    } else if (s.toolStartedAt === null) {
+      s.toolStartedAt = now;
+    }
+    return s;
+  }
+
+  /**
+   * Returns the long-tool-wait swap message for a topic, or null if the
+   * detector isn't tripped. Side-effects: enters long-wait state on first
+   * crossing, fires the one-time escalation message at the cap.
+   *
+   * Called from fireTier2 / fireTier3 AFTER snapshot capture and AFTER the
+   * heartbeat-suppression check (so a live /build heartbeat takes priority).
+   */
+  getLongToolWaitMessage(topicId: number): string | null {
+    if (!this.toolWaitEnabled) return null;
+    const s = this.toolWaitState.get(topicId);
+    if (!s || s.toolStartedAt === null) return null;
+
+    const now = Date.now();
+    const elapsed = now - s.toolStartedAt;
+    if (elapsed < this.toolWaitEnterMs) return null;
+
+    // Enter long-wait state on first qualifying tick.
+    if (s.longWaitEnteredAt === null) {
+      s.longWaitEnteredAt = now;
+    }
+
+    // Escalation cap — one-time alert when total long-wait exceeds cap.
+    const longWaitElapsed = now - s.longWaitEnteredAt;
+    if (longWaitElapsed > this.toolWaitEscalationCapMs && s.longWaitEscalatedAt === null) {
+      s.longWaitEscalatedAt = now;
+      const capMin = Math.floor(this.toolWaitEscalationCapMs / 60_000);
+      const tool = s.toolName ?? 'tool';
+      return `🔭 Long-running ${tool} has now exceeded ${capMin}m — escalating once. No further standby messages until output resumes.`;
+    }
+
+    // After the one-time escalation, stay quiet until exit.
+    if (s.longWaitEscalatedAt !== null) return null;
+
+    // If we're inside a sustained-text recovery window, suppress the
+    // "blocked" message — the user is already seeing output. We'll either
+    // exit long-wait (recordAgentText path) or fall back to emit if the
+    // text trickle stops before hysteresis crosses.
+    if (s.sustainedTextSince !== null) return null;
+
+    const elapsedMin = Math.max(1, Math.floor(elapsed / 60_000));
+    const tool = s.toolName ?? 'a long-running tool';
+    return `🔭 Agent appears blocked on ${tool} — elapsed ${elapsedMin}m with no new output.`;
+  }
+
+  /**
+   * Update the tool-wait detector based on a snapshot diff. Called from
+   * fireTier2/fireTier3 after capturing the new snapshot.
+   *
+   * - If the hash matches the prior tier's hash AND a Cogitated marker is
+   *   present, the agent is sitting in a single tool call → start/keep the
+   *   toolStartedAt baseline.
+   * - If the hash differs, treat it as new agent text (recordAgentText path).
+   */
+  private updateToolWaitFromSnapshot(
+    topicId: number,
+    currentHash: string | null,
+    priorHash: string | null,
+    snapshot: string | null,
+  ): void {
+    if (!this.toolWaitEnabled) return;
+    const hashChanged = currentHash !== priorHash;
+    if (hashChanged) {
+      this.recordAgentText(topicId, currentHash);
+      return;
+    }
+    // No new text. Is this a cogitated/tool-wait shape?
+    if (snapshot && COGITATED_RE.test(snapshot)) {
+      const s = this.getOrCreateToolWaitState(topicId);
+      if (s.toolStartedAt === null) {
+        s.toolStartedAt = Date.now();
+        s.toolName = s.toolName ?? 'a long-running tool';
+      }
+    }
   }
 }

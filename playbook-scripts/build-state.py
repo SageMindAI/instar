@@ -24,9 +24,14 @@ Commands:
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
+import os
+import re
+import socket
 import subprocess
 import sys
+import urllib.request
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -106,6 +111,92 @@ def read_audit():
 
 def out(obj):
     print(json.dumps(obj))
+
+
+# ─── Heartbeat (BUILD-STALL-VISIBILITY-SPEC Fix 2) ────────────
+
+_RUNID_SAFE_RE = re.compile(r"[^a-zA-Z0-9_]")
+
+
+def _read_instar_config():
+    """Best-effort read of .instar/config.json. Returns (port, auth_token)."""
+    try:
+        cfg_path = Path(".instar/config.json")
+        if not cfg_path.exists():
+            return 4042, None
+        cfg = json.loads(cfg_path.read_text())
+        port = int(cfg.get("port", 4042) or 4042)
+        token = cfg.get("authToken") or None
+        return port, token
+    except Exception:
+        return 4042, None
+
+
+def _heartbeat_run_id(state):
+    """Derive a stable runId from state['startedAt'] — first 16 chars of sha256."""
+    started = state.get("startedAt") or ""
+    digest = hashlib.sha256(started.encode("utf-8")).hexdigest()
+    safe = _RUNID_SAFE_RE.sub("_", digest)
+    return safe[:16] or "build_unknown"
+
+
+def post_heartbeat(state, phase, tool="none", status="phase-boundary",
+                   elapsed_ms=0):
+    """
+    POST a /build heartbeat to the local instar server. Best-effort:
+    swallows all exceptions, never blocks the calling transition.
+
+    Routing target is read from environment:
+      - INSTAR_TELEGRAM_TOPIC (int) → topicId
+      - INSTAR_SLACK_CHANNEL  (str) → channelId
+    If neither is set, no-op.
+    """
+    topic_env = os.environ.get("INSTAR_TELEGRAM_TOPIC")
+    channel_env = os.environ.get("INSTAR_SLACK_CHANNEL")
+    if not topic_env and not channel_env:
+        return
+
+    port, auth_token = _read_instar_config()
+    run_id = _heartbeat_run_id(state)
+
+    body = {
+        "runId": run_id,
+        "phase": phase,
+        "tool": tool,
+        "status": status,
+        "elapsedMs": int(max(0, elapsed_ms)),
+    }
+    if topic_env:
+        try:
+            body["topicId"] = int(topic_env)
+        except (ValueError, TypeError):
+            return
+    elif channel_env:
+        body["channelId"] = str(channel_env)
+
+    url = "http://127.0.0.1:%d/build/heartbeat" % port
+    data = json.dumps(body).encode("utf-8")
+    req = urllib.request.Request(url, data=data, method="POST")
+    req.add_header("Content-Type", "application/json")
+    if auth_token:
+        req.add_header("Authorization", "Bearer %s" % auth_token)
+
+    try:
+        with urllib.request.urlopen(req, timeout=2) as resp:
+            resp.read()
+    except (urllib.error.URLError, urllib.error.HTTPError,
+            socket.timeout, ConnectionError, OSError, ValueError) as exc:
+        try:
+            append_audit("heartbeat.skipped", {
+                "phase": phase, "error": str(exc)[:200]})
+        except Exception:
+            pass
+    except Exception as exc:  # pragma: no cover — defensive
+        try:
+            append_audit("heartbeat.skipped", {
+                "phase": phase, "error": "unexpected: %s" % str(exc)[:200]})
+        except Exception:
+            pass
 
 
 def git_run(args, cwd=None):
@@ -295,6 +386,12 @@ def cmd_transition(args):
     append_audit("phase.transition", {
         "from": old, "to": target,
         "evidence": args.evidence or None})
+    # BUILD-STALL-VISIBILITY-SPEC Fix 2 — emit phase-boundary heartbeat.
+    # Best-effort, never blocks the transition.
+    try:
+        post_heartbeat(state, target, status="phase-boundary")
+    except Exception:
+        pass
     out({"status": "transitioned", "from": old, "to": target})
 
 
@@ -444,6 +541,11 @@ def cmd_complete(_args):
     hist = HISTORY_DIR / ("build-%s.json" % ts)
     hist.write_text(json.dumps(state, indent=2))
 
+    # BUILD-STALL-VISIBILITY-SPEC Fix 2 — terminal heartbeat.
+    try:
+        post_heartbeat(state, "complete", status="phase-boundary")
+    except Exception:
+        pass
     out({"status": "complete", "task": state["task"],
          "totalTests": state["totalTests"],
          "stepsCompleted": len(state["steps"]),
