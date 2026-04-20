@@ -36,11 +36,53 @@ describe('buildCompactionResumePayload', () => {
     expect(payload).toBe(`${COMPACTION_RESUME_PREAMBLE}\n\n${block}`);
   });
 
-  it('tells the agent compaction occurred (lets user know) and to continue naturally', () => {
-    // These phrases are what prevent the generic status-summary failure mode.
+  it('tells the agent compaction occurred', () => {
     expect(COMPACTION_RESUME_PREAMBLE).toMatch(/compaction/i);
-    expect(COMPACTION_RESUME_PREAMBLE).toMatch(/let the user know/i);
-    expect(COMPACTION_RESUME_PREAMBLE).toMatch(/continue the conversation/i);
+  });
+
+  // Regression: screenshots on topic 6795 (2026-04-20) showed two failure
+  // modes on the 0.28.52 preamble. Pin them down so they can't come back.
+  describe('preamble guardrails', () => {
+    it('prescribes calm acknowledgment phrasing (not open-ended "let the user know")', () => {
+      // The open-ended phrasing produced alarming self-narration like
+      // "I lost track of what we were working on" on active sessions.
+      expect(COMPACTION_RESUME_PREAMBLE).toMatch(/paused for context compaction/i);
+      expect(COMPACTION_RESUME_PREAMBLE).toMatch(/resumed/i);
+    });
+
+    it('explicitly forbids "lost track" / "got lost" / "got confused" self-narration', () => {
+      expect(COMPACTION_RESUME_PREAMBLE).toMatch(/lost track/i);
+      expect(COMPACTION_RESUME_PREAMBLE).toMatch(/got lost/i);
+      expect(COMPACTION_RESUME_PREAMBLE).toMatch(/got confused/i);
+      // Verify they appear as prohibitions, not descriptions.
+      expect(COMPACTION_RESUME_PREAMBLE).toMatch(/do not|don't/i);
+    });
+
+    it('directs the agent to respond to the user\'s most recent message', () => {
+      // Without this, the recovered agent defaults to status-summary reflex.
+      // Topic 6795 / Bob thread showed the user say "Your call" and the agent
+      // re-offer the same two choices and hand "Your call" back — ping-pong.
+      expect(COMPACTION_RESUME_PREAMBLE).toMatch(/most recent message/i);
+      expect(COMPACTION_RESUME_PREAMBLE).toMatch(/your call|you decide|delegated/i);
+      // Must explicitly forbid the status-summary + re-offer reflex.
+      expect(COMPACTION_RESUME_PREAMBLE).toMatch(/status summary/i);
+      expect(COMPACTION_RESUME_PREAMBLE).toMatch(/re-offer|re offer/i);
+    });
+
+    it('instructs the agent to assume continuity (not treat recovery as a fresh start)', () => {
+      expect(COMPACTION_RESUME_PREAMBLE).toMatch(/continuity|carry forward|work-in-progress/i);
+    });
+
+    it('places the calm-acknowledgment instruction BEFORE the respond-to-last-message instruction', () => {
+      // Order matters: the first sentence the agent emits must be the calm
+      // compaction acknowledgment. If the "respond to most recent message"
+      // instruction came first, the agent could skip the acknowledgment
+      // entirely. Topic 6795 Mew screenshot is exactly this failure.
+      const ackIdx = COMPACTION_RESUME_PREAMBLE.search(/paused for context compaction/i);
+      const respondIdx = COMPACTION_RESUME_PREAMBLE.search(/most recent message/i);
+      expect(ackIdx).toBeGreaterThanOrEqual(0);
+      expect(respondIdx).toBeGreaterThan(ackIdx);
+    });
   });
 });
 
@@ -109,6 +151,24 @@ describe('prepareInjectionText', () => {
     const filepath = match![0];
     expect(fs.existsSync(filepath)).toBe(true);
     expect(fs.readFileSync(filepath, 'utf-8')).toBe(payload);
+  });
+
+  it('file-reference stub carries the same tone + intent guardrails as the inline preamble', () => {
+    // The two branches (under threshold vs over) must give the agent the
+    // same instructions — otherwise long-context recoveries fail in ways
+    // short-context ones don't. Regression anchor: topic 6795 screenshots.
+    const payload = 'x'.repeat(COMPACTION_RESUME_FILE_THRESHOLD + 100);
+    const out = prepareInjectionText(payload, 'test', 42, { tmpDir });
+    // Prescribed acknowledgment
+    expect(out).toMatch(/paused for context compaction/i);
+    // Forbids the alarming self-narration
+    expect(out).toMatch(/lost track/i);
+    expect(out).toMatch(/got lost/i);
+    // Directs answering the user's most recent message
+    expect(out).toMatch(/most recent message/i);
+    expect(out).toMatch(/your call|you decide|delegated/i);
+    // Forbids status-summary + re-offer reflex
+    expect(out).toMatch(/status summary/i);
   });
 
   it('respects a custom threshold', () => {

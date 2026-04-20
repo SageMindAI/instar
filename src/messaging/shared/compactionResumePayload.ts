@@ -26,7 +26,14 @@ import path from 'path';
 import { randomUUID } from 'crypto';
 
 export const COMPACTION_RESUME_PREAMBLE =
-  'Your session just went through context compaction — your working memory was reset. The context below is what you had before the reset. Briefly let the user know compaction occurred, then continue the conversation naturally.';
+  [
+    'Your session just went through context compaction — your working memory was reset. The context below is what you had before the reset.',
+    '',
+    'How to respond:',
+    '1. Your FIRST sentence must be a brief, calm statement that your session paused for context compaction and has now resumed. Do NOT say you "lost track," "got lost," "got confused," or "lost your place" — you did not. Compaction is a routine pause; narrate it as one.',
+    '2. Then respond directly to the user\'s MOST RECENT message in the context below. If it was a question, answer it. If it was a directive or a decision the user handed back to you ("your call", "you decide", "proceed as you see fit"), make the decision and act on it — do NOT reconstruct a generic status summary, re-offer options the user already delegated, or hand the choice back to them.',
+    '3. Assume full continuity. Any work-in-progress, open commitments, or next steps recorded in the context below are still yours to carry forward.',
+  ].join('\n');
 
 export interface HistoryEntryLike {
   text?: string;
@@ -103,9 +110,11 @@ export function prepareInjectionText(
   );
 
   return (
-    `Your session just went through context compaction. Your prior working memory — ` +
-    `summary, recent messages, and lookup hints — has been preserved at ${filepath}. ` +
-    `Read that file IMMEDIATELY to re-orient, briefly let the user know compaction ` +
-    `occurred, then continue the conversation naturally.`
+    `Your session just went through context compaction — your working memory was reset. ` +
+    `Your prior context (summary, recent messages, and lookup hints) has been preserved at ${filepath}. ` +
+    `Read that file IMMEDIATELY to re-orient, then respond to the user as follows:\n\n` +
+    `1. Your FIRST sentence must be a brief, calm statement that your session paused for context compaction and has now resumed. Do NOT say you "lost track," "got lost," "got confused," or "lost your place" — you did not. Compaction is a routine pause; narrate it as one.\n` +
+    `2. Then respond directly to the user's MOST RECENT message in the preserved context. If it was a question, answer it. If it was a directive or a decision the user handed back to you ("your call", "you decide", "proceed as you see fit"), make the decision and act on it — do NOT reconstruct a generic status summary, re-offer options the user already delegated, or hand the choice back to them.\n` +
+    `3. Assume full continuity. Any work-in-progress, open commitments, or next steps recorded in the preserved context are still yours to carry forward.`
   );
 }
