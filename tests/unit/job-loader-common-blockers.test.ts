@@ -549,10 +549,11 @@ describe('JobLoader — commonBlockers validation', () => {
   // ── Integration with loadJobs ───────────────────────────────────────
 
   describe('integration with loadJobs', () => {
-    it('commonBlockers validation runs during loadJobs', async () => {
+    it('commonBlockers validation runs during loadJobs (entry skipped with logged error)', async () => {
       const fs = await import('node:fs');
       const path = await import('node:path');
       const os = await import('node:os');
+      const { vi } = await import('vitest');
       const { loadJobs } = await import('../../src/scheduler/JobLoader.js');
 
       const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'instar-blocker-'));
@@ -562,9 +563,15 @@ describe('JobLoader — commonBlockers validation', () => {
         commonBlockers: { 'bad': { description: 123 } },
       }]));
 
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      const err = vi.spyOn(console, 'error').mockImplementation(() => {});
       try {
-        expect(() => loadJobs(filePath)).toThrow('"description" is required');
+        const jobs = loadJobs(filePath);
+        expect(jobs).toHaveLength(0);
+        expect(err).toHaveBeenCalledWith(expect.stringContaining('"description" is required'));
       } finally {
+        warn.mockRestore();
+        err.mockRestore();
         fs.rmSync(tmpDir, { recursive: true, force: true });
       }
     });
