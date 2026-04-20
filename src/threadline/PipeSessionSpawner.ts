@@ -231,6 +231,17 @@ export class PipeSessionSpawner {
   }
 
   /**
+   * Check if there is already an active pipe session for this thread.
+   * Prevents rapid-fire same-thread messages from killing each other's tmux sessions.
+   */
+  hasActiveSessionForThread(threadId: string): boolean {
+    for (const session of this.activeSessions.values()) {
+      if (session.threadId === threadId) return true;
+    }
+    return false;
+  }
+
+  /**
    * Spawn a pipe-mode session.
    */
   async spawn(request: PipeSpawnRequest, summarizedHistory?: string): Promise<PipeSpawnResult> {

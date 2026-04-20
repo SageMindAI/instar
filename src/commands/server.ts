@@ -5685,7 +5685,15 @@ export async function startServer(options: StartOptions): Promise<void> {
           }
 
           // Phase 2a: Pipe-mode session for simple queries (lightweight, auto-exit)
-          if (pipeSpawner && msg.threadId && !threadResumeMap.get(msg.threadId)) {
+          // Rapid-fire same-thread guard: if an active pipe session already exists for this
+          // thread, fall through to the listener/cold-spawn path so messages queue serially
+          // via ListenerSessionManager.writeToInbox instead of killing the prior tmux session.
+          if (
+            pipeSpawner &&
+            msg.threadId &&
+            !threadResumeMap.get(msg.threadId) &&
+            !pipeSpawner.hasActiveSessionForThread(msg.threadId)
+          ) {
             const pipeCheck = pipeSpawner.shouldUsePipeMode({
               threadId: msg.threadId,
               messageText: textContent,

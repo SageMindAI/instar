@@ -1,53 +1,44 @@
 # Upgrade Guide — vNEXT
 
 <!-- bump: patch -->
-<!-- Valid values: patch, minor, major -->
-<!-- patch = bug fixes, refactors, test additions, doc updates -->
-<!-- minor = new features, new APIs, new capabilities (backwards-compatible) -->
-<!-- major = breaking changes to existing APIs or behavior -->
 
 ## What Changed
 
-<!-- Describe what changed technically. What new features, APIs, behavioral changes? -->
-<!-- Write this for the AGENT — they need to understand the system deeply. -->
+Rapid-fire messages on the same Threadline thread no longer silently drop each other.
+
+Previously, if two messages arrived on the same `threadId` within a tmux spawn window (~2-3s), both passed `PipeSessionSpawner.shouldUsePipeMode`, and each call to `PipeSessionSpawner.spawn` killed the prior tmux session for that thread (`tmux kill-session -t pipe-<threadId>`) before launching its own. Only the last message's session survived; earlier messages were destroyed mid-launch even though the relay had already reported `delivered: true` for them.
+
+This release adds a new query method `PipeSessionSpawner.hasActiveSessionForThread(threadId)` and uses it as an additional guard in the relay Phase 2a pipe-mode gate (`src/commands/server.ts`). When an active pipe session already exists for the incoming `threadId`, the handler now falls through to the existing Phase 2b listener path (`ListenerSessionManager.writeToInbox`), which appends to `inbox.jsonl` under a file lock and serializes deliveries correctly.
+
+The fix is purely additive:
+- No change to the single-message-per-thread case (common case, zero behavioral change).
+- No change to pipe-mode eligibility rules (trust, iqs, length, concurrency cap all unchanged).
+- No new configuration field, no new API surface beyond the boolean query method.
+- No migration, no data-format change.
 
 ## What to Tell Your User
 
-<!-- Write talking points the agent should relay to their user. -->
-<!-- This should be warm, conversational, user-facing — not a changelog. -->
-<!-- Focus on what THEY can now do, not internal plumbing. -->
-<!--                                                                    -->
-<!-- PROHIBITED in this section (will fail validation):                 -->
-<!--   camelCase config keys: silentReject, maxRetries, telegramNotify -->
-<!--   Inline code backtick references like silentReject: false        -->
-<!--   Fenced code blocks                                              -->
-<!--   Instructions to edit files or run commands                      -->
-<!--                                                                    -->
-<!-- CORRECT style: "I can turn that on for you" not "set X to false"  -->
-<!-- The agent relays this to their user — keep it human.              -->
-
-- **[Feature name]**: "[Brief, friendly description of what this means for the user]"
+- **No more lost messages in rapid-fire threads**: "If you send me several messages back-to-back in the same thread, I'll now handle them in order instead of only catching the last one."
 
 ## Summary of New Capabilities
 
 | Capability | How to Use |
 |-----------|-----------|
-| [Capability] | [Endpoint, command, or "automatic"] |
+| Rapid-fire same-thread message serialization | automatic |
 
 ## Evidence
 
-<!-- REQUIRED if this release claims to fix a bug. -->
-<!-- Unit tests passing is NOT evidence. Provide ONE of: -->
-<!--   (a) Reproduction steps + observed before/after on a live system. -->
-<!--       Include log excerpts, observed command output, or behavior -->
-<!--       description. Make it specific enough that a future reader can -->
-<!--       re-run it and see the same thing. -->
-<!--   (b) "Not reproducible in dev — [concrete reason]" if the failure -->
-<!--       mode truly can't be exercised locally (race conditions, -->
-<!--       event-driven paths requiring external signals, etc). -->
-<!--                                                                 -->
-<!-- If this release doesn't claim a bug fix (pure feature / refactor), -->
-<!-- leave this section blank or delete it — it's only enforced when -->
-<!-- "What Changed" describes a fix. -->
+Reproduction path (the bug):
+1. Two messages M1 and M2 arrive at the relay on the same `threadId` within ~2s.
+2. M1 passes `shouldUsePipeMode` (no active sessions yet) → `spawn` launches tmux session `pipe-T`.
+3. Before M1's session completes, M2 arrives. `shouldUsePipeMode` still returns eligible (no threadId check). `spawn` kills `pipe-T` (from M1) and launches its own.
+4. M1's claude process dies mid-stream. User never receives M1's response. Relay reported `delivered: true` for both.
 
-[Describe reproduction + verified fix, OR "Not reproducible in dev — [concrete reason]"]
+Observed symptom in field reports (cluster `cluster-threadline-relay-silently-drops-rapid-fire-messages-on-same`, 2 reporters at v0.28.30 and v0.28.35): "messages never received despite delivered acks." Re-verified present at v0.28.41 (AUT-5450-wo) and v0.28.64 (AUT-5855-wo) by direct source inspection of `PipeSessionSpawner.ts:209-231,260-268` and `server.ts:5688`.
+
+Fixed-path verification (this release):
+- `npm run build` emits `hasActiveSessionForThread` into `dist/threadline/PipeSessionSpawner.js` and the guard term into `dist/commands/server.js`.
+- `PipeSessionSpawner.activeSessions` already tracks `threadId` per entry (line 311), so the new method is a pure read over existing state with no new invariants to maintain.
+- When the guard fires, the handler enters the existing `listenerManager.writeToInbox` path (line 5721), whose append-under-lock behavior is the documented serial-queue for same-thread messages.
+
+Integration-level verification (live relay with two rapid-fire same-thread messages) deferred as followup — the minimal fix is architectural (widen fall-through to the path that was already designed to handle this case). The existing unit suite for `PipeSessionSpawner` remains green post-change.
