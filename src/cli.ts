@@ -1521,6 +1521,66 @@ lifelineCmd
   });
 
 lifelineCmd
+  .command('restart')
+  .description('Restart the Telegram lifeline via launchd kickstart — Stage B self-heal entry point')
+  .option('-d, --dir <path>', 'Project directory')
+  .action(async (opts) => {
+    const { loadConfig } = await import('./core/Config.js');
+    const { readStartupMarker } = await import('./lifeline/startupMarker.js');
+    const { execFileSync, execSync } = await import('node:child_process');
+    const fs = await import('node:fs');
+    const path = await import('node:path');
+    const config = loadConfig(opts.dir);
+    const label = `com.instar.${config.projectName}.lifeline`;
+
+    // Check shadow-install .updating lockfile — don't kickstart against a
+    // half-written install. Wait up to 60 s.
+    const updatingLock = path.join(
+      path.dirname(config.stateDir),
+      'shadow-install',
+      '.updating',
+    );
+    const waitStarted = Date.now();
+    while (fs.existsSync(updatingLock) && Date.now() - waitStarted < 60_000) {
+      await new Promise(r => setTimeout(r, 1000));
+    }
+    if (fs.existsSync(updatingLock)) {
+      console.error(pc.red('shadow-install is still updating; aborting to avoid half-written respawn'));
+      process.exit(2);
+    }
+
+    // Baseline startup marker pid so we can detect the respawn.
+    const baseline = readStartupMarker(config.stateDir);
+    const baselinePid = baseline?.pid ?? null;
+
+    try {
+      const uid = process.getuid?.() ?? 0;
+      execFileSync('launchctl', ['kickstart', '-k', `gui/${uid}/${label}`], { stdio: 'inherit' });
+    } catch (err) {
+      // Fallback: maybe running under tmux (dev). Try SIGTERM via pkill.
+      console.warn(pc.yellow(`launchctl kickstart failed (${err instanceof Error ? err.message : err}); falling back to pkill`));
+      try {
+        execSync(`pkill -TERM -f '${config.projectName}.*lifeline'`);
+      } catch {
+        /* no process to kill */
+      }
+    }
+
+    // Poll for respawn — up to 30 s.
+    const pollStart = Date.now();
+    while (Date.now() - pollStart < 30_000) {
+      const now = readStartupMarker(config.stateDir);
+      if (now && now.pid !== baselinePid) {
+        console.log(pc.green(`Lifeline restarted (pid ${now.pid}, version ${now.version})`));
+        return;
+      }
+      await new Promise(r => setTimeout(r, 500));
+    }
+    console.error(pc.red('Lifeline restart timed out after 30 s (pid never changed)'));
+    process.exit(1);
+  });
+
+lifelineCmd
   .command('status')
   .description('Check lifeline status')
   .option('-d, --dir <path>', 'Project directory')

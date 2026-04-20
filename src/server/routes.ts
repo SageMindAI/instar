@@ -20,6 +20,7 @@ import { rateLimiter, signViewPath } from './middleware.js';
 import type { WriteOperation, WriteToken } from '../core/StateWriteAuthority.js';
 import { validateWriteToken, canPerformOperation } from '../core/StateWriteAuthority.js';
 import { DegradationReporter } from '../monitoring/DegradationReporter.js';
+import { parseVersion, compareVersions } from '../lifeline/versionHandshake.js';
 import {
   GATE_ROUTE_VERSION,
   GATE_ROUTE_MINIMUM_VERSION,
@@ -6310,8 +6311,67 @@ export function createRoutes(ctx: RouteContext): Router {
   // Receives messages from the Telegram Lifeline process and injects
   // them into the appropriate session, just like TelegramAdapter would.
 
+  // Cache serverVersion once at route-registration time. Use ProcessIntegrity
+  // (the running-in-memory version frozen at boot) rather than a live disk
+  // read that can drift after npm install -g. Stale-version prevention
+  // guardrail: routes.ts tests assert this path is NOT a live read. Per spec,
+  // if this fails to resolve to parseable semver, /internal/telegram-forward
+  // responds 503 to skip the handshake path.
+  const _serverVersionString =
+    ProcessIntegrity.getInstance()?.getState().runningVersion ?? '';
+  const _serverVersionParsed = parseVersion(_serverVersionString);
+
   router.post('/internal/telegram-forward', async (req, res) => {
-    const { topicId, text, fromUserId, fromUsername, fromFirstName, messageId } = req.body;
+    const { topicId, text, fromUserId, fromUsername, fromFirstName, messageId, lifelineVersion } = req.body;
+
+    // Server boot window: if version cache wasn't populated, skip handshake
+    // rather than 426-erroneously. Lifeline retries after retryAfterMs.
+    if (!_serverVersionParsed) {
+      res.status(503).json({ ok: false, reason: 'server-boot-incomplete', retryAfterMs: 1000 });
+      return;
+    }
+
+    // Version-handshake (only when lifelineVersion field is present AND
+    // auth is configured — dev-mode with empty authToken skips the handshake
+    // to avoid unauth'd fingerprinting channel if bearer-auth ever regresses).
+    const authEnabled = Boolean(ctx.config.authToken);
+    if (lifelineVersion !== undefined && authEnabled) {
+      const clientVersion = parseVersion(lifelineVersion);
+      if (!clientVersion) {
+        res.status(400).json({ ok: false, error: 'invalid lifelineVersion' });
+        return;
+      }
+      const decision = compareVersions(_serverVersionParsed, clientVersion);
+      if (decision.kind === 'upgrade-required') {
+        res.status(426).json({
+          ok: false,
+          upgradeRequired: true,
+          serverVersion: decision.serverVersionString,
+          action: 'restart',
+          reason: 'major-minor-mismatch',
+        });
+        return;
+      }
+      if (decision.kind === 'accept-with-patch-info') {
+        DegradationReporter.getInstance().report({
+          feature: 'TelegramLifeline.versionSkewInfo',
+          primary: 'Informational — lifeline patch drift beyond policy',
+          fallback: 'No behavior change; forward accepted',
+          reason: `patch drift ${decision.patchDiff} between lifeline and server`,
+          impact: 'Lifeline hasn’t restarted in a while; consider manual kick.',
+        });
+      }
+    } else if (lifelineVersion === undefined && authEnabled) {
+      // Backward-compat: pre-Stage-B lifelines don't send the field. Accept,
+      // emit informational signal once per cooldown.
+      DegradationReporter.getInstance().report({
+        feature: 'TelegramLifeline.versionMissing',
+        primary: 'Forward from Stage-B lifeline with version field',
+        fallback: 'Forward from pre-Stage-B lifeline (no version)',
+        reason: 'lifelineVersion field absent — backward-compat path',
+        impact: 'Observability only; lifeline needs a restart to pick up Stage B.',
+      });
+    }
 
     if (!topicId || !text) {
       res.status(400).json({ error: 'topicId and text required' });

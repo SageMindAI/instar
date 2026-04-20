@@ -25,7 +25,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import pc from 'picocolors';
-import { loadConfig, ensureStateDir, detectTmuxPath } from '../core/Config.js';
+import { loadConfig, ensureStateDir, detectTmuxPath, getInstarVersion } from '../core/Config.js';
 import { registerAgent, unregisterAgent, startHeartbeat } from '../core/AgentRegistry.js';
 // setup.ts uses @inquirer/prompts which requires Node 20.12+
 // Dynamic import to avoid breaking the lifeline on older Node versions
@@ -34,6 +34,30 @@ import { MessageQueue, type QueuedMessage } from './MessageQueue.js';
 import { ServerSupervisor } from './ServerSupervisor.js';
 import { retryWithBackoff } from './retryWithBackoff.js';
 import { notifyMessageDropped } from './droppedMessages.js';
+import {
+  ForwardTransientError,
+  ForwardBadRequestError,
+  ForwardServerBootError,
+  ForwardVersionSkewError,
+  isTerminalForwardError,
+  type VersionSkewBody,
+} from './forwardErrors.js';
+import { writeStartupMarker } from './startupMarker.js';
+import { RestartOrchestrator } from './RestartOrchestrator.js';
+import {
+  LifelineHealthWatchdog,
+  DEFAULT_WATCHDOG_THRESHOLDS,
+  type WatchdogThresholds,
+  type TripResult,
+} from './LifelineHealthWatchdog.js';
+import {
+  readRateLimitState,
+  decide as decideRateLimit,
+  writeRateLimitState,
+  isRestartStorm,
+  type RestartBucket,
+} from './rateLimitState.js';
+import { DegradationReporter } from '../monitoring/DegradationReporter.js';
 
 /**
  * Acquire an exclusive lock file to prevent multiple lifeline instances.
@@ -288,7 +312,23 @@ export class TelegramLifeline {
     console.log(pc.bold(`Starting Telegram Lifeline for ${pc.cyan(this.projectConfig.projectName)}`));
     console.log(`  Port: ${this.projectConfig.port}`);
     console.log(`  State: ${this.projectConfig.stateDir}`);
+    console.log(`  Version: ${this.lifelineVersion}`);
     console.log();
+
+    // Stage B: startup liveness marker. Every startup, regardless of cause,
+    // writes this file so `instar lifeline restart` can detect pid changes.
+    writeStartupMarker(this.projectConfig.stateDir, this.lifelineVersion);
+
+    // Stage B: startup coherence check. Guards against respawning into a
+    // half-written shadow install where the bundled package.json advertises
+    // a version but the code is broken or missing. The getInstarVersion()
+    // helper is the same one used below; if it returns '0.0.0' (its error
+    // fallback), the install is incoherent — exit code 2 so launchd throttles
+    // respawn rather than tight-looping.
+    if (this.lifelineVersion === '0.0.0') {
+      console.error(pc.red('[Lifeline] startup coherence check failed: package.json missing or unreadable. Exiting with code 2 for launchd throttle.'));
+      process.exit(2);
+    }
 
     // Acquire exclusive lock — prevent multiple lifeline instances
     if (!acquireLockFile(this.lockPath)) {
@@ -344,6 +384,11 @@ export class TelegramLifeline {
       }
     }, 15_000);
 
+    // Stage B: install the restart orchestrator and health watchdog.
+    // In unsupervised mode (no INSTAR_SUPERVISED=1 and no launchd parent),
+    // the orchestrator emits signals and logs but skips process.exit.
+    this.installOrchestratorAndWatchdog();
+
     // Replay any messages queued from previous lifeline runs
     if (this.queue.length > 0) {
       console.log(`  ${this.queue.length} queued messages from previous run`);
@@ -378,23 +423,198 @@ export class TelegramLifeline {
     // but never responds to messages.
     this.selfHealSettingsJson();
 
-    // Graceful shutdown — every step is wrapped in try-catch because a crash
-    // during shutdown leaves the lifeline in a half-alive state that confuses
-    // launchd's KeepAlive restart logic.
-    const shutdown = async () => {
-      console.log('\nLifeline shutting down...');
-      this.polling = false;
-      if (this.pollTimeout) clearTimeout(this.pollTimeout);
-      if (this.replayInterval) clearInterval(this.replayInterval);
-      try { if (this.stopHeartbeat) this.stopHeartbeat(); } catch { /* non-critical */ }
-      try { unregisterAgent(this.projectConfig.projectDir + '-lifeline'); } catch { /* ELOCKED is non-critical during shutdown */ }
-      try { releaseLockFile(this.lockPath); } catch { /* non-critical */ }
-      try { await this.supervisor.stop(); } catch { /* best effort */ }
-      process.exit(0);
+    // Graceful shutdown — SIGTERM/SIGINT route through the orchestrator so
+    // external restarts (e.g., `instar lifeline restart` → launchctl kickstart)
+    // get the same quiesce+persist semantics as self-triggered ones.
+    const externalShutdown = async () => {
+      if (this.orchestrator) {
+        await this.orchestrator.requestRestart({
+          reason: 'external-signal',
+          bucket: 'watchdog',
+        });
+      } else {
+        // Fallback if orchestrator wasn't installed (should not happen post-Stage-B)
+        console.log('\nLifeline shutting down (no orchestrator)...');
+        await this.quiesceEverything();
+        process.exit(0);
+      }
     };
 
-    process.on('SIGINT', shutdown);
-    process.on('SIGTERM', shutdown);
+    process.on('SIGINT', externalShutdown);
+    process.on('SIGTERM', externalShutdown);
+  }
+
+  /**
+   * Stop all in-flight / scheduled mutation sources so the queue snapshot
+   * is consistent when persisted.
+   */
+  private async quiesceEverything(): Promise<void> {
+    this.polling = false;
+    if (this.pollTimeout) clearTimeout(this.pollTimeout);
+    if (this.replayInterval) { clearInterval(this.replayInterval); this.replayInterval = null; }
+    if (this.watchdog) this.watchdog.stop();
+    try { if (this.stopHeartbeat) this.stopHeartbeat(); } catch { /* non-critical */ }
+    try { unregisterAgent(this.projectConfig.projectDir + '-lifeline'); } catch { /* non-critical */ }
+    try { releaseLockFile(this.lockPath); } catch { /* non-critical */ }
+    try { await this.supervisor.stop(); } catch { /* best-effort */ }
+  }
+
+  /**
+   * Install the restart orchestrator and watchdog. Called from start().
+   *
+   * The orchestrator owns the process.exit call. The watchdog requests
+   * restarts via the orchestrator on threshold crossings, subject to
+   * rate-limit state on disk.
+   */
+  private installOrchestratorAndWatchdog(): void {
+    const isSupervised =
+      process.env.INSTAR_SUPERVISED === '1' ||
+      process.env.NODE_ENV !== 'test' && process.ppid === 1;
+
+    this.orchestrator = new RestartOrchestrator({
+      quiesce: () => this.quiesceEverything(),
+      persistAll: async () => {
+        // Each persist is best-effort; Promise.all so they run in parallel.
+        await Promise.all([
+          this.persistRateLimitSafe(),
+          // Queue + dropped-messages are already atomically persisted by
+          // existing code paths (MessageQueue.save, notifyMessageDropped's
+          // atomic write). A no-op here is correct — the goal is "nothing
+          // is in-flight that would need a final flush."
+          Promise.resolve(),
+        ]);
+      },
+      exitFn: (code) => process.exit(code),
+      isSupervised,
+      isShadowInstallUpdating: () => {
+        // Shadow-install sibling path: `.instar/shadow-install/.updating`.
+        // stateDir is `.instar/state`; we check one level up for the lockfile.
+        const lockPath = path.join(
+          path.dirname(this.projectConfig.stateDir),
+          'shadow-install',
+          '.updating',
+        );
+        try { return fs.existsSync(lockPath); } catch { return false; }
+      },
+    });
+
+    const onTrip = (result: TripResult) => {
+      this.initiateRestart('watchdog', result.primary ?? 'unknown', {
+        tripped: result.tripped,
+        snapshot: result.snapshot,
+      });
+    };
+
+    this.watchdog = new LifelineHealthWatchdog({
+      thresholds: this.loadThresholdOverrides(),
+      getInputs: () => ({
+        now: Date.now(),
+        oldestQueueItemEnqueuedAt: this.oldestQueueItemEnqueuedAt(),
+        consecutiveForwardFailures: this.consecutiveForwardFailures,
+        conflict409StartedAt: this.conflict409StartedAt,
+        serverHealthy: this.supervisor.getStatus().healthy,
+      }),
+      onTrip,
+      onStarved: (gap) => {
+        DegradationReporter.getInstance().report({
+          feature: 'TelegramLifeline.watchdogStarved',
+          primary: 'Watchdog tick on schedule',
+          fallback: `Tick gap ${Math.round(gap / 1000)}s — event loop blocked`,
+          reason: 'setInterval delayed by blocked loop',
+          impact: 'Observability only; watchdog still functional at coarser granularity.',
+        });
+      },
+      autoStart: process.env.NODE_ENV !== 'test',
+    });
+  }
+
+  /** Extract oldest queue item's enqueue timestamp as ms, if any. */
+  private oldestQueueItemEnqueuedAt(): number | undefined {
+    const peeked = this.queue.peek();
+    if (peeked.length === 0) return undefined;
+    const ts = Date.parse(peeked[0].timestamp);
+    return Number.isFinite(ts) ? ts : undefined;
+  }
+
+  /** Read config overrides for watchdog thresholds. */
+  private loadThresholdOverrides(): Partial<WatchdogThresholds> {
+    const raw = (this.projectConfig as unknown as {
+      lifeline?: { watchdog?: Record<string, unknown> };
+    }).lifeline?.watchdog;
+    if (!raw || typeof raw !== 'object') return {};
+    const valid = (v: unknown): v is number =>
+      typeof v === 'number' && Number.isFinite(v) && v > 0;
+    const out: Partial<WatchdogThresholds> = {};
+    if (valid(raw.tickIntervalMs)) out.tickIntervalMs = raw.tickIntervalMs as number;
+    if (valid(raw.noForwardStuckMs)) out.noForwardStuckMs = raw.noForwardStuckMs as number;
+    if (valid(raw.consecutiveFailureMax)) out.consecutiveFailureMax = raw.consecutiveFailureMax as number;
+    if (valid(raw.conflict409StuckMs)) out.conflict409StuckMs = raw.conflict409StuckMs as number;
+    let hadInvalid = false;
+    for (const k of Object.keys(raw)) {
+      if (!(k in DEFAULT_WATCHDOG_THRESHOLDS)) hadInvalid = true;
+      else if (!valid(raw[k as keyof typeof raw])) hadInvalid = true;
+    }
+    if (hadInvalid) {
+      DegradationReporter.getInstance().report({
+        feature: 'TelegramLifeline.configInvalid',
+        primary: 'Valid watchdog threshold overrides',
+        fallback: 'Falling back to defaults for invalid keys',
+        reason: 'Non-finite, non-positive, or unknown override key in lifeline.watchdog',
+        impact: 'Threshold uses default; behavior unchanged but config is misleading.',
+      });
+    }
+    return out;
+  }
+
+  /** Persist rate-limit state. Safe to call during orchestrator persist. */
+  private async persistRateLimitSafe(): Promise<void> {
+    // The orchestrator invokes this while transitioning to 'persisting';
+    // rate-limit history was already written by initiateRestart() before
+    // the orchestrator was called. This is a final no-op flush.
+    return;
+  }
+
+  /**
+   * Unified restart initiator: checks rate limit, writes history, then
+   * calls the orchestrator. Used by both the watchdog tick (bucket=watchdog)
+   * and the version-skew handler (bucket=versionSkew).
+   */
+  private initiateRestart(
+    bucket: RestartBucket,
+    reason: string,
+    context?: Record<string, unknown>,
+  ): void {
+    const outcome = readRateLimitState(this.projectConfig.stateDir);
+    const dec = decideRateLimit(outcome, bucket);
+    if (!dec.allowed) {
+      console.log(`[Lifeline] restart suppressed by rate limit: ${dec.reason} (bucket=${bucket} reason=${reason})`);
+      return;
+    }
+    // Storm escalation signal (fires in addition to the normal restart
+    // signal so the operator sees that self-heal is not converging).
+    if (dec.stormActive || isRestartStorm(outcome.kind === 'ok' ? outcome.state : null)) {
+      DegradationReporter.getInstance().report({
+        feature: 'TelegramLifeline.restartStorm',
+        primary: 'Rate-limited self-restarts within ceiling',
+        fallback: 'Continuing to restart — underlying cause unresolved',
+        reason: `>= 6 restarts within the last hour; latest bucket=${bucket} reason=${reason}`,
+        impact: 'Operator should investigate; self-heal is not converging.',
+      });
+    }
+    // Write the history entry BEFORE calling process.exit so the new lifeline
+    // sees the rate-limit state on startup. Best-effort — failure here still
+    // lets the restart proceed (orchestrator is authoritative).
+    try {
+      const prior = outcome.kind === 'ok' ? outcome.state : null;
+      writeRateLimitState(this.projectConfig.stateDir, reason, bucket, prior);
+    } catch (err) {
+      console.error(`[Lifeline] failed to write rate-limit state: ${err}`);
+    }
+    if (!this.orchestrator) {
+      console.error('[Lifeline] initiateRestart called before orchestrator was installed');
+      return;
+    }
+    void this.orchestrator.requestRestart({ reason, bucket, context });
   }
 
   // ── Stale Connection Flush ───────────────────────────────
@@ -470,6 +690,7 @@ export class TelegramLifeline {
         this.saveOffset();
       }
       // Success — reset backoff counters
+      if (this.consecutive409s > 0) this.conflict409StartedAt = null; // 0→... edge
       this.consecutive409s = 0;
       this.consecutive429s = 0;
       this.pollBackoffMs = this.config.pollIntervalMs ?? 2000;
@@ -482,6 +703,8 @@ export class TelegramLifeline {
       }
       // Handle 409 Conflict (multiple bot instances polling)
       if (errMsg.includes('409') && errMsg.includes('Conflict')) {
+        // 0→>0 edge: record when conflict started so watchdog can time the stuck state.
+        if (this.consecutive409s === 0) this.conflict409StartedAt = Date.now();
         this.consecutive409s++;
         // Exponential backoff: 4s, 8s, 16s, 32s, max 60s
         this.pollBackoffMs = Math.min(60_000, 2000 * Math.pow(2, this.consecutive409s));
@@ -848,11 +1071,33 @@ export class TelegramLifeline {
   private static readonly FORWARD_ATTEMPTS = 3;
   private static readonly FORWARD_BACKOFF_BASE_MS = 1000;
 
+  /**
+   * `legacyStrict` — if a pre-Stage-B server strictly validates JSON and
+   * rejects the unknown `lifelineVersion` field with 400, the lifeline
+   * falls back to omitting it and pins this flag for the session.
+   */
+  private legacyStrictServer = false;
+
+  /** Full semver of this lifeline, read once at construction. */
+  private readonly lifelineVersion = getInstarVersion();
+
   private async forwardToServer(
     topicId: number,
     text: string,
     rawMsg: NonNullable<TelegramUpdate['message']>,
   ): Promise<boolean> {
+    const buildBody = (includeVersion: boolean): string =>
+      JSON.stringify({
+        topicId,
+        text,
+        fromUserId: rawMsg.from.id,
+        fromUsername: rawMsg.from.username,
+        fromFirstName: rawMsg.from.first_name,
+        messageId: rawMsg.message_id,
+        timestamp: new Date(rawMsg.date * 1000).toISOString(),
+        ...(includeVersion ? { lifelineVersion: this.lifelineVersion } : {}),
+      });
+
     const doForward = async (): Promise<true> => {
       const controller = new AbortController();
       const timer = setTimeout(() => controller.abort(), 10_000);
@@ -866,22 +1111,42 @@ export class TelegramLifeline {
           {
             method: 'POST',
             headers: fwdHeaders,
-            body: JSON.stringify({
-              topicId,
-              text,
-              fromUserId: rawMsg.from.id,
-              fromUsername: rawMsg.from.username,
-              fromFirstName: rawMsg.from.first_name,
-              messageId: rawMsg.message_id,
-              timestamp: new Date(rawMsg.date * 1000).toISOString(),
-            }),
+            body: buildBody(!this.legacyStrictServer),
             signal: controller.signal,
           }
         );
-        if (!response.ok) {
-          throw new Error(`forward responded ${response.status}`);
+        if (response.ok) return true;
+        if (response.status === 426) {
+          const body = (await response.json().catch(() => ({}))) as VersionSkewBody;
+          throw new ForwardVersionSkewError(426, body);
         }
-        return true;
+        if (response.status === 503) {
+          const body = (await response.json().catch(() => ({}))) as { retryAfterMs?: number };
+          throw new ForwardServerBootError(body.retryAfterMs ?? 1000);
+        }
+        if (response.status === 400) {
+          const body = await response.json().catch(() => ({}));
+          // Graceful degradation: if we included lifelineVersion and the
+          // server rejected the request, retry once without it.
+          if (!this.legacyStrictServer) {
+            this.legacyStrictServer = true;
+            console.warn(
+              `[Lifeline] server returned 400 with lifelineVersion; ` +
+              `retrying without (legacyStrictServer=true)`
+            );
+            // Re-issue the request WITHOUT the version field and return the
+            // result of that retry. If still 400, it's a genuine bad request.
+            const r2 = await fetch(
+              `http://127.0.0.1:${this.projectConfig.port}/internal/telegram-forward`,
+              { method: 'POST', headers: fwdHeaders, body: buildBody(false) }
+            );
+            if (r2.ok) return true;
+            if (r2.status === 400) throw new ForwardBadRequestError(await r2.json().catch(() => ({})));
+            throw new ForwardTransientError(r2.status);
+          }
+          throw new ForwardBadRequestError(body);
+        }
+        throw new ForwardTransientError(response.status);
       } finally {
         clearTimeout(timer);
       }
@@ -891,6 +1156,7 @@ export class TelegramLifeline {
       await retryWithBackoff(doForward, {
         attempts: TelegramLifeline.FORWARD_ATTEMPTS,
         baseMs: TelegramLifeline.FORWARD_BACKOFF_BASE_MS,
+        isTerminal: isTerminalForwardError,
         onAttempt: (n, lastErr) => {
           if (n > 1) {
             console.warn(
@@ -900,11 +1166,53 @@ export class TelegramLifeline {
           }
         },
       });
+      // Record success for watchdog.
+      this.consecutiveForwardFailures = 0;
+      this.lastForwardSuccessAt = Date.now();
       return true;
-    } catch {
+    } catch (err) {
+      // Version-skew handler: emit signal + request restart via orchestrator.
+      if (err instanceof ForwardVersionSkewError) {
+        this.handleVersionSkew(err);
+        return false;
+      }
+      this.consecutiveForwardFailures++;
       return false;
     }
   }
+
+  /**
+   * Handle a 426 response from the server. Validates the response body's
+   * `serverVersion` differs from this lifeline's, then requests restart
+   * through the orchestrator. If the body is malformed or the versions
+   * match (loopback impostor), treat as transient.
+   */
+  private handleVersionSkew(err: ForwardVersionSkewError): void {
+    const { body } = err;
+    if (body.upgradeRequired !== true) {
+      // Not a genuine Stage-B upgrade directive; treat as transient noise.
+      this.consecutiveForwardFailures++;
+      return;
+    }
+    if (typeof body.serverVersion !== 'string' || body.serverVersion === this.lifelineVersion) {
+      // Loopback impostor or malformed body — don't trust it.
+      console.warn(`[Lifeline] ignoring 426 with missing/matching serverVersion`);
+      this.consecutiveForwardFailures++;
+      return;
+    }
+    this.initiateRestart('versionSkew', 'version-skew', {
+      serverVersion: body.serverVersion,
+      lifelineVersion: this.lifelineVersion,
+    });
+  }
+
+  /** Watchdog-tracked counters/state. */
+  private consecutiveForwardFailures = 0;
+  private lastForwardSuccessAt = 0;
+  private conflict409StartedAt: number | null = null;
+
+  private orchestrator: RestartOrchestrator | null = null;
+  private watchdog: LifelineHealthWatchdog | null = null;
 
   // ── Lifeline Commands ─────────────────────────────────────
 

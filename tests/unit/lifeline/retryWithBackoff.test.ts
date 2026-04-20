@@ -76,6 +76,19 @@ describe('retryWithBackoff', () => {
     expect(onAttempt).toHaveBeenCalledWith(2, expect.any(Error));
   });
 
+  it('short-circuits on isTerminal — zero additional attempts', async () => {
+    const fn = vi.fn()
+      .mockRejectedValueOnce(new Error('version-skew-ish'));
+    const isTerminal = (err: Error) => err.message === 'version-skew-ish';
+    const p = retryWithBackoff(fn, { attempts: 3, baseMs: 1000, isTerminal });
+    const caught = p.catch((e: Error) => e);
+    await vi.advanceTimersByTimeAsync(0);
+    const err = await caught;
+    expect((err as Error).message).toBe('version-skew-ish');
+    // Critical: called exactly ONCE, not 3 times.
+    expect(fn).toHaveBeenCalledTimes(1);
+  });
+
   it('uses doubling backoff (baseMs, baseMs*2, baseMs*4)', async () => {
     const fn = vi.fn()
       .mockRejectedValueOnce(new Error('a'))
