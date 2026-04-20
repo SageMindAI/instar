@@ -1,45 +1,53 @@
 # Upgrade Guide — vNEXT
 
 <!-- bump: patch -->
+<!-- Valid values: patch, minor, major -->
+<!-- patch = bug fixes, refactors, test additions, doc updates -->
+<!-- minor = new features, new APIs, new capabilities (backwards-compatible) -->
+<!-- major = breaking changes to existing APIs or behavior -->
 
 ## What Changed
 
-**JobLoader per-entry resilience.** `JobLoader.loadJobs` now logs and
-skips invalid job entries instead of throwing on the first one. One
-malformed job (e.g. missing `name`/`priority` or an invalid
-`execute.type`) previously took down the whole scheduler — propagating
-through `JobScheduler.start` and killing the HTTP server before port
-bind, which cascaded to the dashboard, feedback pipeline, attention
-queue, and Telegram poller. Now each bad entry is logged (to
-`console.error` with index + slug + validation error) and skipped;
-valid sibling entries load normally. Structural errors (missing file,
-unparseable JSON, non-array root) still throw — those indicate nothing
-can be loaded at all. `validateJob` is unchanged and still throws on a
-single bad entry, so CLI validators and tests keep their strict
-single-entry semantics.
-
-Fixes `cluster-jobloader-crashes-entire-server-on-one-bad-job-supervisor-ci`.
-See `docs/specs/jobloader-per-entry-resilience.md` and
-`upgrades/side-effects/jobloader-per-entry-resilience.md`.
+<!-- Describe what changed technically. What new features, APIs, behavioral changes? -->
+<!-- Write this for the AGENT — they need to understand the system deeply. -->
 
 ## What to Tell Your User
 
-- "If one job in my jobs file is broken, the others still run. The broken one gets logged and skipped instead of taking down everything."
+<!-- Write talking points the agent should relay to their user. -->
+<!-- This should be warm, conversational, user-facing — not a changelog. -->
+<!-- Focus on what THEY can now do, not internal plumbing. -->
+<!--                                                                    -->
+<!-- PROHIBITED in this section (will fail validation):                 -->
+<!--   camelCase config keys: silentReject, maxRetries, telegramNotify -->
+<!--   Inline code backtick references like silentReject: false        -->
+<!--   Fenced code blocks                                              -->
+<!--   Instructions to edit files or run commands                      -->
+<!--                                                                    -->
+<!-- CORRECT style: "I can turn that on for you" not "set X to false"  -->
+<!-- The agent relays this to their user — keep it human.              -->
+
+- **[Feature name]**: "[Brief, friendly description of what this means for the user]"
 
 ## Summary of New Capabilities
 
-- `JobLoader.loadJobs` skips invalid entries with `console.error` + summary `console.warn` instead of throwing.
+| Capability | How to Use |
+|-----------|-----------|
+| [Capability] | [Endpoint, command, or "automatic"] |
 
 ## Evidence
 
-**Reproduction (before the fix).** Reporter electruck, 2026-04-17: commit `a4d7376` in their agent appended a new job to `.instar/jobs.json` missing required `name` and `priority`, with invalid `execute.type: "bash"`. `validateJob` threw on the first missing field; `JobScheduler.start()` propagated the throw; `startServer()` died before binding port 4041. The lifeline supervisor restarted the server 5× — each failure reported as "Server unhealthy" (actually: never started) — then entered long-backoff with no user-visible alert. Ten healthy jobs plus the HTTP API, dashboard, feedback pipeline, attention queue, and Telegram poller all stopped because of one typo.
+<!-- REQUIRED if this release claims to fix a bug. -->
+<!-- Unit tests passing is NOT evidence. Provide ONE of: -->
+<!--   (a) Reproduction steps + observed before/after on a live system. -->
+<!--       Include log excerpts, observed command output, or behavior -->
+<!--       description. Make it specific enough that a future reader can -->
+<!--       re-run it and see the same thing. -->
+<!--   (b) "Not reproducible in dev — [concrete reason]" if the failure -->
+<!--       mode truly can't be exercised locally (race conditions, -->
+<!--       event-driven paths requiring external signals, etc). -->
+<!--                                                                 -->
+<!-- If this release doesn't claim a bug fix (pure feature / refactor), -->
+<!-- leave this section blank or delete it — it's only enforced when -->
+<!-- "What Changed" describes a fix. -->
 
-**After the fix.** The same jobs file boots successfully. The malformed entry emits `[JobLoader] Skipping invalid job at index N (slug="contact-proposer"): Job[N]: "name" is required and must be a non-empty string` to `console.error`, followed by a `console.warn` summary `Loaded N valid job(s); skipped 1 invalid entry(ies). Fix the skipped entries to restore full scheduler coverage.` Valid siblings load normally and the scheduler runs.
-
-**Unit-test evidence** (`npx vitest run tests/unit/JobLoader.test.ts tests/unit/job-loader-common-blockers.test.ts` at commit `058f1fe`):
-
-- New positive test `skips invalid entries and loads valid ones (does not throw)` — writes a jobs file with the exact shape of the failing production entry (`execute.type: "bash"`, missing `name`+`priority`) sandwiched between two valid jobs; asserts the loader returns the two valid jobs and logs the skip. Passes.
-- Updated integration test `commonBlockers validation runs during loadJobs (entry skipped with logged error)` — writes a job with a malformed `commonBlockers.description`; asserts zero valid jobs and the validation message on `console.error`. Passes.
-- Full: 102/102 tests across the two files. All 41 pre-existing `validateJob` throw-tests continue to pass — `validateJob` is byte-identical.
-
-**Scope of what changed.** Only `JobLoader.loadJobs` (fail-fast → log-and-skip). `validateJob` and `validateCommonBlockers` unchanged. Structural errors (missing file, unparseable JSON, non-array root) still throw.
+[Describe reproduction + verified fix, OR "Not reproducible in dev — [concrete reason]"]
