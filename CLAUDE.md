@@ -40,7 +40,10 @@ src/
                   # LlmQueue (rate-limited, priority-laned LLM call queue shared
                   # across PresenceProxy and PromiseBeacon; enforces daily spend cap),
                   # SessionWatchdog (stuck-process detection + escalating kill
-                  # sequence; watchdog-notifications for user-facing messages)
+                  # sequence; watchdog-notifications for user-facing messages),
+                  # HelperWatchdog (stall + failure detection for spawned subagents
+                  # via SubagentTracker events; signal-only: emits `stall` and
+                  # `helper-failed` events; consumers handle retry/messaging)
   messaging/      # TelegramAdapter (long-polling, JSONL history),
                   # WhatsAppAdapter, SlackAdapter, iMessage (platform adapters);
                   # MessageRouter (topic → adapter routing),

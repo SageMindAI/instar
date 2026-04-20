@@ -153,7 +153,7 @@ New class `src/monitoring/PromiseBeacon.ts`. Runs in the server process alongsid
 2. **Existing `commit-action` skill.** Already invokes CommitmentTracker. Extended to pass beacon fields when the commitment has an active `topicId`. The skill's own local ledger row remains the source of truth for idempotency (I4 fix) — `externalKey` flows through.
 3. **Existing `CommitmentSentinel` — opt-in "beacon-enable" step.** The Sentinel detects unregistered commitments from Telegram messages. When a detected commitment has an implicit cadence ("I'll update in 10 min"), the Sentinel's Haiku classifier extracts it and proposes beacon-enabling. **Shadow mode required (A9 fix):** for the first 7 days after this ships, the Sentinel logs the intent but does not actually enable the beacon. Precision report gates enabling. Default-off. Cap auto-created cadence to `≥ 5min`.
 
-No auto-parse of outgoing agent messages is added in this spec — `CommitmentSentinel` already covers that surface and is intelligence-based, not regex.
+**Auto-beacon via `detectTimePromise` (implemented in CommitmentTracker.record()).** When `beaconEnabled` is not explicitly passed but `topicId` is set, `record()` runs a lightweight regex scan (`detectTimePromise`) on `agentResponse` looking for time markers ("back in 20 min", "by EOD", "shortly", etc.). On a match, it auto-sets `beaconEnabled = true` and computes `cadenceMs` (half the stated interval, capped at 6h) and `hardDeadlineAt` (3× the interval, capped at 24h). This path is distinct from `CommitmentSentinel` (which detects *unregistered* commitments from incoming Telegram messages); `detectTimePromise` fires on every `record()` call-site that has a `topicId` but didn't opt in explicitly.
 
 ### Delivery detection
 
