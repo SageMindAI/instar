@@ -1,8 +1,8 @@
 {
-  "agentName": "TestAgent",
-  "projectName": "TestAgent",
-  "projectDir": "/var/folders/7s/y2tbdryn5jl10h7n_0y2vr700000gn/T/compact-harness-Ac1V4b/agent-home",
-  "stateDir": "/var/folders/7s/y2tbdryn5jl10h7n_0y2vr700000gn/T/compact-harness-Ac1V4b/agent-home/.instar",
+  "agentName": "Echo",
+  "projectName": "Echo",
+  "projectDir": "/var/folders/7s/y2tbdryn5jl10h7n_0y2vr700000gn/T/compact-harness-0pWSit/agent-home",
+  "stateDir": "/var/folders/7s/y2tbdryn5jl10h7n_0y2vr700000gn/T/compact-harness-0pWSit/agent-home/.instar",
   "port": 0,
-  "authToken": "harness-token-601df1ee"
+  "authToken": "harness-token-b77d873e"
 }
