@@ -29,3 +29,17 @@ See `docs/specs/jobloader-per-entry-resilience.md` and
 ## Summary of New Capabilities
 
 - `JobLoader.loadJobs` skips invalid entries with `console.error` + summary `console.warn` instead of throwing.
+
+## Evidence
+
+**Reproduction (before the fix).** Reporter electruck, 2026-04-17: commit `a4d7376` in their agent appended a new job to `.instar/jobs.json` missing required `name` and `priority`, with invalid `execute.type: "bash"`. `validateJob` threw on the first missing field; `JobScheduler.start()` propagated the throw; `startServer()` died before binding port 4041. The lifeline supervisor restarted the server 5× — each failure reported as "Server unhealthy" (actually: never started) — then entered long-backoff with no user-visible alert. Ten healthy jobs plus the HTTP API, dashboard, feedback pipeline, attention queue, and Telegram poller all stopped because of one typo.
+
+**After the fix.** The same jobs file boots successfully. The malformed entry emits `[JobLoader] Skipping invalid job at index N (slug="contact-proposer"): Job[N]: "name" is required and must be a non-empty string` to `console.error`, followed by a `console.warn` summary `Loaded N valid job(s); skipped 1 invalid entry(ies). Fix the skipped entries to restore full scheduler coverage.` Valid siblings load normally and the scheduler runs.
+
+**Unit-test evidence** (`npx vitest run tests/unit/JobLoader.test.ts tests/unit/job-loader-common-blockers.test.ts` at commit `058f1fe`):
+
+- New positive test `skips invalid entries and loads valid ones (does not throw)` — writes a jobs file with the exact shape of the failing production entry (`execute.type: "bash"`, missing `name`+`priority`) sandwiched between two valid jobs; asserts the loader returns the two valid jobs and logs the skip. Passes.
+- Updated integration test `commonBlockers validation runs during loadJobs (entry skipped with logged error)` — writes a job with a malformed `commonBlockers.description`; asserts zero valid jobs and the validation message on `console.error`. Passes.
+- Full: 102/102 tests across the two files. All 41 pre-existing `validateJob` throw-tests continue to pass — `validateJob` is byte-identical.
+
+**Scope of what changed.** Only `JobLoader.loadJobs` (fail-fast → log-and-skip). `validateJob` and `validateCommonBlockers` unchanged. Structural errors (missing file, unparseable JSON, non-array root) still throw.
