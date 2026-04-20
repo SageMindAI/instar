@@ -251,6 +251,10 @@ export interface RouteContext {
   featureRegistry: import('../core/FeatureRegistry.js').FeatureRegistry | null;
   discoveryEvaluator: import('../core/DiscoveryEvaluator.js').DiscoveryEvaluator | null;
   unifiedTrust: UnifiedTrustSystem | null;
+  /** Shared proxy coordinator — mutex + /build heartbeat record for the
+   *  PresenceProxy ↔ PromiseBeacon ↔ /build-heartbeat three-way deconfliction
+   *  (BUILD-STALL-VISIBILITY-SPEC Fix 2 "Routing"). */
+  proxyCoordinator: import('../monitoring/ProxyCoordinator.js').ProxyCoordinator | null;
   /** Integrated-Being SharedStateLedger (v1). Null when disabled. */
   sharedStateLedger: import('../core/SharedStateLedger.js').SharedStateLedger | null;
   /** Integrated-Being LedgerSessionRegistry (v2). Null when v2Enabled=false. */
@@ -4123,6 +4127,113 @@ export function createRoutes(ctx: RouteContext): Router {
       res.status(500).json({ error: err instanceof Error ? err.message : String(err) });
     }
   });
+
+  // POST /build/heartbeat — /build pipeline status relay.
+  //
+  // BUILD-STALL-VISIBILITY-SPEC Fix 2. The /build skill / build-state.py calls
+  // this on phase transitions (and optionally from a server-side cadence tick)
+  // so the user sees signs of life during long-running tool waits.
+  //
+  // Content shape is locked: enumerated phase + allowlisted tool + elapsed.
+  // No free-form agent prose, no argv, no paths — the caller cannot smuggle
+  // sensitive content through this endpoint. The message goes out as a proxy
+  // class (isProxy: true), which bypasses the outbound tone/dedup gates on
+  // purpose: there's nothing free-form to judge in an enumerated template.
+  //
+  // The dispatch also records the heartbeat in ProxyCoordinator so
+  // PresenceProxy suppresses its generic Tier 2/3 standby for the same
+  // topic within the suppression window (one progress voice per channel).
+  {
+    const HEARTBEAT_PHASES = new Set([
+      'idle', 'clarify', 'planning', 'executing',
+      'verifying', 'fixing', 'hardening', 'complete', 'failed', 'escalated',
+    ]);
+    const HEARTBEAT_TOOLS = new Set([
+      'Monitor', 'Bash-test', 'Bash-tsc', 'Bash-install',
+      'Bash-lint', 'Bash-other', 'none',
+    ]);
+    const HEARTBEAT_STATUSES = new Set(['still-working', 'no-progress-detected', 'phase-boundary']);
+    const RUNID_RE = /^[a-zA-Z0-9_-]{1,64}$/;
+
+    router.post('/build/heartbeat', async (req, res) => {
+      const body = req.body as {
+        runId?: unknown;
+        phase?: unknown;
+        topicId?: unknown;
+        channelId?: unknown;
+        tool?: unknown;
+        elapsedMs?: unknown;
+        status?: unknown;
+      };
+
+      const runId = typeof body.runId === 'string' ? body.runId : '';
+      if (!RUNID_RE.test(runId)) {
+        res.status(400).json({ error: '"runId" must match /^[a-zA-Z0-9_-]{1,64}$/' });
+        return;
+      }
+      const phase = typeof body.phase === 'string' ? body.phase : '';
+      if (!HEARTBEAT_PHASES.has(phase)) {
+        res.status(400).json({ error: `"phase" must be one of: ${[...HEARTBEAT_PHASES].join(', ')}` });
+        return;
+      }
+      const tool = typeof body.tool === 'string' ? body.tool : 'none';
+      if (!HEARTBEAT_TOOLS.has(tool)) {
+        res.status(400).json({ error: `"tool" must be one of: ${[...HEARTBEAT_TOOLS].join(', ')}` });
+        return;
+      }
+      const status = typeof body.status === 'string' ? body.status : 'phase-boundary';
+      if (!HEARTBEAT_STATUSES.has(status)) {
+        res.status(400).json({ error: `"status" must be one of: ${[...HEARTBEAT_STATUSES].join(', ')}` });
+        return;
+      }
+      const elapsedMs = typeof body.elapsedMs === 'number' && Number.isFinite(body.elapsedMs) && body.elapsedMs >= 0 && body.elapsedMs < 86_400_000
+        ? Math.floor(body.elapsedMs)
+        : 0;
+
+      // Route by topicId (Telegram) or channelId (Slack). Exactly one must be set.
+      const topicId = typeof body.topicId === 'number' && Number.isInteger(body.topicId) ? body.topicId : null;
+      const channelId = typeof body.channelId === 'string' && body.channelId.length > 0 && body.channelId.length <= 128
+        ? body.channelId
+        : null;
+      if ((topicId === null) === (channelId === null)) {
+        res.status(400).json({ error: 'Exactly one of "topicId" (number) or "channelId" (string) must be provided' });
+        return;
+      }
+
+      const elapsedMin = Math.floor(elapsedMs / 60_000);
+      const elapsedStr = elapsedMin >= 1 ? `${elapsedMin}m` : `${Math.floor(elapsedMs / 1000)}s`;
+      const text = `🔨 /build — phase=${phase}, tool=${tool}, elapsed=${elapsedStr}, status=${status}`;
+
+      try {
+        if (topicId !== null) {
+          if (!ctx.telegram) {
+            res.status(503).json({ error: 'Telegram not configured' });
+            return;
+          }
+          await ctx.telegram.sendToTopic(topicId, text, { skipStallClear: true });
+          ctx.proxyCoordinator?.recordBuildHeartbeat(topicId);
+        } else if (channelId !== null) {
+          if (!ctx.slack) {
+            res.status(503).json({ error: 'Slack not configured' });
+            return;
+          }
+          await ctx.slack.sendToChannel(channelId, text);
+          // Slack uses synthetic negative topic IDs internally; compute the same
+          // hash used by server.ts:slackChannelToSyntheticId so PresenceProxy's
+          // Slack path sees the same suppression signal.
+          let hash = 0;
+          for (let i = 0; i < channelId.length; i++) {
+            hash = ((hash << 5) - hash + channelId.charCodeAt(i)) | 0;
+          }
+          const synthetic = -(Math.abs(hash) + 1);
+          ctx.proxyCoordinator?.recordBuildHeartbeat(synthetic);
+        }
+        res.json({ ok: true, runId, phase, tool, status, elapsedMs });
+      } catch (err) {
+        res.status(500).json({ error: err instanceof Error ? err.message : String(err) });
+      }
+    });
+  }
 
   // POST /telegram/post-update — route an update/announcement message to the
   // Agent Updates topic, deterministically.
