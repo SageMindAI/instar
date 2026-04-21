@@ -1,25 +1,53 @@
 # Upgrade Guide — vNEXT
 
 <!-- bump: patch -->
+<!-- Valid values: patch, minor, major -->
+<!-- patch = bug fixes, refactors, test additions, doc updates -->
+<!-- minor = new features, new APIs, new capabilities (backwards-compatible) -->
+<!-- major = breaking changes to existing APIs or behavior -->
 
 ## What Changed
 
-The boot-time grounding audit in `JobLoader.ts` no longer emits a warning for built-in default jobs shipped with instar. The audit is meant to nudge users toward declaring grounding on jobs they add — firing on package-provided defaults created noise the user could not silence without editing vendored jobs, which trained everyone to ignore the message. The exempt set now covers all current and historical built-in default slugs (reflection-trigger, guardian-pulse, insight-harvest, the overseer-* family, identity-review, memory-hygiene, etc.). The audit still fires for user-authored jobs missing grounding, which is the signal it was built for.
-
-Fixes feedback cluster `cluster-jobloader-warns-12-enabled-jobs-lack-grounding-config`.
+<!-- Describe what changed technically. What new features, APIs, behavioral changes? -->
+<!-- Write this for the AGENT — they need to understand the system deeply. -->
 
 ## What to Tell Your User
 
-- **Quieter startup logs**: "The grounding warning that used to show up in my logs at every boot is gone — it was pointing at my own package defaults, not anything you need to act on."
+<!-- Write talking points the agent should relay to their user. -->
+<!-- This should be warm, conversational, user-facing — not a changelog. -->
+<!-- Focus on what THEY can now do, not internal plumbing. -->
+<!--                                                                    -->
+<!-- PROHIBITED in this section (will fail validation):                 -->
+<!--   camelCase config keys: silentReject, maxRetries, telegramNotify -->
+<!--   Inline code backtick references like silentReject: false        -->
+<!--   Fenced code blocks                                              -->
+<!--   Instructions to edit files or run commands                      -->
+<!--                                                                    -->
+<!-- CORRECT style: "I can turn that on for you" not "set X to false"  -->
+<!-- The agent relays this to their user — keep it human.              -->
+
+- **[Feature name]**: "[Brief, friendly description of what this means for the user]"
 
 ## Summary of New Capabilities
 
 | Capability | How to Use |
 |-----------|-----------|
-| Quieter boot logs for built-in jobs | Automatic |
+| [Capability] | [Endpoint, command, or "automatic"] |
 
 ## Evidence
 
-- Root cause traced in `src/scheduler/JobLoader.ts` `auditGrounding`; the warning list was enumerating jobs whose definitions ship in `src/commands/init.ts` `getDefaultJobs()`.
-- Verified 22 of 26 warned slugs are currently defined defaults; the remaining 4 (sentry-error-scan, self-diagnosis, evolution-review, commitment-check) are historical defaults still present in long-running agents' `jobs.json`.
-- No logic change — only the `GROUNDING_EXEMPT_SLUGS` set widens.
+<!-- REQUIRED if this release claims to fix a bug. -->
+<!-- Unit tests passing is NOT evidence. Provide ONE of: -->
+<!--   (a) Reproduction steps + observed before/after on a live system. -->
+<!--       Include log excerpts, observed command output, or behavior -->
+<!--       description. Make it specific enough that a future reader can -->
+<!--       re-run it and see the same thing. -->
+<!--   (b) "Not reproducible in dev — [concrete reason]" if the failure -->
+<!--       mode truly can't be exercised locally (race conditions, -->
+<!--       event-driven paths requiring external signals, etc). -->
+<!--                                                                 -->
+<!-- If this release doesn't claim a bug fix (pure feature / refactor), -->
+<!-- leave this section blank or delete it — it's only enforced when -->
+<!-- "What Changed" describes a fix. -->
+
+[Describe reproduction + verified fix, OR "Not reproducible in dev — [concrete reason]"]
