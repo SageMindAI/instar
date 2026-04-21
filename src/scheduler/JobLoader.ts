@@ -17,7 +17,17 @@ import type { JobDefinition, JobPriority, ModelTier } from '../core/types.js';
 const VALID_PRIORITIES: JobPriority[] = ['critical', 'high', 'medium', 'low'];
 const VALID_MODELS: ModelTier[] = ['opus', 'sonnet', 'haiku'];
 
-/** Slugs for lightweight default jobs where grounding is unnecessary. */
+/**
+ * Slugs for built-in default jobs that ship with instar.
+ *
+ * The grounding audit is aimed at USER-AUTHORED jobs — it nudges users to
+ * declare identity/security requirements for work they add. Warning on the
+ * package's own shipped defaults at every boot is noise the user can't silence
+ * without editing vendored job definitions. Built-in defaults either don't
+ * need grounding (lightweight health/sync jobs) or carry inline grounding
+ * where required (identity-review, memory-hygiene, etc.) — the audit can
+ * trust the package author and skip them.
+ */
 const GROUNDING_EXEMPT_SLUGS: ReadonlySet<string> = new Set([
   'health-check',
   'feedback-retry',
@@ -25,6 +35,32 @@ const GROUNDING_EXEMPT_SLUGS: ReadonlySet<string> = new Set([
   'update-check',
   'project-map-refresh',
   'git-sync',
+  'reflection-trigger',
+  'relationship-maintenance',
+  'insight-harvest',
+  'evolution-overdue-check',
+  'coherence-audit',
+  'degradation-digest',
+  'state-integrity-check',
+  'memory-hygiene',
+  'guardian-pulse',
+  'session-continuity-check',
+  'memory-export',
+  'capability-audit',
+  'identity-review',
+  'evolution-proposal-evaluate',
+  'evolution-proposal-implement',
+  'commitment-detection',
+  'dashboard-link-refresh',
+  'overseer-guardian',
+  'overseer-learning',
+  'overseer-maintenance',
+  'overseer-infrastructure',
+  'overseer-development',
+  'sentry-error-scan',
+  'self-diagnosis',
+  'evolution-review',
+  'commitment-check',
 ]);
 
 /**
