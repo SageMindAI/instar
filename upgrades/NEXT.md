@@ -8,46 +8,38 @@
 
 ## What Changed
 
-<!-- Describe what changed technically. What new features, APIs, behavioral changes? -->
-<!-- Write this for the AGENT — they need to understand the system deeply. -->
+The better-sqlite3 self-heal script (`scripts/fix-better-sqlite3.cjs`, invoked by `ensureSqliteBindings()` at server startup when a native-binding mismatch is detected) now anchors its Node resolution to `process.execPath` instead of `node` from `$PATH`. Prior behavior: on machines with a mixed Node environment — asdf / NVM / Homebrew / system-node combinations where `$PATH`'s first `node` differs from the one running the instar server — the script could silently produce and "verify" a binary compiled for the wrong ABI, reporting success while the server's next load fails with NODE_MODULE_VERSION mismatch. This produced three cascading SQLite-subsystem degradations (TopicMemory, SemanticMemory, FeatureRegistry) with no loud-signal alarm — the exact failure mode observed on the Inspec agent on 2026-04-21.
+
+Three changes in `scripts/fix-better-sqlite3.cjs`:
+
+1. `testBinary` now uses `execFileSync(process.execPath, ['-e', ...])` instead of a shelled `execSync("node -e ...")` — guarantees the test runs under the same Node that will load the binary.
+2. `trySourceBuild` prepends `path.dirname(process.execPath)` to the child's PATH and invokes npm via `execFileSync(process.execPath, [npmCli, ...])` — ensures node-gyp compiles against the right Node's headers even when PATH is non-standard.
+3. New `verifyChildAbiMatches()` defence-in-depth probe — before recovery, confirms the Node behind `process.execPath` reports the same MODULE_VERSION as the in-process one. Catches the narrow case of a symlink-behind-execPath being replaced mid-session.
+
+Six new regression tests in `tests/unit/fix-better-sqlite3-state.test.ts` combine source inspection (protect the spawn shape), behavioural exercise (exercise verifyChildAbiMatches), and injection-guard (prevent future interpolation into `-e` payloads).
+
+Already-affected agents self-heal on the next server restart after this patch lands — no operator action needed. The in-process detector re-fires on every startup, and the patched script now correctly targets the server's Node. Full technical detail in `docs/specs/fix-better-sqlite3-execpath.md` and side-effects artifact `upgrades/side-effects/fix-better-sqlite3-execpath.md`.
 
 ## What to Tell Your User
 
-<!-- Write talking points the agent should relay to their user. -->
-<!-- This should be warm, conversational, user-facing — not a changelog. -->
-<!-- Focus on what THEY can now do, not internal plumbing. -->
-<!--                                                                    -->
-<!-- PROHIBITED in this section (will fail validation):                 -->
-<!--   camelCase config keys: silentReject, maxRetries, telegramNotify -->
-<!--   Inline code backtick references like silentReject: false        -->
-<!--   Fenced code blocks                                              -->
-<!--   Instructions to edit files or run commands                      -->
-<!--                                                                    -->
-<!-- CORRECT style: "I can turn that on for you" not "set X to false"  -->
-<!-- The agent relays this to their user — keep it human.              -->
-
-- **[Feature name]**: "[Brief, friendly description of what this means for the user]"
+- **Silent SQLite degradation on mixed-Node machines, fixed**: "If you've ever noticed I couldn't remember conversations or search my own memory properly, that was likely this bug. It should heal itself automatically on my next restart."
 
 ## Summary of New Capabilities
 
 | Capability | How to Use |
 |-----------|-----------|
-| [Capability] | [Endpoint, command, or "automatic"] |
+| Correct native-binding self-heal on mixed-Node machines | automatic (at server startup) |
 
 ## Evidence
 
-<!-- REQUIRED if this release claims to fix a bug. -->
-<!-- Unit tests passing is NOT evidence. Provide ONE of: -->
-<!--   (a) Reproduction steps + observed before/after on a live system. -->
-<!--       Include log excerpts, observed command output, or behavior -->
-<!--       description. Make it specific enough that a future reader can -->
-<!--       re-run it and see the same thing. -->
-<!--   (b) "Not reproducible in dev — [concrete reason]" if the failure -->
-<!--       mode truly can't be exercised locally (race conditions, -->
-<!--       event-driven paths requiring external signals, etc). -->
-<!--                                                                 -->
-<!-- If this release doesn't claim a bug fix (pure feature / refactor), -->
-<!-- leave this section blank or delete it — it's only enforced when -->
-<!-- "What Changed" describes a fix. -->
+Reproduction on Inspec 2026-04-21:
+- Server: Node 25.6.1 (ABI 141), bundled in `.instar/shadow-install/.../bin/node`.
+- `$PATH` first `node`: asdf Node 22.18.0 (ABI 127).
+- Observed: three degradations (TopicMemory, SemanticMemory, FeatureRegistry) all citing `NODE_MODULE_VERSION 127 ≠ 141`. better-sqlite3 binary on disk was ABI 127.
+- Root cause: earlier self-heal attempt(s) under the buggy script produced ABI-127 binaries while testing them with asdf Node 22 (false positive → `source-ok` state recorded).
 
-[Describe reproduction + verified fix, OR "Not reproducible in dev — [concrete reason]"]
+Post-fix verification:
+- Running the updated script with `process.execPath = /Users/justin/Documents/Projects/monroe-workspace/.instar/bin/node` (Node 25): output `[fix-better-sqlite3] Prebuild installed and verified.` in one step.
+- `require('better-sqlite3')` under Node 25 returned successfully: `OK ABI 141`.
+- Tests: 14/14 passing in `tests/unit/fix-better-sqlite3-state.test.ts` (8 existing + 6 new).
+- Type check: `tsc --noEmit` clean.

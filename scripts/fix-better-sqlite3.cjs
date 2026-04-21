@@ -24,7 +24,7 @@
  * upgrade naturally invalidates stale state.
  */
 
-const { execSync } = require('child_process');
+const { execSync, execFileSync } = require('child_process');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
@@ -47,11 +47,58 @@ function getBetterSqliteVersion(pkgDir) {
   return pkg.version;
 }
 
-/** Spawn a fresh node process to avoid any require-cache contamination. */
+/**
+ * Spawn a fresh node process to avoid any require-cache contamination.
+ *
+ * MUST use process.execPath (the Node running THIS script), not `node` from
+ * PATH. Rationale: when the script is invoked by the instar server via
+ * execFileSync(process.execPath, [fixScript], ...) but PATH has a different
+ * Node first (e.g. asdf Node 22 vs server's bundled Node 25), a bare `node`
+ * invocation tests the binary against the wrong ABI. A binary built for the
+ * server's Node 25 then "fails" under Node 22's testBinary, flipping the
+ * script into source-build; source-build via `npm rebuild` inherits PATH and
+ * compiles against Node 22's headers; testBinary (still Node 22) passes the
+ * ABI-127 output; the script reports success. Server then loads the binary
+ * under Node 25 and gets a NODE_MODULE_VERSION mismatch — the exact silent
+ * degradation we found on Inspec 2026-04-21.
+ *
+ * Defence in depth: before testing the binary, we also verify that the
+ * child spawned via process.execPath reports the SAME MODULE_VERSION as the
+ * in-process one. Divergence (e.g., symlink-behind-execPath was replaced
+ * mid-session by an OS update) means we'd build for a target that doesn't
+ * match what the caller actually needs — bail fast rather than produce
+ * another silently-wrong binary.
+ */
+function verifyChildAbiMatches() {
+  try {
+    const out = execFileSync(
+      process.execPath,
+      ['-e', "process.stdout.write(process.versions.modules)"],
+      { stdio: ['ignore', 'pipe', 'pipe'], timeout: 5000 }
+    );
+    const childAbi = String(out).trim();
+    if (childAbi !== String(MODULE_VERSION)) {
+      console.warn(
+        `[fix-better-sqlite3] ABI mismatch between in-process (${MODULE_VERSION}) and child via execPath (${childAbi}). ` +
+        `Refusing to build — execPath may have been upgraded out from under this process.`
+      );
+      return false;
+    }
+    return true;
+  } catch (err) {
+    console.warn(`[fix-better-sqlite3] child ABI probe failed: ${err.message}`);
+    return false;
+  }
+}
+
 function testBinary(pkgDir) {
   try {
-    execSync(
-      `node -e "const Database = require('better-sqlite3'); const db = new Database(':memory:'); db.pragma('journal_mode = WAL'); db.close();"`,
+    execFileSync(
+      process.execPath,
+      [
+        '-e',
+        "const Database = require('better-sqlite3'); const db = new Database(':memory:'); db.pragma('journal_mode = WAL'); db.close();",
+      ],
       { stdio: 'pipe', timeout: 10000, cwd: pkgDir }
     );
     return true;
@@ -163,15 +210,28 @@ function trySourceBuild(pkgDir) {
   if (nmIdx >= 0) {
     rebuildCwd = pkgDir.slice(0, nmIdx);
   }
+  // Prepend this script's node binary dir to PATH so any child that shells
+  // out to bare `node` (node-gyp internals, lifecycle scripts) picks the Node
+  // we're building FOR. Without this, a mixed environment (e.g. asdf Node 22
+  // on PATH + server's Node 25 as execPath) compiles against the wrong
+  // headers and produces an ABI-mismatched binary that silently fails later.
+  const execDir = path.dirname(process.execPath);
+  const childPath = `${execDir}${path.delimiter}${process.env.PATH || ''}`;
+
   try {
     console.log(`[fix-better-sqlite3] Source-building better-sqlite3 in ${rebuildCwd} (~30s)`);
-    execSync(
-      `"${process.execPath}" "${npmCli}" rebuild better-sqlite3 --build-from-source`,
+    execFileSync(
+      process.execPath,
+      [npmCli, 'rebuild', 'better-sqlite3', '--build-from-source'],
       {
         cwd: rebuildCwd,
         stdio: 'pipe',
         timeout: 180_000, // 3 min — source builds on older hardware are slow
-        env: { ...process.env, npm_config_build_from_source: 'true' },
+        env: {
+          ...process.env,
+          PATH: childPath,
+          npm_config_build_from_source: 'true',
+        },
       }
     );
     return true;
@@ -197,6 +257,18 @@ function main() {
   if (testBinary(pkgDir)) {
     console.log('[fix-better-sqlite3] Native binary is working correctly.');
     return 0;
+  }
+
+  // Defence in depth: confirm the child spawned via process.execPath has the
+  // SAME MODULE_VERSION as this process. If not, we can't safely build (the
+  // target is ambiguous).
+  if (!verifyChildAbiMatches()) {
+    console.error(
+      '[fix-better-sqlite3] Cannot proceed: execPath child ABI does not match in-process ABI. ' +
+      'This usually means the Node binary behind process.execPath was replaced while the server was running. ' +
+      'Restart the server under the current Node before retrying.'
+    );
+    return 1;
   }
 
   const existing = readState(pkgDir);
@@ -263,4 +335,5 @@ module.exports = {
   testBinary,
   findBetterSqlite3,
   findNpmCli,
+  verifyChildAbiMatches,
 };
