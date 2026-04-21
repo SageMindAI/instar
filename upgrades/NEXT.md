@@ -2,6 +2,16 @@
 
 <!-- bump: patch -->
 
+## Summary of New Capabilities
+
+The better-sqlite3 native-bindings self-heal gains a source-build fallback and a loop-breaker. You'll notice the difference if an install on a fresh Node major version (where no prebuild exists yet) or a machine with a corrupted prebuild now recovers automatically instead of crash-looping. There's no new agent-facing surface — this is all under-the-hood install-time machinery.
+
+## What to Tell Your User
+
+Nothing unless they ask. If they've seen their agent crash-loop on startup with `better-sqlite3` errors in the logs, tell them:
+
+> I patched the startup self-heal. If the native binding is missing or broken, I'll now rebuild it from source instead of redownloading the same broken prebuild over and over. And if both paths fail, I'll stop retrying and degrade to a slower backing store so your agent stays up — you'll see a log line, not a crash loop. You can clear the attempt state and force another try by deleting `<instar-install>/node_modules/better-sqlite3/.instar-fix-state.json`.
+
 ## What Changed
 
 `scripts/fix-better-sqlite3.cjs` — the startup self-heal for better-sqlite3 native bindings — now has a source-build fallback and a loop-breaker, closing the "keep redownloading the same broken prebuild forever" failure mode observed on Dawn's machine on 2026-04-20.
