@@ -21,6 +21,7 @@ import path from 'node:path';
 import type { LiveConfig } from '../config/LiveConfig.js';
 import type { ComponentHealth } from '../core/types.js';
 import { ProcessIntegrity } from '../core/ProcessIntegrity.js';
+import { DegradationReporter } from './DegradationReporter.js';
 
 // ── Types ─────────────────────────────────────────────────────────
 
@@ -79,6 +80,8 @@ export class CoherenceMonitor extends EventEmitter {
   private correctionLog: Array<{ timestamp: string; check: string; detail: string }> = [];
   /** Track which failure signatures have already been notified (signature → timestamp ms) */
   private notifiedFailures: Map<string, number> = new Map();
+  /** Last diskVersion we reported as a versionMismatch degradation — dedup so we don't emit on every 5-min tick */
+  private lastReportedMismatchDiskVersion: string | null = null;
   /** Don't re-notify about the same failure within this window */
   private static readonly NOTIFY_COOLDOWN_MS = 2 * 60 * 60 * 1000; // 2 hours
 
@@ -264,6 +267,25 @@ export class CoherenceMonitor extends EventEmitter {
           passed: false,
           message: `Running v${integrity.runningVersion} but disk has v${integrity.diskVersion} — restart needed`,
         });
+
+        // Emit a degradation entry so the stale-process state surfaces in
+        // degradationSummary / Telegram alerts — not just in the /health field
+        // that nobody inspects. Dedup on diskVersion so we only emit once per
+        // newly-observed on-disk version (not on every 5-min coherence tick).
+        if (this.lastReportedMismatchDiskVersion !== integrity.diskVersion) {
+          this.lastReportedMismatchDiskVersion = integrity.diskVersion;
+          try {
+            DegradationReporter.getInstance().report({
+              feature: 'ProcessIntegrity.versionMismatch',
+              primary: `Running v${integrity.diskVersion} (matches disk)`,
+              fallback: `Still running v${integrity.runningVersion} in memory — restart needed to pick up v${integrity.diskVersion}`,
+              reason: `Why: A newer version (v${integrity.diskVersion}) is installed on disk but this process is still running v${integrity.runningVersion}.`,
+              impact: `Process is executing stale code; bug fixes and features from v${integrity.diskVersion} are not active until restart.`,
+            });
+          } catch { // @silent-fallback-ok — coherence check shouldn't hard-fail if reporter isn't initialized
+            // no-op
+          }
+        }
       }
     } else {
       results.push({
@@ -271,6 +293,8 @@ export class CoherenceMonitor extends EventEmitter {
         passed: true,
         message: `Running v${integrity.runningVersion} (matches disk)`,
       });
+      // Reset dedup so a future mismatch (after another update) re-emits.
+      this.lastReportedMismatchDiskVersion = null;
     }
 
     return results;
