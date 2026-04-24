@@ -61,6 +61,21 @@ function createTestDb(dbPath: string): Database.Database {
       FOREIGN KEY (chat_id) REFERENCES chat(ROWID),
       FOREIGN KEY (message_id) REFERENCES message(ROWID)
     );
+
+    CREATE TABLE attachment (
+      ROWID INTEGER PRIMARY KEY,
+      filename TEXT,
+      mime_type TEXT,
+      transfer_name TEXT,
+      total_bytes INTEGER
+    );
+
+    CREATE TABLE message_attachment_join (
+      message_id INTEGER,
+      attachment_id INTEGER,
+      FOREIGN KEY (message_id) REFERENCES message(ROWID),
+      FOREIGN KEY (attachment_id) REFERENCES attachment(ROWID)
+    );
   `);
 
   return db;
