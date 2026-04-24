@@ -13,6 +13,7 @@ import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import { DegradationReporter } from '../monitoring/DegradationReporter.js';
+import { assertNotInstarSourceTree } from './SourceTreeGuard.js';
 
 // ── Types ────────────────────────────────────────────────────────────
 
@@ -114,6 +115,7 @@ export class BranchManager {
   private branchStateDir: string;
 
   constructor(config: BranchManagerConfig) {
+    assertNotInstarSourceTree(config.projectDir, 'BranchManager');
     this.projectDir = config.projectDir;
     this.stateDir = config.stateDir;
     this.machineId = config.machineId;

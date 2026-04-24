@@ -22,6 +22,7 @@ import type { ConflictFile, EscalationContext, ResolutionResult } from './LLMCon
 import { FileClassifier } from './FileClassifier.js';
 import type { ClassificationResult } from './FileClassifier.js';
 import { DegradationReporter } from '../monitoring/DegradationReporter.js';
+import { assertNotInstarSourceTree } from './SourceTreeGuard.js';
 
 // ── Types ────────────────────────────────────────────────────────────
 
@@ -90,6 +91,7 @@ export class GitSyncManager {
   private fileClassifier: FileClassifier;
 
   constructor(config: GitSyncConfig) {
+    assertNotInstarSourceTree(config.projectDir, 'GitSyncManager');
     this.projectDir = config.projectDir;
     this.stateDir = config.stateDir;
     this.identityManager = config.identityManager;

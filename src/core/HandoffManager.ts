@@ -15,6 +15,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { DegradationReporter } from '../monitoring/DegradationReporter.js';
 import type { WorkLedger, LedgerEntry } from './WorkLedger.js';
+import { assertNotInstarSourceTree } from './SourceTreeGuard.js';
 
 // ── Types ────────────────────────────────────────────────────────────
 
@@ -116,6 +117,7 @@ export class HandoffManager {
   private handoffDir: string;
 
   constructor(config: HandoffManagerConfig) {
+    assertNotInstarSourceTree(config.projectDir, 'HandoffManager');
     this.projectDir = config.projectDir;
     this.stateDir = config.stateDir;
     this.machineId = config.machineId;
