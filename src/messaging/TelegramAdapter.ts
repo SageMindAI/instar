@@ -26,6 +26,12 @@ import { MessagingEventBus } from './shared/MessagingEventBus.js';
 import { CallbackRegistry, isAllowedButtonKey } from '../core/CallbackRegistry.js';
 import type { DetectedPrompt } from '../monitoring/PromptGate.js';
 import { sanitizeForPrompt } from '../monitoring/SessionRecovery.js';
+import { formatForTelegram, type FormatMode } from './TelegramMarkdownFormatter.js';
+import {
+  recordFormatApplied,
+  recordFormatLintIssue,
+  recordFormatFallbackPlainRetry,
+} from './telegramFormatMetrics.js';
 
 export interface TelegramConfig {
   /** Bot token from @BotFather */
@@ -57,6 +63,15 @@ export interface TelegramConfig {
     /** Timeout in seconds for relay responses (default: 300 = 5 min) */
     relayTimeoutSeconds?: number;
   };
+  /**
+   * Hot-reloadable accessor for the Telegram format mode. Returning a falsy
+   * value or `'legacy-passthrough'` preserves pre-PR2 behavior (byte-for-byte
+   * passthrough, caller-supplied parse_mode honored). See
+   * docs/specs/TELEGRAM-MARKDOWN-RENDERER-SPEC.md.
+   */
+  getFormatMode?: () => FormatMode | undefined;
+  /** Hot-reloadable accessor for lint-strict mode. */
+  getLintStrict?: () => boolean | undefined;
 }
 
 /** Tracks a pending text reply for a Prompt Gate relay (no-button prompts) */
@@ -3993,6 +4008,14 @@ export class TelegramAdapter implements MessagingAdapter {
   }
 
   private async apiCall(method: string, params: Record<string, unknown>, retryCount: number = 0): Promise<unknown> {
+    // PR2: run the formatter on sendMessage / editMessageText when a non-legacy
+    // mode is configured. Legacy-passthrough (default) preserves the caller's
+    // parse_mode byte-for-byte. See docs/specs/TELEGRAM-MARKDOWN-RENDERER-SPEC.md.
+    const sendParams = applyTelegramFormatter(
+      method,
+      params,
+      this.config.getFormatMode?.(),
+    );
     const url = `https://api.telegram.org/bot${this.config.token}/${method}`;
     const safeUrl = `https://api.telegram.org/bot[REDACTED]/${method}`;
 
@@ -4006,7 +4029,7 @@ export class TelegramAdapter implements MessagingAdapter {
       response = await fetch(url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(params),
+        body: JSON.stringify(sendParams.outgoingParams),
         signal: controller.signal,
       });
     } finally {
@@ -4031,6 +4054,29 @@ export class TelegramAdapter implements MessagingAdapter {
         }
       }
       const text = await response.text();
+      // Plain-retry fallback on 400 for formatted sends. See spec
+      // "Plain-retry fallback". Only applies to sendMessage — editMessageText
+      // cannot be split/retried identically (TELEGRAM_EDIT_TOO_LONG).
+      if (
+        response.status === 400 &&
+        method === 'sendMessage' &&
+        sendParams.didFormat &&
+        !sendParams.isPlainRetry
+      ) {
+        recordFormatFallbackPlainRetry();
+        const retryParams: Record<string, unknown> = {
+          ...sendParams.originalParams,
+          parse_mode: undefined,
+        };
+        // Suffix idempotency key so downstream dedup treats this as fresh.
+        if (typeof retryParams._idempotencyKey === 'string') {
+          retryParams._idempotencyKey = `${retryParams._idempotencyKey}:fallback-plain`;
+        }
+        // Mark so we don't recurse.
+        (retryParams as { _isPlainRetry?: boolean })._isPlainRetry = true;
+        delete retryParams.parse_mode;
+        return this.apiCall(method, retryParams, retryCount);
+      }
       throw new Error(`Telegram API error ${safeUrl} (${response.status}): ${text}`);
     }
 
@@ -4041,4 +4087,69 @@ export class TelegramAdapter implements MessagingAdapter {
 
     return data.result;
   }
+}
+
+/**
+ * Shared formatter wire-up used by both TelegramAdapter.apiCall and
+ * TelegramLifeline.apiCall. Pure function for testability.
+ *
+ * For non-send methods, or when mode is undefined / `'legacy-passthrough'`,
+ * returns params unchanged. For `sendMessage` / `editMessageText` in a
+ * formatting mode, runs the formatter on `params.text` and overrides
+ * `params.parse_mode` with the formatter's output.
+ *
+ * Callers may opt out per-call by passing `params._isPlainRetry = true`
+ * (internal flag for the 400 retry path).
+ */
+export function applyTelegramFormatter(
+  method: string,
+  params: Record<string, unknown>,
+  configMode: FormatMode | undefined,
+): {
+  outgoingParams: Record<string, unknown>;
+  originalParams: Record<string, unknown>;
+  didFormat: boolean;
+  isPlainRetry: boolean;
+} {
+  const isPlainRetry = (params as { _isPlainRetry?: boolean })._isPlainRetry === true;
+  // Strip internal flags before sending to Bot API.
+  const stripped: Record<string, unknown> = { ...params };
+  delete (stripped as { _isPlainRetry?: boolean })._isPlainRetry;
+  delete (stripped as { _idempotencyKey?: unknown })._idempotencyKey;
+
+  const isSendMethod = method === 'sendMessage' || method === 'editMessageText';
+  const mode: FormatMode = configMode ?? 'legacy-passthrough';
+
+  if (
+    !isSendMethod ||
+    mode === 'legacy-passthrough' ||
+    isPlainRetry ||
+    typeof stripped.text !== 'string'
+  ) {
+    return {
+      outgoingParams: stripped,
+      originalParams: params,
+      didFormat: false,
+      isPlainRetry,
+    };
+  }
+
+  const result = formatForTelegram(stripped.text as string, mode);
+  recordFormatApplied(result.modeApplied);
+  for (const issue of result.lintIssues) {
+    recordFormatLintIssue(issue);
+  }
+  const outgoing: Record<string, unknown> = { ...stripped, text: result.text };
+  if (result.parseMode !== undefined) {
+    outgoing.parse_mode = result.parseMode;
+  } else {
+    // legacy-passthrough returns parseMode undefined; fall back to caller's
+    // explicit parse_mode if any (preserved above via ...stripped).
+  }
+  return {
+    outgoingParams: outgoing,
+    originalParams: params,
+    didFormat: true,
+    isPlainRetry: false,
+  };
 }

@@ -204,6 +204,13 @@ export interface TransportMetadata {
   nonce: string;
   /** ISO timestamp — validated per transport type (see Clock Skew Tolerance) */
   timestamp: string;
+  /**
+   * Observability-only flag indicating the sender believed the message body
+   * was already rendered to Telegram HTML. **The receiving (sending-to-Telegram)
+   * machine IGNORES this flag** and re-runs its own formatter with its own
+   * local config. Spec: "Multi-machine send-side-only".
+   */
+  alreadyFormatted?: boolean;
 }
 
 /**

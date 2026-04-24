@@ -1485,6 +1485,16 @@ export interface InstarConfig {
   /** Dashboard configuration */
   dashboard?: DashboardConfig;
   /**
+   * Telegram markdown formatter mode. Default `'legacy-passthrough'` —
+   * byte-for-byte identical to pre-PR2 behavior (formatter bypassed; callsite
+   * parse_mode preserved). Flip to `'markdown'` / `'plain'` / `'code'` / `'html'`
+   * to enable formatting. See docs/specs/TELEGRAM-MARKDOWN-RENDERER-SPEC.md.
+   * Hot-reloadable: the adapter/lifeline read the config on every send.
+   */
+  telegramFormatMode?: 'plain' | 'html' | 'code' | 'markdown' | 'legacy-passthrough';
+  /** When true, lint issues return 422 / throw instead of just being logged. */
+  telegramLintStrict?: boolean;
+  /**
    * Free-text description of how outbound agent-to-user messages should be
    * written for this agent's user. Consumed by the MessagingToneGate's style
    * rule (B11_STYLE_MISMATCH). Generic by design — every agent's operator sets

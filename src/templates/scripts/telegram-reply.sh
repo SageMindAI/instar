@@ -3,18 +3,52 @@
 #
 # Usage:
 #   ./telegram-reply.sh TOPIC_ID "message text"
+#   ./telegram-reply.sh --format markdown TOPIC_ID "**bold**"
 #   echo "message text" | ./telegram-reply.sh TOPIC_ID
 #   cat <<'EOF' | ./telegram-reply.sh TOPIC_ID
 #   Multi-line message here
 #   EOF
 #
+# Flags:
+#   --format <mode>   Override server-side format mode for this send.
+#                     Valid: plain, code, markdown, legacy-passthrough
+#                     ('html' is reserved for trusted internal callers.)
+#                     When absent, the server's configured default applies.
+#
 # Reads INSTAR_PORT from environment (default: 4040).
+
+FORMAT=""
+
+# Parse leading flags before positional args.
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --format)
+      FORMAT="$2"
+      shift 2
+      ;;
+    --format=*)
+      FORMAT="${1#--format=}"
+      shift
+      ;;
+    --)
+      shift
+      break
+      ;;
+    -*)
+      echo "Unknown flag: $1" >&2
+      exit 1
+      ;;
+    *)
+      break
+      ;;
+  esac
+done
 
 TOPIC_ID="$1"
 shift
 
 if [ -z "$TOPIC_ID" ]; then
-  echo "Usage: telegram-reply.sh TOPIC_ID [message]" >&2
+  echo "Usage: telegram-reply.sh [--format MODE] TOPIC_ID [message]" >&2
   exit 1
 fi
 
@@ -38,22 +72,32 @@ if [ -f ".instar/config.json" ]; then
   AUTH_TOKEN=$(python3 -c "import json; print(json.load(open('.instar/config.json')).get('authToken',''))" 2>/dev/null)
 fi
 
-# Escape for JSON
-JSON_MSG=$(printf '%s' "$MSG" | python3 -c 'import sys,json; print(json.dumps(sys.stdin.read()))' 2>/dev/null)
-if [ -z "$JSON_MSG" ]; then
-  # Fallback if python3 not available: basic escape
-  JSON_MSG="\"$(printf '%s' "$MSG" | sed 's/\\/\\\\/g; s/"/\\"/g; s/\n/\\n/g')\""
+# Build JSON body (text + optional format).
+JSON_BODY=$(python3 -c '
+import sys, json
+msg = sys.argv[1]
+fmt = sys.argv[2]
+body = {"text": msg}
+if fmt:
+    body["format"] = fmt
+print(json.dumps(body))
+' "$MSG" "$FORMAT" 2>/dev/null)
+
+if [ -z "$JSON_BODY" ]; then
+  # Fallback if python3 not available: basic escape, no format override.
+  ESCAPED=$(printf '%s' "$MSG" | sed 's/\\/\\\\/g; s/"/\\"/g; s/\n/\\n/g')
+  JSON_BODY="{\"text\":\"${ESCAPED}\"}"
 fi
 
 if [ -n "$AUTH_TOKEN" ]; then
   RESPONSE=$(curl -s -w "\n%{http_code}" -X POST "http://localhost:${PORT}/telegram/reply/${TOPIC_ID}" \
     -H 'Content-Type: application/json' \
     -H "Authorization: Bearer ${AUTH_TOKEN}" \
-    -d "{\"text\":${JSON_MSG}}")
+    -d "$JSON_BODY")
 else
   RESPONSE=$(curl -s -w "\n%{http_code}" -X POST "http://localhost:${PORT}/telegram/reply/${TOPIC_ID}" \
     -H 'Content-Type: application/json' \
-    -d "{\"text\":${JSON_MSG}}")
+    -d "$JSON_BODY")
 fi
 
 HTTP_CODE=$(echo "$RESPONSE" | tail -1)

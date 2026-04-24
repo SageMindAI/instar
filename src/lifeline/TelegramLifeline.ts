@@ -58,6 +58,9 @@ import {
   type RestartBucket,
 } from './rateLimitState.js';
 import { DegradationReporter } from '../monitoring/DegradationReporter.js';
+import { applyTelegramFormatter } from '../messaging/TelegramAdapter.js';
+import type { FormatMode } from '../messaging/TelegramMarkdownFormatter.js';
+import { recordFormatFallbackPlainRetry } from '../messaging/telegramFormatMetrics.js';
 
 /**
  * Acquire an exclusive lock file to prevent multiple lifeline instances.
@@ -2190,7 +2193,23 @@ export class TelegramLifeline {
     return (result as TelegramUpdate[]) ?? [];
   }
 
+  /**
+   * Resolve the current format mode from the loaded project config. Read on
+   * each call so hot-reload works without restart.
+   * Multi-machine: this machine is the SENDER, so its own config is authoritative
+   * (per spec "Multi-machine send-side-only"). We ignore any upstream envelope
+   * `alreadyFormatted` flag.
+   */
+  private currentFormatMode(): FormatMode | undefined {
+    const mode = (this.projectConfig as unknown as { telegramFormatMode?: FormatMode })
+      .telegramFormatMode;
+    return mode;
+  }
+
   private async apiCall(method: string, params: Record<string, unknown>, retryCount = 0): Promise<unknown> {
+    // PR2: format sendMessage / editMessageText via the shared helper used by
+    // TelegramAdapter. Legacy-passthrough (default) preserves caller parse_mode.
+    const sendParams = applyTelegramFormatter(method, params, this.currentFormatMode());
     const url = `https://api.telegram.org/bot${this.config.token}/${method}`;
     const timeoutMs = method === 'getUpdates' ? 60_000 : 15_000;
     const controller = new AbortController();
@@ -2201,7 +2220,7 @@ export class TelegramLifeline {
       response = await fetch(url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(params),
+        body: JSON.stringify(sendParams.outgoingParams),
         signal: controller.signal,
       });
     } finally {
@@ -2226,6 +2245,21 @@ export class TelegramLifeline {
         }
       }
       const text = await response.text();
+      if (
+        response.status === 400 &&
+        method === 'sendMessage' &&
+        sendParams.didFormat &&
+        !sendParams.isPlainRetry
+      ) {
+        recordFormatFallbackPlainRetry();
+        const retryParams: Record<string, unknown> = { ...sendParams.originalParams };
+        delete retryParams.parse_mode;
+        (retryParams as { _isPlainRetry?: boolean })._isPlainRetry = true;
+        if (typeof retryParams._idempotencyKey === 'string') {
+          retryParams._idempotencyKey = `${retryParams._idempotencyKey}:fallback-plain`;
+        }
+        return this.apiCall(method, retryParams, retryCount);
+      }
       throw new Error(`Telegram API error (${response.status}): ${text}`);
     }
 

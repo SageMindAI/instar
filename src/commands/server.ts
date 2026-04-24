@@ -2390,7 +2390,19 @@ export async function startServer(options: StartOptions): Promise<void> {
     const isStandbyTelegram = !coordinator.isAwake && telegramConfig;
     if ((skipTelegram || isStandbyTelegram) && telegramConfig) {
       // Send-only mode: no polling, but sendToTopic() works for session replies
-      telegram = new TelegramAdapter(telegramConfig.config as any, config.stateDir);
+      telegram = new TelegramAdapter(
+        {
+          ...(telegramConfig.config as any),
+          // PR2: hot-reloadable accessors. Sending-side authoritative —
+          // each send re-reads config so a canary flip lands without restart.
+          getFormatMode: () =>
+            (config as unknown as { telegramFormatMode?: 'plain' | 'html' | 'code' | 'markdown' | 'legacy-passthrough' })
+              .telegramFormatMode,
+          getLintStrict: () =>
+            (config as unknown as { telegramLintStrict?: boolean }).telegramLintStrict,
+        },
+        config.stateDir,
+      );
       console.log(pc.green(`  Telegram send-only mode (${isStandbyTelegram ? 'standby' : 'lifeline owns polling'})`));
 
       // Resolve any topic names still using the fallback "topic-NNNN" pattern
@@ -2445,7 +2457,19 @@ export async function startServer(options: StartOptions): Promise<void> {
     }
 
     if (telegramConfig && !skipTelegram && !isStandbyTelegram) {
-      telegram = new TelegramAdapter(telegramConfig.config as any, config.stateDir);
+      telegram = new TelegramAdapter(
+        {
+          ...(telegramConfig.config as any),
+          // PR2: hot-reloadable accessors. Sending-side authoritative —
+          // each send re-reads config so a canary flip lands without restart.
+          getFormatMode: () =>
+            (config as unknown as { telegramFormatMode?: 'plain' | 'html' | 'code' | 'markdown' | 'legacy-passthrough' })
+              .telegramFormatMode,
+          getLintStrict: () =>
+            (config as unknown as { telegramLintStrict?: boolean }).telegramLintStrict,
+        },
+        config.stateDir,
+      );
       telegram.intelligence = sharedIntelligence ?? null;
       await telegram.start();
       console.log(pc.green(`  Telegram connected (stall alerts: ${sharedIntelligence ? 'LLM-gated' : 'timer-only'})`));
