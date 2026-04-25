@@ -119,7 +119,9 @@ process.stdin.on('end', async () => {
       '4. HIGHER-LEVEL ELEMENTS — What architectural or cross-system aspects am I missing?\n' +
       '5. COMPLETENESS — Am I considering all elements, or have I collapsed the scope?\n' +
       docsContext + escalation +
-      '\n\nOptions: Read the relevant spec/proposal, confirm scope awareness, or /grounding';
+      '\n\nOptions: Read the relevant spec/proposal, confirm scope awareness,\n' +
+      'invoke /grounding (if your harness ships that skill), or reset directly:\n' +
+      '  curl -X POST http://localhost:4040/scope-coherence/reset';
 
     // Record that we prompted
     state.lastCheckpointPrompt = new Date().toISOString();

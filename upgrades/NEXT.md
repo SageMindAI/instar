@@ -1,53 +1,48 @@
 # Upgrade Guide — vNEXT
 
 <!-- bump: patch -->
-<!-- Valid values: patch, minor, major -->
-<!-- patch = bug fixes, refactors, test additions, doc updates -->
-<!-- minor = new features, new APIs, new capabilities (backwards-compatible) -->
-<!-- major = breaking changes to existing APIs or behavior -->
 
 ## What Changed
 
-<!-- Describe what changed technically. What new features, APIs, behavioral changes? -->
-<!-- Write this for the AGENT — they need to understand the system deeply. -->
+The scope-coherence stop hook (`scope-coherence-checkpoint.js`) previously
+suggested running `/grounding` as the only recovery path when the
+implementation-depth threshold was crossed. `/grounding` is a Claude-Code-side
+skill convention; Instar does not ship it, so agents whose harness lacks that
+skill saw a dead-end suggestion with no working manual reset path.
+
+The checkpoint message now lists three real options: read the relevant
+spec/proposal, invoke `/grounding` if the harness has it, or reset directly via
+the local Instar server's reset endpoint. The endpoint already exists and is
+what `session-start.sh` invokes automatically — this release just surfaces it
+as a manual fallback in the message agents see when they hit the checkpoint.
+
+No code paths changed beyond the human-readable message string. The reset
+endpoint and the depth-accumulation logic are unchanged.
 
 ## What to Tell Your User
 
-<!-- Write talking points the agent should relay to their user. -->
-<!-- This should be warm, conversational, user-facing — not a changelog. -->
-<!-- Focus on what THEY can now do, not internal plumbing. -->
-<!--                                                                    -->
-<!-- PROHIBITED in this section (will fail validation):                 -->
-<!--   camelCase config keys: silentReject, maxRetries, telegramNotify -->
-<!--   Inline code backtick references like silentReject: false        -->
-<!--   Fenced code blocks                                              -->
-<!--   Instructions to edit files or run commands                      -->
-<!--                                                                    -->
-<!-- CORRECT style: "I can turn that on for you" not "set X to false"  -->
-<!-- The agent relays this to their user — keep it human.              -->
-
-- **[Feature name]**: "[Brief, friendly description of what this means for the user]"
+- The scope-coherence checkpoint now points to a manual reset path that always works, so if the suggested skill is not installed in your setup you still have a one-line recovery I can run for you.
 
 ## Summary of New Capabilities
 
 | Capability | How to Use |
 |-----------|-----------|
-| [Capability] | [Endpoint, command, or "automatic"] |
+| Manual scope-coherence reset surfaced in checkpoint message | `curl -X POST http://localhost:4040/scope-coherence/reset` |
 
 ## Evidence
 
-<!-- REQUIRED if this release claims to fix a bug. -->
-<!-- Unit tests passing is NOT evidence. Provide ONE of: -->
-<!--   (a) Reproduction steps + observed before/after on a live system. -->
-<!--       Include log excerpts, observed command output, or behavior -->
-<!--       description. Make it specific enough that a future reader can -->
-<!--       re-run it and see the same thing. -->
-<!--   (b) "Not reproducible in dev — [concrete reason]" if the failure -->
-<!--       mode truly can't be exercised locally (race conditions, -->
-<!--       event-driven paths requiring external signals, etc). -->
-<!--                                                                 -->
-<!-- If this release doesn't claim a bug fix (pure feature / refactor), -->
-<!-- leave this section blank or delete it — it's only enforced when -->
-<!-- "What Changed" describes a fix. -->
+Cluster `cluster-scope-coherence-hook-counter-never-resets-across-sessions`
+flagged that `/grounding` is not a registered skill or command in Instar and
+that there is no user-facing reset path shown in the checkpoint message.
 
-[Describe reproduction + verified fix, OR "Not reproducible in dev — [concrete reason]"]
+Verification: `ls skills/` confirms no `grounding` skill ships with Instar.
+The reset endpoint is implemented at `src/server/routes.ts:2925` and is
+invoked by `.instar/hooks/instar/session-start.sh` when the local server is
+healthy — so the underlying counter reset already works on every session
+start; this release makes the manual fallback path discoverable from the
+hook's own message.
+
+Reproduction: trigger the checkpoint (implementation depth ≥ 20, cooldown
+elapsed, server running) and inspect the `reason` field in the hook's
+output. Before: ends with `or /grounding`. After: ends with the three-option
+block including the explicit curl command for manual reset.
