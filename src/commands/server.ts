@@ -3151,13 +3151,9 @@ export async function startServer(options: StartOptions): Promise<void> {
       });
     }
 
-    // Initialize WorkingMemoryAssembler — token-budgeted context assembly for session-start hooks.
-    // Degrades gracefully: works with whatever memory systems are available.
-    const workingMemory = new WorkingMemoryAssembler({
-      semanticMemory,
-      // episodicMemory — will wire once EpisodicMemory is initialized above
-    });
-    console.log(pc.green(`  WorkingMemoryAssembler: ready (semantic: ${semanticMemory ? 'yes' : 'no'})`));
+    // WorkingMemoryAssembler is initialized after activitySentinel (see below)
+    // so it can wire episodicMemory from the sentinel.
+    let workingMemory: WorkingMemoryAssembler | undefined;
 
     // Fast startup purge — remove session records for dead tmux sessions BEFORE
     // monitoring starts. Prevents the death spiral where stale sessions overwhelm
@@ -3372,6 +3368,15 @@ export async function startServer(options: StartOptions): Promise<void> {
 
       console.log(pc.green('  Episodic memory sentinel enabled (LLM-powered digestion)'));
     }
+
+    // Initialize WorkingMemoryAssembler — token-budgeted context assembly for session-start hooks.
+    // Placed after activitySentinel so episodicMemory can be wired from the sentinel.
+    workingMemory = new WorkingMemoryAssembler({
+      semanticMemory,
+      episodicMemory: activitySentinel?.getEpisodicMemory(),
+    });
+    const epStatus = activitySentinel ? 'yes' : 'no';
+    console.log(pc.green(`  WorkingMemoryAssembler: ready (semantic: ${semanticMemory ? 'yes' : 'no'}, episodic: ${epStatus})`));
 
     // Session Watchdog — auto-remediation for stuck commands
     let watchdog: SessionWatchdog | undefined;
