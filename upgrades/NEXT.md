@@ -1,53 +1,67 @@
 # Upgrade Guide — vNEXT
 
 <!-- bump: patch -->
-<!-- Valid values: patch, minor, major -->
-<!-- patch = bug fixes, refactors, test additions, doc updates -->
-<!-- minor = new features, new APIs, new capabilities (backwards-compatible) -->
-<!-- major = breaking changes to existing APIs or behavior -->
 
 ## What Changed
 
-<!-- Describe what changed technically. What new features, APIs, behavioral changes? -->
-<!-- Write this for the AGENT — they need to understand the system deeply. -->
+`POST /internal/telegram-forward` no longer reports the backward-compat
+`TelegramLifeline.versionMissing` event into the feedback pipeline as a
+`[DEGRADATION]` signal. The condition (an upgraded but un-restarted lifeline
+forwarding a Telegram message without the Stage-B `lifelineVersion` field) is
+expected, accepted, and documented behaviour — emitting it as a critical
+degradation was producing noisy regressions in cluster
+`cmo7wswhj0000mgmdbw4j7dyd` every time any pre-Stage-B lifeline forwarded a
+message.
+
+The forward itself still succeeds via the documented backward-compat path;
+the response, the inbound-message log, and the version-handshake logic for
+lifelines that *do* send `lifelineVersion` are all unchanged. On the first
+occurrence per server process, a one-shot `console.info` is emitted so the
+operator-side observability signal is preserved without per-request log
+spam.
+
+The systemic work to give `DegradationReporter` a typed severity / category
+field (so callers can mark events as ERROR vs COMPAT_SIGNAL at the reporter
+layer rather than the call site) remains tracked under PROP-543 and is
+deliberately out of scope for this release.
 
 ## What to Tell Your User
 
-<!-- Write talking points the agent should relay to their user. -->
-<!-- This should be warm, conversational, user-facing — not a changelog. -->
-<!-- Focus on what THEY can now do, not internal plumbing. -->
-<!--                                                                    -->
-<!-- PROHIBITED in this section (will fail validation):                 -->
-<!--   camelCase config keys: silentReject, maxRetries, telegramNotify -->
-<!--   Inline code backtick references like silentReject: false        -->
-<!--   Fenced code blocks                                              -->
-<!--   Instructions to edit files or run commands                      -->
-<!--                                                                    -->
-<!-- CORRECT style: "I can turn that on for you" not "set X to false"  -->
-<!-- The agent relays this to their user — keep it human.              -->
-
-- **[Feature name]**: "[Brief, friendly description of what this means for the user]"
+- **Quieter feedback signal**: I won't keep logging a critical-looking
+  message every time my lifeline forwards a Telegram note before I've had a
+  chance to restart it. The forward still works the same way; only the
+  noisy critical report goes away.
 
 ## Summary of New Capabilities
 
 | Capability | How to Use |
 |-----------|-----------|
-| [Capability] | [Endpoint, command, or "automatic"] |
+| Quieter pre-Stage-B lifeline forwards | Automatic on upgrade |
 
 ## Evidence
 
-<!-- REQUIRED if this release claims to fix a bug. -->
-<!-- Unit tests passing is NOT evidence. Provide ONE of: -->
-<!--   (a) Reproduction steps + observed before/after on a live system. -->
-<!--       Include log excerpts, observed command output, or behavior -->
-<!--       description. Make it specific enough that a future reader can -->
-<!--       re-run it and see the same thing. -->
-<!--   (b) "Not reproducible in dev — [concrete reason]" if the failure -->
-<!--       mode truly can't be exercised locally (race conditions, -->
-<!--       event-driven paths requiring external signals, etc). -->
-<!--                                                                 -->
-<!-- If this release doesn't claim a bug fix (pure feature / refactor), -->
-<!-- leave this section blank or delete it — it's only enforced when -->
-<!-- "What Changed" describes a fix. -->
+Reproduction (before fix):
 
-[Describe reproduction + verified fix, OR "Not reproducible in dev — [concrete reason]"]
+1. Run a lifeline at v0.28.67 or later, then upgrade the server-side package
+   without restarting the lifeline daemon.
+2. Send a Telegram message that the lifeline forwards via
+   `POST /internal/telegram-forward`.
+3. The handler accepts the forward and emits a
+   `[DEGRADATION] TelegramLifeline.versionMissing: …` feedback event,
+   classified as critical by the Portal cluster intake.
+
+After fix:
+
+1. Same setup; same forward; same successful response.
+2. On the first forward per server process, a single
+   `[telegram-forward] Accepted pre-Stage-B lifeline forward …`
+   `console.info` is emitted; subsequent forwards on the same process emit
+   nothing.
+3. No `TelegramLifeline.versionMissing` feedback events are submitted, so
+   cluster `cmo7wswhj0000mgmdbw4j7dyd` does not auto-reopen on every
+   forward.
+
+`grep -rn versionMissing src/ tests/ test/ __tests__/` shows the symbol
+appears only in `routes.ts` (the one-shot guard and the comment explaining
+it). No test changed because the call site has no existing test coverage of
+the reporter side-effect.

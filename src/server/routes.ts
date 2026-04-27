@@ -6787,6 +6787,10 @@ export function createRoutes(ctx: RouteContext): Router {
     ProcessIntegrity.getInstance()?.getState().runningVersion ?? '';
   const _serverVersionParsed = parseVersion(_serverVersionString);
 
+  // One-shot guard for pre-Stage-B lifeline observability log (see versionMissing
+  // handler below). Avoids per-request log spam while preserving the signal.
+  let _versionMissingLogged = false;
+
   router.post('/internal/telegram-forward', async (req, res) => {
     const { topicId, text, fromUserId, fromUsername, fromFirstName, messageId, lifelineVersion } = req.body;
 
@@ -6828,15 +6832,22 @@ export function createRoutes(ctx: RouteContext): Router {
         });
       }
     } else if (lifelineVersion === undefined && authEnabled) {
-      // Backward-compat: pre-Stage-B lifelines don't send the field. Accept,
-      // emit informational signal once per cooldown.
-      DegradationReporter.getInstance().report({
-        feature: 'TelegramLifeline.versionMissing',
-        primary: 'Forward from Stage-B lifeline with version field',
-        fallback: 'Forward from pre-Stage-B lifeline (no version)',
-        reason: 'lifelineVersion field absent — backward-compat path',
-        impact: 'Observability only; lifeline needs a restart to pick up Stage B.',
-      });
+      // Backward-compat: pre-Stage-B lifelines don't send the field. Accept
+      // silently. This was previously emitted as a [DEGRADATION] feedback
+      // event, which the cluster classifier mislabelled as critical even
+      // though it's expected observability for agents that upgraded the
+      // package without restarting their lifeline daemon. Log once per
+      // process so the signal isn't lost, but don't pollute the feedback
+      // pipeline. Per dispatch dsp-moc6wunp-2dwj, agents are advised to
+      // restart their lifelines; PROP-543 covers the systemic classifier
+      // taxonomy work.
+      if (!_versionMissingLogged) {
+        _versionMissingLogged = true;
+        console.info(
+          '[telegram-forward] Accepted pre-Stage-B lifeline forward (no lifelineVersion field). ' +
+          'Restart the lifeline to enable the Stage-B version handshake.'
+        );
+      }
     }
 
     if (!topicId || !text) {
