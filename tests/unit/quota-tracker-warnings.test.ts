@@ -23,6 +23,7 @@ describe('QuotaTracker — warnings and staleness', () => {
   });
 
   afterEach(() => {
+    // safe-git-allow: incremental-migration
     fs.rmSync(tmpDir, { recursive: true, force: true });
     vi.restoreAllMocks();
   });

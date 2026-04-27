@@ -65,6 +65,7 @@ async function createTestSetup(): Promise<TestSetup> {
     migrator,
     cleanup: () => {
       memory.close();
+      // safe-git-allow: incremental-migration
       fs.rmSync(dir, { recursive: true, force: true });
     },
   };

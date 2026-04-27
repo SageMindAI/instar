@@ -82,6 +82,7 @@ describe('WorkLedger E2E lifecycle', () => {
   });
 
   afterEach(() => {
+    // safe-git-allow: incremental-migration
     fs.rmSync(stateDir, { recursive: true, force: true });
   });
 
@@ -383,6 +384,7 @@ describe('WorkLedger E2E lifecycle', () => {
         const allEntries = ledger.getAllEntries();
         expect(allEntries).toHaveLength(1);
       } finally {
+        // safe-git-allow: incremental-migration
         fs.rmSync(freshStateDir, { recursive: true, force: true });
       }
     });

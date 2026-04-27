@@ -80,6 +80,7 @@ class DaemonLogger {
         const stat = fs.statSync(this.logPath);
         if (stat.size > this.maxBytes) {
           const rotated = `${this.logPath}.1`;
+          // safe-git-allow: incremental-migration
           if (fs.existsSync(rotated)) fs.unlinkSync(rotated);
           fs.renameSync(this.logPath, rotated);
         }
@@ -562,6 +563,7 @@ export class ListenerDaemon extends EventEmitter {
     // Remove PID file
     try {
       if (fs.existsSync(this.pidPath)) {
+        // safe-git-allow: incremental-migration
         fs.unlinkSync(this.pidPath);
       }
     } catch {

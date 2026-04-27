@@ -34,6 +34,7 @@ function setup() {
 }
 
 function teardown() {
+  // safe-git-allow: incremental-migration
   fs.rmSync(tmpDir, { recursive: true, force: true });
 }
 

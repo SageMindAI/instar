@@ -88,6 +88,7 @@ describe('AutoUpdater loop prevention', () => {
   afterEach(() => {
     vi.useRealTimers();
     vi.restoreAllMocks();
+    // safe-git-allow: incremental-migration
     fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 
@@ -260,6 +261,7 @@ describe('Job quiet mode (on-alert)', () => {
   });
 
   afterEach(() => {
+    // safe-git-allow: incremental-migration
     fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 

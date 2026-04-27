@@ -107,8 +107,11 @@ export function createCompactionHarness(options: CompactionHarnessOptions = {}):
 
   // ── 1. Initialize project tree + git repo ──────────────────────────
   fs.mkdirSync(projectDir, { recursive: true });
+  // safe-git-allow: incremental-migration
   execFileSync('git', ['-C', projectDir, 'init', '-q', '-b', 'main']);
+  // safe-git-allow: incremental-migration
   execFileSync('git', ['-C', projectDir, 'config', 'user.email', 'harness@instar.local']);
+  // safe-git-allow: incremental-migration
   execFileSync('git', ['-C', projectDir, 'config', 'user.name', 'Compaction Harness']);
 
   // ── 2. Identity files ──────────────────────────────────────────────
@@ -165,7 +168,9 @@ export function createCompactionHarness(options: CompactionHarnessOptions = {}):
     const planAbs = path.join(projectDir, options.planFile.relativePath);
     fs.mkdirSync(path.dirname(planAbs), { recursive: true });
     fs.writeFileSync(planAbs, options.planFile.content);
+    // safe-git-allow: incremental-migration
     execFileSync('git', ['-C', projectDir, 'add', options.planFile.relativePath]);
+    // safe-git-allow: incremental-migration
     execFileSync(
       'git',
       ['-C', projectDir, 'commit', '-q', '-m', `plan: ${options.planFile.relativePath}`]
@@ -173,7 +178,9 @@ export function createCompactionHarness(options: CompactionHarnessOptions = {}):
   }
 
   // ── 6. Also commit identity files so they're "durable" per the spec
+  // safe-git-allow: incremental-migration
   execFileSync('git', ['-C', projectDir, 'add', 'AGENT.md', 'MEMORY.md', 'USER.md', '.instar/config.json']);
+  // safe-git-allow: incremental-migration
   execFileSync('git', ['-C', projectDir, 'commit', '-q', '-m', 'harness: identity + config']);
 
   return {
@@ -185,7 +192,9 @@ export function createCompactionHarness(options: CompactionHarnessOptions = {}):
       fs.mkdirSync(path.dirname(abs), { recursive: true });
       fs.writeFileSync(abs, content);
       if (opts?.commit) {
+        // safe-git-allow: incremental-migration
         execFileSync('git', ['-C', projectDir, 'add', relativePath]);
+        // safe-git-allow: incremental-migration
         execFileSync(
           'git',
           ['-C', projectDir, 'commit', '-q', '-m', opts.commitMessage ?? `write: ${relativePath}`]
@@ -248,6 +257,7 @@ export function createCompactionHarness(options: CompactionHarnessOptions = {}):
       if (tornDown) return;
       tornDown = true;
       try {
+        // safe-git-allow: incremental-migration
         fs.rmSync(tmp, { recursive: true, force: true });
       } catch {
         // best-effort; harness cleanup should not break tests

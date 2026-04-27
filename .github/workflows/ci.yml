@@ -42,6 +42,14 @@ jobs:
       # deterministic disjoint slice of the test files; union is the full suite.
       # fileParallelism stays off within each shard to preserve isolation.
       - run: npm run test:push -- --shard=${{ matrix.shard }}/4
+      - name: Working-tree integrity check
+        run: |
+          if [ -n "$(git status --porcelain)" ]; then
+            echo "::error::Test suite mutated the working tree. SafeGitExecutor / SafeFsExecutor likely bypassed."
+            git status --porcelain
+            git diff
+            exit 1
+          fi
 
   integration:
     name: Integration Tests
@@ -57,6 +65,14 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y tmux
       - run: npm ci
       - run: npm run test:integration
+      - name: Working-tree integrity check
+        run: |
+          if [ -n "$(git status --porcelain)" ]; then
+            echo "::error::Integration tests mutated the working tree. SafeGitExecutor / SafeFsExecutor likely bypassed."
+            git status --porcelain
+            git diff
+            exit 1
+          fi
 
   e2e:
     name: E2E Tests
@@ -72,6 +88,14 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y tmux
       - run: npm ci
       - run: npm run test:e2e
+      - name: Working-tree integrity check
+        run: |
+          if [ -n "$(git status --porcelain)" ]; then
+            echo "::error::E2E tests mutated the working tree. SafeGitExecutor / SafeFsExecutor likely bypassed."
+            git status --porcelain
+            git diff
+            exit 1
+          fi
 
   contract:
     name: Contract Tests (Live API)

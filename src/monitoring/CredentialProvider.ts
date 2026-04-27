@@ -209,6 +209,7 @@ export class ClaudeConfigCredentialProvider implements CredentialProvider {
     const credPath = path.join(this.configDir, 'credentials.json');
     try {
       if (fs.existsSync(credPath)) {
+        // safe-git-allow: incremental-migration
         fs.unlinkSync(credPath);
       }
     } catch {

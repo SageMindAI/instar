@@ -50,9 +50,11 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  // safe-git-allow: incremental-migration
   fs.rmSync(tmpDir, { recursive: true, force: true });
   // Clean up the test JSONL directory
   if (fs.existsSync(projectJsonlDir)) {
+    // safe-git-allow: incremental-migration
     fs.rmSync(projectJsonlDir, { recursive: true, force: true });
   }
 });
@@ -213,6 +215,7 @@ describe('TopicResumeMap — Heartbeat', () => {
   });
 
   it('handles missing JSONL directory gracefully', () => {
+    // safe-git-allow: incremental-migration
     fs.rmSync(projectJsonlDir, { recursive: true, force: true });
     const topicSessions = new Map<number, { sessionName: string; claudeSessionId?: string }>();
     topicSessions.set(42, { sessionName: 'dawn-test' });

@@ -15,6 +15,7 @@ describe('TelemetryAuth', () => {
   });
 
   afterEach(() => {
+    // safe-git-allow: incremental-migration
     fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 
@@ -85,6 +86,7 @@ describe('TelemetryAuth', () => {
     it('should regenerate missing secret while preserving install-id', () => {
       const first = auth.provision();
       // Delete only the secret
+      // safe-git-allow: incremental-migration
       fs.unlinkSync(path.join(tmpDir, 'telemetry', 'local-secret'));
       const second = auth.provision();
       expect(second.installationId).toBe(first.installationId);

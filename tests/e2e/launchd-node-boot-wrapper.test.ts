@@ -173,11 +173,13 @@ describe('E2E: Node.js boot wrapper & launchd robustness', () => {
   });
 
   afterAll(() => {
+    // safe-git-allow: incremental-migration
     fs.rmSync(projectDir, { recursive: true, force: true });
   });
 
   beforeEach(() => {
     // Restore clean state
+    // safe-git-allow: incremental-migration
     try { fs.unlinkSync(crashFile); } catch { /* ok */ }
     fs.writeFileSync(shadowCli, '#!/usr/bin/env node\nconsole.log("instar-test-cli");');
     fs.chmodSync(shadowCli, 0o755);
@@ -254,6 +256,7 @@ describe('E2E: Node.js boot wrapper & launchd robustness', () => {
   describe('Node symlink self-healing', () => {
     it('creates node symlink on first run when none exists', () => {
       // Remove any existing symlink
+      // safe-git-allow: incremental-migration
       try { fs.unlinkSync(nodeSymlink); } catch { /* ok */ }
 
       execFileSync(process.execPath, [jsWrapperPath], { timeout: 10000 });
@@ -266,6 +269,7 @@ describe('E2E: Node.js boot wrapper & launchd robustness', () => {
 
     it('updates symlink when it points to a different node', () => {
       // Create a symlink pointing to a fake old node path
+      // safe-git-allow: incremental-migration
       try { fs.unlinkSync(nodeSymlink); } catch { /* ok */ }
       fs.symlinkSync('/usr/local/bin/node-v18-old', nodeSymlink);
 
@@ -278,6 +282,7 @@ describe('E2E: Node.js boot wrapper & launchd robustness', () => {
 
     it('does not update symlink when already correct', () => {
       // Create correct symlink
+      // safe-git-allow: incremental-migration
       try { fs.unlinkSync(nodeSymlink); } catch { /* ok */ }
       fs.symlinkSync(process.execPath, nodeSymlink);
 
@@ -292,6 +297,7 @@ describe('E2E: Node.js boot wrapper & launchd robustness', () => {
 
     it('recovers from a broken symlink', () => {
       // Create a symlink pointing to a non-existent path
+      // safe-git-allow: incremental-migration
       try { fs.unlinkSync(nodeSymlink); } catch { /* ok */ }
       fs.symlinkSync('/nonexistent/broken/node', nodeSymlink);
 
@@ -307,7 +313,9 @@ describe('E2E: Node.js boot wrapper & launchd robustness', () => {
     });
 
     it('writes node-candidates.json with valid structure', () => {
+      // safe-git-allow: incremental-migration
       try { fs.unlinkSync(nodeSymlink); } catch { /* ok */ }
+      // safe-git-allow: incremental-migration
       try { fs.unlinkSync(nodeCandidatesFile); } catch { /* ok */ }
 
       execFileSync(process.execPath, [jsWrapperPath], { timeout: 10000 });
@@ -409,6 +417,7 @@ describe('E2E: Node.js boot wrapper & launchd robustness', () => {
     it('creates crash directory if it does not exist', () => {
       // Remove the state directory
       const stateSubDir = path.join(stateDir, 'state');
+      // safe-git-allow: incremental-migration
       fs.rmSync(stateSubDir, { recursive: true, force: true });
 
       fs.writeFileSync(shadowCli, '#!/usr/bin/env node\nprocess.exit(1);');
@@ -527,6 +536,7 @@ describe('E2E: Node.js boot wrapper & launchd robustness', () => {
   describe('Stable node symlink infrastructure', () => {
     it('symlink can be used as node binary to execute scripts', () => {
       // First ensure symlink exists
+      // safe-git-allow: incremental-migration
       try { fs.unlinkSync(nodeSymlink); } catch { /* ok */ }
       fs.symlinkSync(process.execPath, nodeSymlink);
 
@@ -539,6 +549,7 @@ describe('E2E: Node.js boot wrapper & launchd robustness', () => {
 
     it('symlink can execute the JS boot wrapper', () => {
       // Ensure symlink points to current node
+      // safe-git-allow: incremental-migration
       try { fs.unlinkSync(nodeSymlink); } catch { /* ok */ }
       fs.symlinkSync(process.execPath, nodeSymlink);
 
@@ -551,6 +562,7 @@ describe('E2E: Node.js boot wrapper & launchd robustness', () => {
     });
 
     it('broken symlink causes clear failure (simulates stale NVM path)', () => {
+      // safe-git-allow: incremental-migration
       try { fs.unlinkSync(nodeSymlink); } catch { /* ok */ }
       fs.symlinkSync('/nonexistent/old-nvm-version/bin/node', nodeSymlink);
 
@@ -586,6 +598,7 @@ describe('E2E: Node.js boot wrapper & launchd robustness', () => {
       });
       expect(result.trim()).toBe('instar-test-cli');
 
+      // safe-git-allow: incremental-migration
       fs.unlinkSync(testFile);
     });
 
@@ -688,6 +701,7 @@ describe('E2E: Node.js boot wrapper & launchd robustness', () => {
       });
       expect(result.trim()).toBe('spaced-path-ok');
 
+      // safe-git-allow: incremental-migration
       fs.rmSync(spacedDir, { recursive: true, force: true });
     });
 
@@ -721,6 +735,7 @@ describe('E2E: Node.js boot wrapper & launchd robustness', () => {
       });
       expect(result.trim()).toBe('special-chars-ok');
 
+      // safe-git-allow: incremental-migration
       fs.rmSync(specialDir, { recursive: true, force: true });
     });
   });
@@ -730,6 +745,7 @@ describe('E2E: Node.js boot wrapper & launchd robustness', () => {
   describe('End-to-end: node version switch recovery', () => {
     it('simulates full lifecycle: boot → symlink created → node changes → next boot self-heals', () => {
       // Step 1: First boot — symlink is created pointing to current node
+      // safe-git-allow: incremental-migration
       try { fs.unlinkSync(nodeSymlink); } catch { /* ok */ }
 
       execFileSync(process.execPath, [jsWrapperPath], { timeout: 10000 });
@@ -738,6 +754,7 @@ describe('E2E: Node.js boot wrapper & launchd robustness', () => {
       expect(fs.readlinkSync(nodeSymlink)).toBe(process.execPath);
 
       // Step 2: Simulate NVM switch — symlink now points to "old" node
+      // safe-git-allow: incremental-migration
       fs.unlinkSync(nodeSymlink);
       fs.symlinkSync('/usr/local/bin/node-v18-old', nodeSymlink);
       expect(fs.readlinkSync(nodeSymlink)).toBe('/usr/local/bin/node-v18-old');

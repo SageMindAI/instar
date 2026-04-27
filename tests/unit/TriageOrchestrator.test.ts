@@ -936,6 +936,7 @@ describe('TriageOrchestrator', () => {
       expect(content).toContain('<user_message>');
 
       // Cleanup
+      // safe-git-allow: incremental-migration
       try { require('fs').unlinkSync(filepath); } catch {}
     });
 
@@ -961,6 +962,7 @@ describe('TriageOrchestrator', () => {
       // The closing delimiter should be escaped
       expect(content).toContain('&lt;/terminal_output&gt;');
 
+      // safe-git-allow: incremental-migration
       try { require('fs').unlinkSync(filepath); } catch {}
     });
   });

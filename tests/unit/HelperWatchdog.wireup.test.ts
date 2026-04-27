@@ -16,6 +16,7 @@ import { HelperWatchdog } from '../../src/monitoring/HelperWatchdog.js';
 
 function tmp() {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'hw-wireup-'));
+  // safe-git-allow: incremental-migration
   return { dir, cleanup: () => fs.rmSync(dir, { recursive: true, force: true }) };
 }
 

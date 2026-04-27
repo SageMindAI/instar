@@ -23,6 +23,7 @@ describe('StateManager — event querying', () => {
   });
 
   afterEach(() => {
+    // safe-git-allow: incremental-migration
     fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 

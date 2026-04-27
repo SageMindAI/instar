@@ -104,12 +104,14 @@ beforeAll(() => {
 });
 
 afterAll(() => {
+  // safe-git-allow: incremental-migration
   fs.rmSync(tmpDir, { recursive: true, force: true });
 });
 
 beforeEach(() => {
   // Clean serendipity directory between tests
   if (fs.existsSync(serendipityDir)) {
+    // safe-git-allow: incremental-migration
     fs.rmSync(serendipityDir, { recursive: true, force: true });
   }
 });

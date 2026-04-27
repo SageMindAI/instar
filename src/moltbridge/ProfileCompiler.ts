@@ -201,12 +201,14 @@ export class ProfileCompiler {
 
   private getGitStats(): { totalCommits: number; languages: string[]; repos: string[] } {
     try {
+      // safe-git-allow: incremental-migration
       const commitCount = execSync(
         'git log --oneline 2>/dev/null | wc -l',
         { cwd: this.config.projectRoot, encoding: 'utf-8', timeout: 5000 },
       ).trim();
 
       // Get languages from file extensions
+      // safe-git-allow: incremental-migration
       const files = execSync(
         'git ls-files 2>/dev/null | head -500',
         { cwd: this.config.projectRoot, encoding: 'utf-8', timeout: 5000 },
@@ -226,6 +228,7 @@ export class ProfileCompiler {
       }
 
       // Get repo name from remote
+      // safe-git-allow: incremental-migration
       const remote = execSync(
         'git remote get-url origin 2>/dev/null || echo "local"',
         { cwd: this.config.projectRoot, encoding: 'utf-8', timeout: 5000 },

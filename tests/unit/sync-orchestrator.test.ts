@@ -237,6 +237,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  // safe-git-allow: incremental-migration
   fs.rmSync(tmpDir, { recursive: true, force: true });
   vi.restoreAllMocks();
 });
@@ -1288,6 +1289,7 @@ describe('Edge Cases', () => {
     expect(fs.existsSync(path.join(freshState, 'state'))).toBe(true);
 
     // Cleanup
+    // safe-git-allow: incremental-migration
     fs.rmSync(freshTmp, { recursive: true, force: true });
   });
 

@@ -112,6 +112,7 @@ describe('E2E: Messaging lifecycle', () => {
   afterAll(async () => {
     await server.stop();
     await messageStore.destroy();
+    // safe-git-allow: incremental-migration
     fs.rmSync(projectDir, { recursive: true, force: true });
   });
 

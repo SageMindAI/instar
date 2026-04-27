@@ -89,6 +89,7 @@ async function addTelegram(opts: { token?: string; chatId?: string }): Promise<v
     fs.writeFileSync(tmpPath, JSON.stringify(config, null, 2));
     fs.renameSync(tmpPath, configPath);
   } catch (err) {
+    // safe-git-allow: incremental-migration
     try { fs.unlinkSync(tmpPath); } catch { /* ignore */ }
     throw err;
   }
@@ -143,6 +144,7 @@ async function addSentry(opts: { dsn?: string }): Promise<void> {
     fs.writeFileSync(tmpPath, JSON.stringify(config, null, 2));
     fs.renameSync(tmpPath, configPath);
   } catch (err) {
+    // safe-git-allow: incremental-migration
     try { fs.unlinkSync(tmpPath); } catch { /* ignore */ }
     throw err;
   }
@@ -205,6 +207,7 @@ async function addEmail(opts: { credentialsFile?: string; tokenFile?: string }):
     fs.writeFileSync(tmpPath, JSON.stringify(config, null, 2));
     fs.renameSync(tmpPath, configPath);
   } catch (err) {
+    // safe-git-allow: incremental-migration
     try { fs.unlinkSync(tmpPath); } catch { /* ignore */ }
     throw err;
   }
@@ -250,6 +253,7 @@ async function addQuota(opts: { stateFile?: string }): Promise<void> {
     fs.writeFileSync(tmpPath, JSON.stringify(config, null, 2));
     fs.renameSync(tmpPath, configPath);
   } catch (err) {
+    // safe-git-allow: incremental-migration
     try { fs.unlinkSync(tmpPath); } catch { /* ignore */ }
     throw err;
   }

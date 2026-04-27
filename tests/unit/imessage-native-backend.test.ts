@@ -136,6 +136,7 @@ describe('Feature: NativeBackend reads Messages database', () => {
 
   afterEach(() => {
     try { testDb.close(); } catch { /* */ }
+    // safe-git-allow: incremental-migration
     fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 

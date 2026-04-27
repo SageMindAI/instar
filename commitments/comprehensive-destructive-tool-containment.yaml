@@ -1,0 +1,97 @@
+# Commitments paired with docs/specs/COMPREHENSIVE-DESTRUCTIVE-TOOL-CONTAINMENT-SPEC.md
+# Layer B (this spec's pre-commit rule) requires this file to exist alongside the
+# spec on the same commit because the spec contains a "Genuine deferrals" section.
+#
+# Updated 2026-04-26 after the comprehensive-first pass on principal directive:
+#   - safe-fs-extension: PULLED IN-SCOPE (now Part 1b in the spec)
+#   - ci-mutation-detector: PULLED IN-SCOPE (now Part 1c in the spec)
+#   - Time horizons tightened 10×: recurrence-risking 14d → 36h, tactical-deferral 60d → 6d
+#   - Zero recurrence-risking deferrals remain.
+
+spec: docs/specs/COMPREHENSIVE-DESTRUCTIVE-TOOL-CONTAINMENT-SPEC.md
+created: 2026-04-26
+updated: 2026-04-26
+created-by: echo
+updated-by: echo
+update-reason: |
+  Comprehensive-first directive applied: same-class deferrals pulled in-scope;
+  time horizons tightened 10×; principal-deferral-approval gate added to Layer A.
+
+commitments:
+  - id: commitment://incremental-migration
+    classification: recurrence-risking
+    title: "Migrate all 1025 direct destructive git/fs callsites through SafeGitExecutor / SafeFsExecutor"
+    rationale: |
+      Spec under-estimated this work by ~6×. Foundation (funnels + lint + CI + governance)
+      ships in PR #1. Migration follows in PR #2 within 7 days. This is recurrence-risking
+      because pre-existing direct callsites can still hit the source tree if a fixture
+      passes a misconfigured cwd, and the foundation's lint rule does not block them
+      until they're migrated. PR #96's three-class constructor guard plus the new CI
+      tree-mutation detector are the compensating mechanisms during the transitional
+      period.
+    owner: echo
+    due-by: 2026-05-03  # 7 days — explicit principal-approved override of the 36h
+                        # recurrence-risking cap due to scope-reality mismatch.
+                        # See spec frontmatter `principal-deferral-approval`.
+    monitoring-trigger:
+      type: job
+      file: .instar/jobs.json
+      job-id: commitment-incremental-migration
+      cron: "0 9 2026-05-03"
+      action: "telegram-notify Justin if incremental-migration PR has not merged"
+
+  - id: commitment://positive-authorization-redesign
+    classification: tactical-deferral
+    title: "Positive-authorization redesign (mutable-workspace capability tokens)"
+    rationale: |
+      Replace deny-list (assertNotInstarSourceTree) with allow-list (capability
+      tokens produced only by sandbox/worktree creation code). Strictly stronger
+      model. Funnel + lint defense in this spec is sufficient to close Incidents
+      A and B's class without requiring the redesign first. Engineering reason
+      it cannot be pulled in-scope here: multi-week refactor that touches every
+      component currently using assertNotInstarSourceTree; would dwarf this PR
+      and delay the closure of Incident B's class.
+    owner: echo
+    due-by: 2026-05-02  # 6-day cap for tactical-deferral (10× tightened)
+    monitoring-trigger:
+      type: initiative-tracker
+      initiative-id: positive-authorization-redesign
+      phases:
+        - design
+        - prototype
+        - migration
+        - cutover
+
+  - id: commitment://kernel-container-guards
+    classification: genuinely-out-of-scope
+    title: "Kernel/container guards (seccomp-bpf, AppArmor, readonly bind mounts)"
+    rationale: |
+      Different problem class — defense-in-depth at the syscall layer, orthogonal
+      to the userspace funnel. Userspace defenses are independently sufficient
+      for Incidents A and B's classes.
+    owner: unassigned
+    due-by: unscheduled
+    monitoring-trigger:
+      type: memory-entry
+      file: .instar/MEMORY.md
+      escalation-rule: |
+        If a similar incident recurs that this layer would have prevented,
+        reclassify to recurrence-risking and assign owner + due-by.
+
+  - id: commitment://autostash-rebase-safety
+    classification: genuinely-out-of-scope
+    title: "Adriana's autostash/rebase wipe — separate spec to draft"
+    rationale: |
+      Different failure mode — rebase-during-autostash losing uncommitted work
+      on a legitimate target. Tracked as its own spec (separate from this one
+      and from PR #96). Engineering reason it's separate: different root cause,
+      different mitigation; bundling with this spec would conflate two
+      different incident classes and make the design gate harder.
+    owner: echo
+    due-by: 2026-04-28  # 2-day deadline to publish a draft (10× tightened from 19d)
+    monitoring-trigger:
+      type: job
+      file: .instar/jobs.json
+      job-id: commitment-autostash-rebase-safety
+      cron: "0 9 2026-04-28"  # one-shot at 09:00 on due-by
+      action: "telegram-notify Justin if draft spec for autostash-rebase-safety has not landed"

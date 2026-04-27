@@ -20,6 +20,7 @@ beforeEach(() => {
   tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'rate-limit-test-'));
 });
 afterEach(() => {
+  // safe-git-allow: incremental-migration
   fs.rmSync(tmp, { recursive: true, force: true });
 });
 

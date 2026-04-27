@@ -43,6 +43,7 @@ describe('iMessage Adapter — E2E lifecycle', () => {
   });
 
   afterEach(() => {
+    // safe-git-allow: incremental-migration
     fs.rmSync(tmpDir, { recursive: true, force: true });
     clearRegistry();
   });

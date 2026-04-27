@@ -342,7 +342,9 @@ export class GitSyncManager {
             console.warn(`[GitSync] rebase --abort failed, cleaning up rebase state manually: ${abortErr}`);
             const rebaseMerge = path.join(this.projectDir, '.git', 'rebase-merge');
             const rebaseApply = path.join(this.projectDir, '.git', 'rebase-apply');
+            // safe-git-allow: incremental-migration
             if (fs.existsSync(rebaseMerge)) fs.rmSync(rebaseMerge, { recursive: true, force: true });
+            // safe-git-allow: incremental-migration
             if (fs.existsSync(rebaseApply)) fs.rmSync(rebaseApply, { recursive: true, force: true });
           }
           const beforeHead = this.gitHead();
@@ -1005,6 +1007,7 @@ export class GitSyncManager {
   // ── Git Helpers ─────────────────────────────────────────────────
 
   private gitExec(args: string[]): string {
+    // safe-git-allow: incremental-migration
     return execFileSync('git', args, {
       cwd: this.projectDir,
       encoding: 'utf-8',

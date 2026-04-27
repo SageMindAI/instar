@@ -54,6 +54,7 @@ describe('OverlapGuard wiring integrity', () => {
   });
 
   afterEach(() => {
+    // safe-git-allow: incremental-migration
     fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 
@@ -577,6 +578,7 @@ describe('OverlapGuard wiring integrity', () => {
       // Let's reconfigure with explicit userId on writer
 
       // Reset
+      // safe-git-allow: incremental-migration
       fs.rmSync(tmpDir, { recursive: true, force: true });
       fs.mkdirSync(tmpDir, { recursive: true });
 

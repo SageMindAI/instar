@@ -80,6 +80,7 @@ describe('OverlapGuard E2E lifecycle', () => {
   });
 
   afterEach(() => {
+    // safe-git-allow: incremental-migration
     fs.rmSync(stateDir, { recursive: true, force: true });
   });
 
@@ -438,6 +439,7 @@ describe('OverlapGuard E2E lifecycle', () => {
         // onAlert should NOT fire for 'log' action
         expect(onAlertPure).not.toHaveBeenCalled();
       } finally {
+        // safe-git-allow: incremental-migration
         fs.rmSync(stateDir2, { recursive: true, force: true });
       }
     });
@@ -560,6 +562,7 @@ describe('OverlapGuard E2E lifecycle', () => {
         expect(resultArchLog.canProceed).toBe(true);
         expect(onBlockB).not.toHaveBeenCalled();
       } finally {
+        // safe-git-allow: incremental-migration
         fs.rmSync(stateDir2, { recursive: true, force: true });
       }
     });

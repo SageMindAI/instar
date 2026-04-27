@@ -74,6 +74,7 @@ describe('DropPickup', () => {
 
   afterEach(async () => {
     await store.destroy();
+    // safe-git-allow: incremental-migration
     fs.rmSync(storeDir, { recursive: true, force: true });
   });
 

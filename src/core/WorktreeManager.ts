@@ -429,6 +429,7 @@ export class WorktreeManager extends EventEmitter {
       if (lock.sessionId === args.sessionId && lock.fencingToken === args.fencingToken) {
         this.locks.delete(worktreePath);
         const lockFile = path.join(worktreePath, '.session.lock');
+        // safe-git-allow: incremental-migration
         try { fs.unlinkSync(lockFile); } catch { /* @silent-fallback-ok */ }
         this.emit('lock:released', { worktreePath, sessionId: args.sessionId });
         return { released: true };
@@ -505,6 +506,7 @@ export class WorktreeManager extends EventEmitter {
     }
 
     this.locks.delete(binding.worktreePath);
+    // safe-git-allow: incremental-migration
     try { fs.unlinkSync(path.join(binding.worktreePath, '.session.lock')); } catch { /* @silent-fallback-ok */ }
 
     this.appendHistoryEvent({
@@ -753,6 +755,7 @@ export class WorktreeManager extends EventEmitter {
     if (fs.existsSync(worktreePath)) {
       // Adopt existing if .git is valid
       try {
+        // safe-git-allow: incremental-migration
         execFileSync('git', ['-C', worktreePath, 'rev-parse', 'HEAD'], { stdio: 'pipe', timeout: 3000 });
       } catch {
         throw new Error(`Worktree path ${worktreePath} exists but is not a valid git worktree`);
@@ -760,10 +763,13 @@ export class WorktreeManager extends EventEmitter {
     } else {
       // Create branch if needed; then `git worktree add`
       try {
+        // safe-git-allow: incremental-migration
         execFileSync('git', ['-C', this.opts.projectDir, 'rev-parse', '--verify', branch], { stdio: 'pipe', timeout: 3000 });
       } catch {
+        // safe-git-allow: incremental-migration
         execFileSync('git', ['-C', this.opts.projectDir, 'branch', branch], { timeout: 5000 });
       }
+      // safe-git-allow: incremental-migration
       execFileSync('git', ['-C', this.opts.projectDir, 'worktree', 'add', worktreePath, branch], { timeout: 30_000 });
 
       // Cross-platform fast-copy node_modules from main if present (avoid `cp -al` per K-fix; use clonefile/reflink only)
@@ -876,6 +882,7 @@ export class WorktreeManager extends EventEmitter {
 
     let gitWorktrees: Array<{ path: string }> = [];
     try {
+      // safe-git-allow: incremental-migration
       const stdout = execFileSync('git', ['-C', this.opts.projectDir, 'worktree', 'list', '--porcelain', '-z'], { encoding: 'utf-8', timeout: 5000 });
       for (const block of stdout.split('\0\0')) {
         const m = block.match(/worktree\s+(.+)/);

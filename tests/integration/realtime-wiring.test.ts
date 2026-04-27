@@ -66,6 +66,7 @@ describe('AgentBus <-> CoordinationProtocol wiring', () => {
   });
 
   afterEach(() => {
+    // safe-git-allow: incremental-migration
     fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 
@@ -303,6 +304,7 @@ describe('AgentBus <-> ConflictNegotiator wiring', () => {
   });
 
   afterEach(() => {
+    // safe-git-allow: incremental-migration
     fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 
@@ -499,6 +501,7 @@ describe('Two-agent simulation via shared JSONL transport', () => {
   });
 
   afterEach(() => {
+    // safe-git-allow: incremental-migration
     fs.rmSync(sharedDir, { recursive: true, force: true });
   });
 
@@ -697,6 +700,7 @@ describe('CoordinationProtocol <-> ConflictNegotiator integration', () => {
   });
 
   afterEach(() => {
+    // safe-git-allow: incremental-migration
     fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 
@@ -872,6 +876,7 @@ describe('Phase 8 export verification', () => {
       expect(bus).toBeInstanceOf(mod.AgentBus);
       expect(bus.getMachineId()).toBe('export-test');
     } finally {
+      // safe-git-allow: incremental-migration
       fs.rmSync(tmpDir, { recursive: true, force: true });
     }
   });
@@ -892,6 +897,7 @@ describe('Phase 8 export verification', () => {
       });
       expect(coord).toBeInstanceOf(mod.CoordinationProtocol);
     } finally {
+      // safe-git-allow: incremental-migration
       fs.rmSync(tmpDir, { recursive: true, force: true });
     }
   });
@@ -911,6 +917,7 @@ describe('Phase 8 export verification', () => {
       });
       expect(neg).toBeInstanceOf(mod.ConflictNegotiator);
     } finally {
+      // safe-git-allow: incremental-migration
       fs.rmSync(tmpDir, { recursive: true, force: true });
     }
   });

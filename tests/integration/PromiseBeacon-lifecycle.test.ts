@@ -25,6 +25,7 @@ describe('PromiseBeacon lifecycle', () => {
     fs.mkdirSync(path.join(dir, 'state'), { recursive: true });
     fs.writeFileSync(path.join(dir, 'config.json'), '{}');
   });
+  // safe-git-allow: incremental-migration
   afterEach(() => fs.rmSync(dir, { recursive: true, force: true }));
 
   it('records → heartbeats → delivered → stops', async () => {

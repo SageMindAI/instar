@@ -242,6 +242,7 @@ export class HealthChecker {
       // Check we can write — fixed name prevents orphaned files on crash
       const testFile = path.join(this.config.stateDir, '.health-check-probe');
       fs.writeFileSync(testFile, 'ok');
+      // safe-git-allow: incremental-migration
       fs.unlinkSync(testFile);
 
       return { status: 'healthy', message: 'State directory writable', lastCheck: now };

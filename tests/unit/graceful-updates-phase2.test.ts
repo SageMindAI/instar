@@ -99,6 +99,7 @@ describe('Phase 2A: Update coalescing', () => {
   afterEach(() => {
     vi.useRealTimers();
     vi.restoreAllMocks();
+    // safe-git-allow: incremental-migration
     fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 
@@ -449,6 +450,7 @@ describe('Phase 2B+E: AutoUpdater with session gating', () => {
   afterEach(() => {
     vi.useRealTimers();
     vi.restoreAllMocks();
+    // safe-git-allow: incremental-migration
     fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 
@@ -557,6 +559,7 @@ describe('Phase 2C: Notify-only mode (autoApply: false)', () => {
   afterEach(() => {
     vi.useRealTimers();
     vi.restoreAllMocks();
+    // safe-git-allow: incremental-migration
     fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 
@@ -642,6 +645,7 @@ describe('E2E: Full update cycle', () => {
   afterEach(() => {
     vi.useRealTimers();
     vi.restoreAllMocks();
+    // safe-git-allow: incremental-migration
     fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 

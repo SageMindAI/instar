@@ -24,6 +24,7 @@ function tmpState() {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'promise-beacon-'));
   fs.mkdirSync(path.join(dir, 'state'), { recursive: true });
   fs.writeFileSync(path.join(dir, 'config.json'), '{}');
+  // safe-git-allow: incremental-migration
   return { dir, cleanup: () => fs.rmSync(dir, { recursive: true, force: true }) };
 }
 

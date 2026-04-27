@@ -30,6 +30,7 @@ describe('UnifiedTrustWiring', () => {
 
   afterEach(() => {
     system.shutdown();
+    // safe-git-allow: incremental-migration
     fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 
@@ -179,6 +180,7 @@ describe('UnifiedTrustWiring', () => {
       expect(fs.existsSync(path.join(legacyDir, 'identity.json'))).toBe(true);
 
       sys.shutdown();
+      // safe-git-allow: incremental-migration
       fs.rmSync(migrateDir, { recursive: true, force: true });
     });
   });

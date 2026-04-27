@@ -27,6 +27,7 @@ describe('Phase 4: UX Signals, QR Code, Message Bridge — E2E', () => {
   });
 
   afterEach(() => {
+    // safe-git-allow: incremental-migration
     fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 

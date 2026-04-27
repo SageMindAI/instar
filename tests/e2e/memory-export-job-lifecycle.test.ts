@@ -87,6 +87,7 @@ describe('Memory Export Job lifecycle (E2E)', () => {
 
   afterAll(() => {
     semanticMemory?.close();
+    // safe-git-allow: incremental-migration
     fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 

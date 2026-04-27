@@ -801,6 +801,7 @@ describe('AuditTrail wiring integrity', () => {
   });
 
   afterEach(() => {
+    // safe-git-allow: incremental-migration
     fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 
@@ -1069,6 +1070,7 @@ describe('Cross-module wiring integrity', () => {
     });
 
     afterEach(() => {
+      // safe-git-allow: incremental-migration
       fs.rmSync(tmpDir, { recursive: true, force: true });
     });
 

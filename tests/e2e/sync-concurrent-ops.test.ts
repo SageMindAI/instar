@@ -131,6 +131,7 @@ describe('Concurrent Operations', () => {
   });
 
   afterEach(() => {
+    // safe-git-allow: incremental-migration
     fs.rmSync(projectDir, { recursive: true, force: true });
   });
 

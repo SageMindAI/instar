@@ -60,6 +60,7 @@ describe('CoherenceGate — escalation context wiring', () => {
 
   afterEach(() => {
     vi.restoreAllMocks();
+    // safe-git-allow: incremental-migration
     fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 

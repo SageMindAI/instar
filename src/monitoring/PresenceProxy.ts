@@ -1425,6 +1425,7 @@ IMPORTANT BIAS: Default to "working" or "waiting" unless there is STRONG evidenc
     this.states.delete(topicId);
     // Remove persisted state file
     const filePath = path.join(this.stateDir, `${topicId}.json`);
+    // safe-git-allow: incremental-migration
     try { fs.unlinkSync(filePath); } catch { /* ok — may not exist */ }
   }
 
@@ -1464,6 +1465,7 @@ IMPORTANT BIAS: Default to "working" or "waiting" unless there is STRONG evidenc
 
           // Stale state (>15 minutes) — clean up
           if (elapsed > 15 * 60_000) {
+            // safe-git-allow: incremental-migration
             fs.unlinkSync(path.join(this.stateDir, file));
             continue;
           }
@@ -1473,6 +1475,7 @@ IMPORTANT BIAS: Default to "working" or "waiting" unless there is STRONG evidenc
 
           // Verify session still exists
           if (!this.config.getSessionForTopic(topicId)) {
+            // safe-git-allow: incremental-migration
             fs.unlinkSync(path.join(this.stateDir, file));
             continue;
           }
@@ -1516,6 +1519,7 @@ IMPORTANT BIAS: Default to "working" or "waiting" unless there is STRONG evidenc
           console.log(`[PresenceProxy] Recovered state for topic ${topicId} (elapsed: ${Math.round(elapsed / 1000)}s)`);
         } catch {
           // Corrupt state file — remove it
+          // safe-git-allow: incremental-migration
           try { fs.unlinkSync(path.join(this.stateDir, file)); } catch { /* ok */ }
         }
       }

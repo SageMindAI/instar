@@ -18,6 +18,7 @@ const ROOT = path.resolve(__dirname, '..');
 
 // Guard: warn if working tree is dirty (manifest won't match committed source in CI)
 try {
+  // safe-git-allow: incremental-migration
   const status = execSync('git status --porcelain -- src/', { cwd: ROOT, encoding: 'utf-8' }).trim();
   if (status) {
     console.warn('\n⚠️  WARNING: Working tree has uncommitted changes in src/.');

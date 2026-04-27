@@ -85,6 +85,7 @@ describe('Auto-spawn thread history (routes.ts HTTP forward)', () => {
   });
 
   afterEach(() => {
+    // safe-git-allow: incremental-migration
     fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 

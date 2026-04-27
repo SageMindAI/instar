@@ -32,6 +32,7 @@ export interface ParallelDevWiringResult {
 
 function defaultRepoOriginUrl(projectDir: string): string {
   try {
+    // safe-git-allow: incremental-migration
     return execFileSync('git', ['remote', 'get-url', 'origin'], {
       cwd: projectDir,
       encoding: 'utf-8',

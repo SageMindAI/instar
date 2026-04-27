@@ -520,6 +520,7 @@ export class PostUpdateMigrator {
       try {
         // Move built-in hooks to instar/ — they'll be overwritten by the current
         // migrateHooks() call anyway, but cleaning up the old location is important
+        // safe-git-allow: incremental-migration
         fs.unlinkSync(oldPath);
       } catch {
         // If we can't remove, it's not critical — the new hooks will be written
@@ -2074,6 +2075,7 @@ The user has been talking to you (possibly for days). A generic greeting like "H
 
     const getRemote = (name: string): string | null => {
       try {
+        // safe-git-allow: incremental-migration
         return execSync(`git remote get-url ${name}`, {
           cwd: this.config.projectDir,
           stdio: ['ignore', 'pipe', 'ignore'],

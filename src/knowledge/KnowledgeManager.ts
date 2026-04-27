@@ -130,6 +130,7 @@ export class KnowledgeManager {
 
     // Remove file if it exists
     if (fs.existsSync(fullPath)) {
+      // safe-git-allow: incremental-migration
       fs.unlinkSync(fullPath);
     }
 

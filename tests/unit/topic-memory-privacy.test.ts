@@ -32,6 +32,7 @@ beforeEach(async () => {
 
 afterEach(() => {
   memory.close();
+  // safe-git-allow: incremental-migration
   fs.rmSync(testDir, { recursive: true, force: true });
 });
 
@@ -60,6 +61,7 @@ describe('schema v3 migration', () => {
     // Create a v2 database manually (without user_id/privacy_scope columns)
     const BetterSqlite3 = (await import('better-sqlite3')).default;
     const dbPath = path.join(testDir, 'topic-memory.db');
+    // safe-git-allow: incremental-migration
     fs.unlinkSync(dbPath); // Remove the v3 db
 
     const db = new BetterSqlite3(dbPath);

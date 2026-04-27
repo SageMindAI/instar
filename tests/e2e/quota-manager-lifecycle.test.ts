@@ -137,6 +137,7 @@ describe('QuotaManager E2E Lifecycle', () => {
 
   afterEach(() => {
     vi.useRealTimers();
+    // safe-git-allow: incremental-migration
     fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 

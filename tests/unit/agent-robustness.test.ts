@@ -22,6 +22,7 @@ function createTempDir(): string {
 }
 
 function cleanup(dir: string): void {
+  // safe-git-allow: incremental-migration
   fs.rmSync(dir, { recursive: true, force: true });
 }
 
@@ -196,6 +197,7 @@ describe('Agent Robustness', () => {
       expect(shutdownCompleted).toBe(true);
 
       // Clean up lock
+      // safe-git-allow: incremental-migration
       fs.rmSync(lockPath, { recursive: true, force: true });
     });
   });

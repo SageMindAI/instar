@@ -16,6 +16,7 @@ import type { TaskBranch, BranchManagerConfig } from '../../src/core/BranchManag
 // ── Helpers ────────────────────────────────────────────────────────────
 
 function git(cwd: string, ...args: string[]): string {
+  // safe-git-allow: incremental-migration
   return execFileSync('git', args, {
     cwd,
     encoding: 'utf-8',
@@ -58,15 +59,21 @@ describe('BranchManager', () => {
   beforeEach(() => {
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'branch-mgr-'));
     stateDir = path.join(tmpDir, '.instar');
+    // safe-git-allow: incremental-migration
     execFileSync('git', ['init', '-b', 'main'], { cwd: tmpDir });
+    // safe-git-allow: incremental-migration
     execFileSync('git', ['config', 'user.email', 'test@test.com'], { cwd: tmpDir });
+    // safe-git-allow: incremental-migration
     execFileSync('git', ['config', 'user.name', 'Test'], { cwd: tmpDir });
     fs.writeFileSync(path.join(tmpDir, 'README.md'), '# Test\n');
+    // safe-git-allow: incremental-migration
     execFileSync('git', ['add', '.'], { cwd: tmpDir });
+    // safe-git-allow: incremental-migration
     execFileSync('git', ['commit', '-m', 'init'], { cwd: tmpDir });
   });
 
   afterEach(() => {
+    // safe-git-allow: incremental-migration
     fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 

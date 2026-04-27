@@ -162,6 +162,7 @@ export class StateManager {
     const filePath = path.join(this.stateDir, 'state', 'sessions', `${sessionId}.json`);
     if (!fs.existsSync(filePath)) return false;
     try {
+      // safe-git-allow: incremental-migration
       fs.unlinkSync(filePath);
       return true;
     } catch {
@@ -300,6 +301,7 @@ export class StateManager {
     const filePath = path.join(this.stateDir, 'state', `${key}.json`);
     if (!fs.existsSync(filePath)) return false;
     try {
+      // safe-git-allow: incremental-migration
       fs.unlinkSync(filePath);
       return true;
     } catch {
@@ -320,6 +322,7 @@ export class StateManager {
       fs.renameSync(tmpPath, filePath);
     } catch (err) {
       // Clean up temp file on failure
+      // safe-git-allow: incremental-migration
       try { fs.unlinkSync(tmpPath); } catch { /* ignore */ }
       throw err;
     }

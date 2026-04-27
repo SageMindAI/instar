@@ -40,6 +40,7 @@ function createTestAdapter() {
 
 afterEach(() => {
   // Clean up test state directory
+  // safe-git-allow: incremental-migration
   fs.rmSync(TEST_STATE_DIR, { recursive: true, force: true });
 });
 

@@ -157,6 +157,7 @@ export class PrivacyConsent {
       fs.writeFileSync(tmpPath, JSON.stringify([...this.records.values()], null, 2));
       fs.renameSync(tmpPath, this.consentPath);
     } catch (err) {
+      // safe-git-allow: incremental-migration
       try { fs.unlinkSync(tmpPath); } catch { /* ignore */ }
       throw err;
     }

@@ -98,6 +98,7 @@ describe('Adapt and Defer Mechanics (Milestone 5)', () => {
   });
 
   afterEach(() => {
+    // safe-git-allow: incremental-migration
     fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 

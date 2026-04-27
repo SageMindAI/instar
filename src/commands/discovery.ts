@@ -713,6 +713,7 @@ export function writeSetupLock(lock: SetupLock): void {
 export function deleteSetupLock(): void {
   try {
     if (fs.existsSync(LOCK_PATH)) {
+      // safe-git-allow: incremental-migration
       fs.unlinkSync(LOCK_PATH);
     }
   } catch { /* non-fatal */ }

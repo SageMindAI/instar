@@ -23,6 +23,7 @@ describe('migrate sync-session-hook', () => {
   });
 
   afterEach(() => {
+    // safe-git-allow: incremental-migration
     fs.rmSync(projectDir, { recursive: true, force: true });
   });
 

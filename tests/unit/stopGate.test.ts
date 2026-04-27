@@ -96,6 +96,7 @@ describe('stopGate — compactionInFlight probe (P0.6)', () => {
   });
 
   afterEach(() => {
+    // safe-git-allow: incremental-migration
     fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 
@@ -127,6 +128,7 @@ describe('stopGate — compactionInFlight probe (P0.6)', () => {
         compactionInFlight({ sessionId: sid, recoveryScriptPath: '/no/such/path' })
       ).toBe(true);
     } finally {
+      // safe-git-allow: incremental-migration
       fs.rmSync(markerDir, { recursive: true, force: true });
     }
   });
@@ -186,6 +188,7 @@ describe('stopGate — getHotPathState', () => {
       });
       expect(present.autonomousActive).toBe(true);
 
+      // safe-git-allow: incremental-migration
       fs.unlinkSync(stateFile);
       const absent = getHotPathState({
         sessionId: 'sess-h',
@@ -194,6 +197,7 @@ describe('stopGate — getHotPathState', () => {
       });
       expect(absent.autonomousActive).toBe(false);
     } finally {
+      // safe-git-allow: incremental-migration
       fs.rmSync(tmp, { recursive: true, force: true });
     }
   });

@@ -34,6 +34,7 @@ function createTempDir(): string {
 }
 
 function cleanup(dir: string): void {
+  // safe-git-allow: incremental-migration
   fs.rmSync(dir, { recursive: true, force: true });
 }
 
@@ -49,7 +50,9 @@ describe('GitStateManager', () => {
 
     // Configure git user for commits in test env
     try {
+      // safe-git-allow: incremental-migration
       execSync('git config --global user.email "test@test.com" 2>/dev/null || true', { stdio: 'pipe' });
+      // safe-git-allow: incremental-migration
       execSync('git config --global user.name "Test" 2>/dev/null || true', { stdio: 'pipe' });
     } catch {
       // May already be configured
@@ -310,6 +313,7 @@ describe('GitStateManager', () => {
       manager.setRemote('https://github.com/user/repo.git');
 
       // Verify the git remote was set
+      // safe-git-allow: incremental-migration
       const remoteUrl = execSync('git remote get-url origin', { cwd: stateDir, encoding: 'utf-8' }).trim();
       expect(remoteUrl).toBe('https://github.com/user/repo.git');
     });

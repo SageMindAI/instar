@@ -1253,6 +1253,7 @@ function wireIMessageRouting(
         const cutoff = Date.now() - 3_600_000;
         for (const f of fs.readdirSync(tmpDir)) {
           const fp = path.join(tmpDir, f);
+          // safe-git-allow: incremental-migration
           try { if (fs.statSync(fp).mtimeMs < cutoff) fs.unlinkSync(fp); } catch { /* ignore */ }
         }
       } catch { /* non-critical */ }
@@ -1587,6 +1588,7 @@ function cleanupTelegramTempFiles(): void {
         const filepath = path.join(tmpDir, file);
         const stat = fs.statSync(filepath);
         if (stat.isFile() && now - stat.mtimeMs > maxAge) {
+          // safe-git-allow: incremental-migration
           fs.unlinkSync(filepath);
           cleaned++;
         }

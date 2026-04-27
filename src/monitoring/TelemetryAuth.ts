@@ -130,7 +130,9 @@ export class TelemetryAuth {
    * Delete all local identity files. Called on `instar telemetry disable`.
    */
   deprovision(): void {
+    // safe-git-allow: incremental-migration
     try { fs.unlinkSync(this.installIdPath); } catch { /* may not exist */ }
+    // safe-git-allow: incremental-migration
     try { fs.unlinkSync(this.secretPath); } catch { /* may not exist */ }
   }
 

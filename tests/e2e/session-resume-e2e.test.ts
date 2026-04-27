@@ -65,8 +65,10 @@ describe('Session Resume E2E', () => {
   });
 
   afterEach(() => {
+    // safe-git-allow: incremental-migration
     fs.rmSync(tmpDir, { recursive: true, force: true });
     for (const dir of cleanupDirs) {
+      // safe-git-allow: incremental-migration
       try { fs.rmSync(dir, { recursive: true, force: true }); } catch { /* best effort */ }
     }
   });
@@ -413,6 +415,7 @@ describe('Session Resume E2E', () => {
 
       // Delete the JSONL file (simulating cleanup or disk issue)
       const jsonlPath = path.join(myDir, `${sessionUuid}.jsonl`);
+      // safe-git-allow: incremental-migration
       fs.unlinkSync(jsonlPath);
 
       // get() should now return null — JSONL validation fails gracefully

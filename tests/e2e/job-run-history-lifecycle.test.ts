@@ -195,6 +195,7 @@ describeMaybe('E2E: Job Run History lifecycle', () => {
     } catch {}
 
     await server?.stop();
+    // safe-git-allow: incremental-migration
     fs.rmSync(projectDir, { recursive: true, force: true });
   });
 

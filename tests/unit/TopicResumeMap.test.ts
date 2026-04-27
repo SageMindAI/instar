@@ -26,6 +26,7 @@ describe('TopicResumeMap', () => {
   });
 
   afterEach(() => {
+    // safe-git-allow: incremental-migration
     fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 
@@ -283,6 +284,7 @@ describe('TopicResumeMap', () => {
 
   afterEach(() => {
     for (const dir of testProjectDirs) {
+      // safe-git-allow: incremental-migration
       try { fs.rmSync(dir, { recursive: true, force: true }); } catch { /* best effort */ }
     }
     testProjectDirs.length = 0;

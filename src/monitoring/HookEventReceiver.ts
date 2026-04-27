@@ -291,6 +291,7 @@ export class HookEventReceiver extends EventEmitter {
     for (const sessionId of toRemove) {
       const file = this.getSessionFile(sessionId);
       try {
+        // safe-git-allow: incremental-migration
         fs.unlinkSync(file);
         this.sessionIndex.delete(sessionId);
       } catch { /* best effort */ }

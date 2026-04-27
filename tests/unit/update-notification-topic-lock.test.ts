@@ -81,6 +81,7 @@ describe('update announcement topic lock', () => {
 
   afterEach(() => {
     vi.restoreAllMocks();
+    // safe-git-allow: incremental-migration
     fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 

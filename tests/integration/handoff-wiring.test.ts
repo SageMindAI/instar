@@ -32,6 +32,7 @@ import type { MachineLedger } from '../../src/core/WorkLedger.js';
 
 /** Run a git command in the given directory. */
 function git(cwd: string, ...args: string[]): string {
+  // safe-git-allow: incremental-migration
   return execFileSync('git', args, {
     cwd,
     encoding: 'utf-8',
@@ -78,6 +79,7 @@ describe('HandoffManager wiring integrity', () => {
   });
 
   afterEach(() => {
+    // safe-git-allow: incremental-migration
     fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 

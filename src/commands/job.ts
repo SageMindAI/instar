@@ -69,6 +69,7 @@ export async function addJob(options: JobAddOptions): Promise<void> {
     fs.writeFileSync(tmpPath, JSON.stringify(jobs, null, 2));
     fs.renameSync(tmpPath, jobsFile);
   } catch (err) {
+    // safe-git-allow: incremental-migration
     try { fs.unlinkSync(tmpPath); } catch { /* ignore */ }
     throw err;
   }

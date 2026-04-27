@@ -57,6 +57,7 @@ describe('PostUpdateMigrator — context-death anti-pattern migration', () => {
   });
 
   afterEach(() => {
+    // safe-git-allow: incremental-migration
     fs.rmSync(home.tmp, { recursive: true, force: true });
   });
 

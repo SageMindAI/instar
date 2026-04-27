@@ -130,6 +130,7 @@ describe('prepareInjectionText', () => {
   });
 
   afterEach(() => {
+    // safe-git-allow: incremental-migration
     try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch { /* best effort */ }
   });
 

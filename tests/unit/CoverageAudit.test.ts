@@ -27,6 +27,7 @@ describe('Coverage Audit + Evolution (Phase 4)', () => {
   });
 
   afterEach(() => {
+    // safe-git-allow: incremental-migration
     fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 

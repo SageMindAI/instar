@@ -40,11 +40,16 @@ export async function createTwoSessionHarness(): Promise<HarnessHandle> {
 
   fs.mkdirSync(projectDir, { recursive: true });
   // Initialize a real git repo so `git worktree add` works
+  // safe-git-allow: incremental-migration
   execFileSync('git', ['-C', projectDir, 'init', '-q', '-b', 'main']);
+  // safe-git-allow: incremental-migration
   execFileSync('git', ['-C', projectDir, 'config', 'user.email', 'test@instar.local']);
+  // safe-git-allow: incremental-migration
   execFileSync('git', ['-C', projectDir, 'config', 'user.name', 'Test Harness']);
   fs.writeFileSync(path.join(projectDir, 'README.md'), '# test\n');
+  // safe-git-allow: incremental-migration
   execFileSync('git', ['-C', projectDir, 'add', 'README.md']);
+  // safe-git-allow: incremental-migration
   execFileSync('git', ['-C', projectDir, 'commit', '-q', '-m', 'init']);
 
   fs.mkdirSync(stateDir, { recursive: true });
@@ -104,6 +109,7 @@ export async function createTwoSessionHarness(): Promise<HarnessHandle> {
       });
     },
     cleanup() {
+      // safe-git-allow: incremental-migration
       try { fs.rmSync(tmp, { recursive: true, force: true }); }
       catch { /* @silent-fallback-ok */ }
     },

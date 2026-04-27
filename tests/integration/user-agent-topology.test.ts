@@ -197,6 +197,7 @@ describe('pipeline → TopicMemory storage', () => {
 
   afterEach(() => {
     topicMemory.close();
+    // safe-git-allow: incremental-migration
     fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 
@@ -445,6 +446,7 @@ describe('schema migration: v1 → v2 upgrade', () => {
   });
 
   afterEach(() => {
+    // safe-git-allow: incremental-migration
     fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 

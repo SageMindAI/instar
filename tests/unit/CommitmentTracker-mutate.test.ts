@@ -26,6 +26,7 @@ function createTmpState(): { stateDir: string; cleanup: () => void } {
   );
   return {
     stateDir,
+    // safe-git-allow: incremental-migration
     cleanup: () => fs.rmSync(stateDir, { recursive: true, force: true }),
   };
 }

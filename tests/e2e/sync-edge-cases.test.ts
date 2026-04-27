@@ -32,15 +32,21 @@ function createTempDir(): string {
 }
 
 function cleanup(dir: string): void {
+  // safe-git-allow: incremental-migration
   fs.rmSync(dir, { recursive: true, force: true });
 }
 
 function initGitRepo(dir: string): void {
+  // safe-git-allow: incremental-migration
   execFileSync('git', ['init'], { cwd: dir, stdio: 'ignore' });
+  // safe-git-allow: incremental-migration
   execFileSync('git', ['config', 'user.email', 'test@test.com'], { cwd: dir, stdio: 'ignore' });
+  // safe-git-allow: incremental-migration
   execFileSync('git', ['config', 'user.name', 'Test'], { cwd: dir, stdio: 'ignore' });
   fs.writeFileSync(path.join(dir, 'README.md'), '# Test');
+  // safe-git-allow: incremental-migration
   execFileSync('git', ['add', '.'], { cwd: dir, stdio: 'ignore' });
+  // safe-git-allow: incremental-migration
   execFileSync('git', ['commit', '-m', 'init'], { cwd: dir, stdio: 'ignore' });
 }
 

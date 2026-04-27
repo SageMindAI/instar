@@ -20,6 +20,7 @@ describe('Baseline Submission Flow', () => {
   });
 
   afterEach(() => {
+    // safe-git-allow: incremental-migration
     fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 
@@ -545,6 +546,7 @@ describe('HMAC Signature Format (Worker Compatibility)', () => {
   });
 
   afterEach(() => {
+    // safe-git-allow: incremental-migration
     fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 

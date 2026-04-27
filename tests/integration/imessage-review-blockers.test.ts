@@ -128,6 +128,7 @@ describe('Fix 1: lastRowId persistence across restarts', () => {
 
   afterEach(() => {
     try { testDb.close(); } catch { /* */ }
+    // safe-git-allow: incremental-migration
     fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 
@@ -339,6 +340,7 @@ describe('Authorization normalization', () => {
 
   afterEach(() => {
     try { testDb.close(); } catch { /* */ }
+    // safe-git-allow: incremental-migration
     fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 
@@ -389,6 +391,7 @@ describe('Full adapter lifecycle with mock database', () => {
 
   afterEach(() => {
     try { testDb.close(); } catch { /* */ }
+    // safe-git-allow: incremental-migration
     fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 

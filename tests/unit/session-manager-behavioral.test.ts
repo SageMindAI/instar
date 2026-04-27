@@ -121,6 +121,7 @@ describe('SessionManager behavioral tests', () => {
 
   afterEach(() => {
     manager.stopMonitoring();
+    // safe-git-allow: incremental-migration
     fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 

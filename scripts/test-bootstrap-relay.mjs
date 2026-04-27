@@ -85,6 +85,7 @@ try {
 } finally {
   // Cleanup
   try {
+    // safe-git-allow: incremental-migration
     fs.rmSync(tmpDir, { recursive: true, force: true });
   } catch {}
 }

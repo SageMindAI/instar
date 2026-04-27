@@ -38,6 +38,7 @@ function createTempStateDir(prefix: string): string {
 
 function cleanupDir(dir: string): void {
   try {
+    // safe-git-allow: incremental-migration
     fs.rmSync(dir, { recursive: true, force: true });
   } catch {
     // Best-effort cleanup

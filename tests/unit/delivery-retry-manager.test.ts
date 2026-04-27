@@ -101,6 +101,7 @@ describe('DeliveryRetryManager', () => {
 
   afterEach(() => {
     manager.stop();
+    // safe-git-allow: incremental-migration
     fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 

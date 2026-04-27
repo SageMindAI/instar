@@ -135,7 +135,9 @@ describe('REST Server E2E', () => {
     await server.stop();
     // Cleanup token file
     try {
+      // safe-git-allow: incremental-migration
       fs.unlinkSync(tokenPath);
+      // safe-git-allow: incremental-migration
       fs.rmdirSync(path.dirname(tokenPath));
     } catch { /* ignore */ }
   });

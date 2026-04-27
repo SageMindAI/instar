@@ -44,6 +44,7 @@ describe('Config', () => {
       expect(config.sessions.claudePath).toBe(customClaudePath);
 
       // Cleanup
+      // safe-git-allow: incremental-migration
       fs.rmSync(tmpDir, { recursive: true, force: true });
     });
 
@@ -64,6 +65,7 @@ describe('Config', () => {
       expect(config.sessions.tmuxPath).toBe(customTmuxPath);
 
       // Cleanup
+      // safe-git-allow: incremental-migration
       fs.rmSync(tmpDir, { recursive: true, force: true });
     });
 
@@ -87,6 +89,7 @@ describe('Config', () => {
       expect(config.sessions.claudePath).toBe(detected);
 
       // Cleanup
+      // safe-git-allow: incremental-migration
       fs.rmSync(tmpDir, { recursive: true, force: true });
     });
   });

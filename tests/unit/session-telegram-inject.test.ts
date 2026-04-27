@@ -28,6 +28,7 @@ describe('SessionManager.injectTelegramMessage', () => {
     if (fs.existsSync(tmpDir)) {
       const files = fs.readdirSync(tmpDir).filter(f => f.startsWith('msg-'));
       for (const f of files) {
+        // safe-git-allow: incremental-migration
         try { fs.unlinkSync(path.join(tmpDir, f)); } catch { /* ignore */ }
       }
     }

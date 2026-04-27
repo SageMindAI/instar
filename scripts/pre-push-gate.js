@@ -271,6 +271,30 @@ if (!process.env.CI) {
   }
 }
 
+// ── Destructive-tool containment lint (full repo) ─────────────────────
+//
+// Runs the lint-no-direct-destructive AST scanner across the whole repo on
+// every push. Pre-commit only runs it over staged files; pre-push catches
+// commits that landed before the rule existed (or before the marker scheme
+// expired). Fails the push on any violation.
+//
+// Wired here rather than in .husky/pre-push because the husky hook files
+// are managed by a sandboxed flow that this gate can extend.
+
+try {
+  const { spawnSync } = await import('node:child_process');
+  const result = spawnSync(
+    process.execPath,
+    [path.join(ROOT, 'scripts/lint-no-direct-destructive.js')],
+    { cwd: ROOT, stdio: ['ignore', 'inherit', 'inherit'] },
+  );
+  if (result.status !== 0) {
+    errors.push('lint-no-direct-destructive: violations detected (see output above)');
+  }
+} catch (err) {
+  warnings.push(`lint-no-direct-destructive failed to run: ${err.message}`);
+}
+
 // ── Report ────────────────────────────────────────────────────────────
 
 if (errors.length > 0 || warnings.length > 0) {

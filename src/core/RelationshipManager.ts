@@ -777,6 +777,7 @@ Respond with ONLY: YES or NO`;
       writeFileSync(tmpPath, JSON.stringify(record, null, 2));
       renameSync(tmpPath, filePath);
     } catch (err) {
+      // safe-git-allow: incremental-migration
       try { unlinkSync(tmpPath); } catch { /* ignore */ }
       throw err;
     }
@@ -786,6 +787,7 @@ Respond with ONLY: YES or NO`;
     this.validateId(id);
     const filePath = join(this.config.relationshipsDir, `${id}.json`);
     try {
+      // safe-git-allow: incremental-migration
       unlinkSync(filePath);
     } catch {
       // File may not exist

@@ -231,6 +231,7 @@ export class LedgerSessionRegistry {
       }
     } catch {
       try {
+        // safe-git-allow: incremental-migration
         fs.unlinkSync(tmp);
       } catch {
         /* best effort */

@@ -38,6 +38,7 @@ describe('GitSyncManager.isGitRepo()', () => {
   });
 
   afterEach(() => {
+    // safe-git-allow: incremental-migration
     fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 
@@ -68,6 +69,7 @@ describe('GitSyncManager.isGitRepo()', () => {
   });
 
   it('returns true when .git/ exists and repo has commits', () => {
+    // safe-git-allow: incremental-migration
     execSync('git init && git commit --allow-empty -m "init"', { cwd: tmpDir, stdio: 'ignore' });
 
     const gitSync = new GitSyncManager({
@@ -92,6 +94,7 @@ describe('GitSyncManager.sync() without git repo', () => {
   });
 
   afterEach(() => {
+    // safe-git-allow: incremental-migration
     fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 

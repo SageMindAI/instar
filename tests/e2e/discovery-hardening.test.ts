@@ -74,6 +74,7 @@ describe('E2E: Discovery Hardening', () => {
   });
 
   afterAll(() => {
+    // safe-git-allow: incremental-migration
     fs.rmSync(projectDir, { recursive: true, force: true });
   });
 

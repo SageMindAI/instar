@@ -139,6 +139,7 @@ describe('Telemetry Routes', () => {
       expect(res.body.submissions.length).toBeLessThanOrEqual(200);
 
       // Cleanup
+      // safe-git-allow: incremental-migration
       fs.unlinkSync(path.join(logDir, 'submissions.jsonl'));
     });
   });
@@ -167,6 +168,7 @@ describe('Telemetry Routes', () => {
       expect(res.body.submission.payload.installationId).toBe('test-latest');
 
       // Cleanup
+      // safe-git-allow: incremental-migration
       fs.unlinkSync(path.join(logDir, 'submissions.jsonl'));
     });
   });

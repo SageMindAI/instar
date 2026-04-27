@@ -79,6 +79,7 @@ function findGlobalInstalls(): string[] {
  */
 function removeGlobalInstall(installPath: string): void {
   // Remove the package directory
+  // safe-git-allow: incremental-migration
   fs.rmSync(installPath, { recursive: true, force: true });
 
   // Find and remove the corresponding bin symlink.
@@ -96,6 +97,7 @@ function removeGlobalInstall(installPath: string): void {
       if (fs.existsSync(binPath)) {
         const stat = fs.lstatSync(binPath);
         if (stat.isSymbolicLink()) {
+          // safe-git-allow: incremental-migration
           fs.unlinkSync(binPath);
         }
       }

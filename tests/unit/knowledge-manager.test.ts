@@ -179,6 +179,7 @@ describe('KnowledgeManager', () => {
       const fullPath = path.join(km.getKnowledgeDir(), result.filePath);
 
       // Manually delete the file first
+      // safe-git-allow: incremental-migration
       fs.unlinkSync(fullPath);
 
       // remove should still succeed (removes catalog entry)

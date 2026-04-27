@@ -77,6 +77,7 @@ describe('Quota Enforcement Lifecycle (E2E)', () => {
   });
 
   afterEach(() => {
+    // safe-git-allow: incremental-migration
     fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 

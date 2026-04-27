@@ -59,6 +59,7 @@ async function createHybridMemory(): Promise<TestSetup> {
     memory,
     cleanup: () => {
       memory.close();
+      // safe-git-allow: incremental-migration
       fs.rmSync(dir, { recursive: true, force: true });
     },
   };
@@ -82,6 +83,7 @@ async function createFtsOnlyMemory(): Promise<TestSetup> {
     memory,
     cleanup: () => {
       memory.close();
+      // safe-git-allow: incremental-migration
       fs.rmSync(dir, { recursive: true, force: true });
     },
   };
@@ -308,6 +310,7 @@ describe('Hybrid Search Integration', () => {
 
       // Clean up this nested setup
       memory.close();
+      // safe-git-allow: incremental-migration
       fs.rmSync(dir, { recursive: true, force: true });
     });
 

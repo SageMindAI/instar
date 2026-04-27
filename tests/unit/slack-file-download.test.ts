@@ -14,6 +14,7 @@ import path from 'node:path';
 const TEST_DIR = '/tmp/slack-file-download-test-' + Date.now();
 
 afterEach(() => {
+  // safe-git-allow: incremental-migration
   fs.rmSync(TEST_DIR, { recursive: true, force: true });
   vi.restoreAllMocks();
 });

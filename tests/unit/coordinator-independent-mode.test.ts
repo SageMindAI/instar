@@ -35,6 +35,7 @@ function createTempDir(): string {
 }
 
 function cleanup(dir: string): void {
+  // safe-git-allow: incremental-migration
   fs.rmSync(dir, { recursive: true, force: true });
 }
 

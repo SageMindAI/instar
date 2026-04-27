@@ -79,6 +79,7 @@ describe('POST /health/degradations/mark-reported', () => {
     if (handle) handle.server.close();
     handle = null;
     DegradationReporter.resetForTesting();
+    // safe-git-allow: incremental-migration
     fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 

@@ -72,6 +72,7 @@ describe('Threadline Relay E2E', () => {
   afterAll(async () => {
     await server.stop();
     for (const dir of tmpDirs) {
+      // safe-git-allow: incremental-migration
       fs.rmSync(dir, { recursive: true, force: true });
     }
   });

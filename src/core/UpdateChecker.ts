@@ -621,6 +621,7 @@ export class UpdateChecker {
       fs.writeFileSync(tmpPath, JSON.stringify(info, null, 2));
       fs.renameSync(tmpPath, this.stateFile);
     } catch (err) {
+      // safe-git-allow: incremental-migration
       try { fs.unlinkSync(tmpPath); } catch { /* ignore */ }
       throw err;
     }
@@ -638,6 +639,7 @@ export class UpdateChecker {
 
   private clearRollbackInfo(): void {
     if (fs.existsSync(this.rollbackFile)) {
+      // safe-git-allow: incremental-migration
       fs.unlinkSync(this.rollbackFile);
     }
   }

@@ -43,6 +43,7 @@ describe('TopicSummarizer', () => {
 
   afterEach(() => {
     topicMemory.close();
+    // safe-git-allow: incremental-migration
     fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 

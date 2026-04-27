@@ -36,6 +36,7 @@ export function createTempProject(): TempProject {
     dir,
     stateDir,
     state,
+    // safe-git-allow: incremental-migration
     cleanup: () => fs.rmSync(dir, { recursive: true, force: true }),
   };
 }

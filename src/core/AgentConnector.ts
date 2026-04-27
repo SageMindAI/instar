@@ -138,6 +138,7 @@ export function checkGitVersion(): { version: string; safe: boolean; minimum: st
   const minimum = MIN_GIT_VERSIONS[platform] || '2.43.7';
 
   try {
+    // safe-git-allow: incremental-migration
     const versionOutput = execSync('git --version', { encoding: 'utf-8' }).trim();
     const match = versionOutput.match(/(\d+\.\d+\.\d+)/);
     if (!match) {
@@ -243,6 +244,7 @@ export function connectViaGit(options: ConnectViaGitOptions): ConnectViaGitResul
       stdio: ['pipe', 'pipe', 'pipe'],
       timeout: 60000, // 1 minute timeout
     };
+    // safe-git-allow: incremental-migration
     execSync(
       `git clone --depth=1 --no-recurse-submodules ${JSON.stringify(remoteUrl)} ${JSON.stringify(targetDir)}`,
       execOpts,
@@ -332,6 +334,7 @@ export function connectViaGit(options: ConnectViaGitOptions): ConnectViaGitResul
  */
 function cleanup(dir: string): void {
   try {
+    // safe-git-allow: incremental-migration
     fs.rmSync(dir, { recursive: true, force: true });
   } catch {
     // Best effort cleanup

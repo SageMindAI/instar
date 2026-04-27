@@ -30,6 +30,7 @@ describe('ContextSnapshotBuilder', () => {
   });
 
   afterEach(() => {
+    // safe-git-allow: incremental-migration
     fs.rmSync(tmpDir, { recursive: true, force: true });
     vi.restoreAllMocks();
   });
@@ -538,6 +539,7 @@ describe('ContextSnapshotBuilder', () => {
   describe('edge cases', () => {
     it('handles completely empty state directory', () => {
       // Remove state dir entirely
+      // safe-git-allow: incremental-migration
       fs.rmSync(stateDir, { recursive: true, force: true });
       const builder = makeBuilder();
       const snapshot = builder.build();

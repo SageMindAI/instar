@@ -335,6 +335,7 @@ describe('Full Cross-Module Integration — All 15 INTELLIGENT_SYNC_SPEC Modules
   });
 
   afterEach(() => {
+    // safe-git-allow: incremental-migration
     fs.rmSync(projectDir, { recursive: true, force: true });
   });
 

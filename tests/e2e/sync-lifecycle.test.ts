@@ -22,6 +22,7 @@ import type { IntelligenceProvider, IntelligenceOptions } from '../../src/core/t
 // ── Helpers ──────────────────────────────────────────────────────────
 
 function git(args: string[], cwd: string): string {
+  // safe-git-allow: incremental-migration
   return execFileSync('git', args, {
     cwd,
     encoding: 'utf-8',
@@ -107,6 +108,7 @@ describe('Sync pipeline E2E lifecycle', () => {
   });
 
   afterEach(() => {
+    // safe-git-allow: incremental-migration
     fs.rmSync(repoDir, { recursive: true, force: true });
   });
 

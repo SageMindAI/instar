@@ -384,6 +384,7 @@ export class BackupManager {
       const dir = path.resolve(this.backupsDir, snapshot.id);
       if (dir.startsWith(this.backupsDir + path.sep)) {
         try {
+          // safe-git-allow: incremental-migration
           fs.rmSync(dir, { recursive: true, force: true });
           removed++;
         } catch {

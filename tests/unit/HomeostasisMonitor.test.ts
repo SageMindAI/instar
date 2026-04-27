@@ -24,6 +24,7 @@ describe('HomeostasisMonitor', () => {
   });
 
   afterEach(() => {
+    // safe-git-allow: incremental-migration
     fs.rmSync(stateDir, { recursive: true, force: true });
   });
 

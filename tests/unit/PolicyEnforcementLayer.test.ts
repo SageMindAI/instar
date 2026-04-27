@@ -40,6 +40,7 @@ describe('PolicyEnforcementLayer', () => {
 
   afterEach(() => {
     pel.destroy();
+    // safe-git-allow: incremental-migration
     fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 
@@ -227,6 +228,7 @@ describe('PolicyEnforcementLayer', () => {
         expect(result.violations.filter(v => v.rule === 'auth-token-leak')).toHaveLength(0);
       } finally {
         pelNoConfig.destroy();
+        // safe-git-allow: incremental-migration
         fs.rmSync(emptyDir, { recursive: true, force: true });
       }
     });
@@ -245,6 +247,7 @@ describe('PolicyEnforcementLayer', () => {
         expect(result.violations.filter(v => v.rule === 'auth-token-leak')).toHaveLength(0);
       } finally {
         pelShort.destroy();
+        // safe-git-allow: incremental-migration
         fs.rmSync(shortDir, { recursive: true, force: true });
       }
     });

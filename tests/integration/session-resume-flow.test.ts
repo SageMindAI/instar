@@ -108,7 +108,9 @@ describe('Session Resume Flow (integration)', () => {
 
   afterEach(() => {
     sessionManager.stopMonitoring();
+    // safe-git-allow: incremental-migration
     fs.rmSync(tmpDir, { recursive: true, force: true });
+    // safe-git-allow: incremental-migration
     try { fs.rmSync(testProjectDir, { recursive: true, force: true }); } catch { /* best effort */ }
   });
 

@@ -15,6 +15,7 @@ function makeTempJsonlRoot(): { root: string; write: (name: string, bytes: numbe
     write: (name, bytes) => {
       fs.writeFileSync(path.join(root, name), 'x'.repeat(bytes));
     },
+    // safe-git-allow: incremental-migration
     cleanup: () => fs.rmSync(root, { recursive: true, force: true }),
   };
 }

@@ -25,6 +25,7 @@ describe('UpdateChecker.applyUpdate()', () => {
 
   afterEach(() => {
     global.fetch = originalFetch;
+    // safe-git-allow: incremental-migration
     fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 
@@ -99,6 +100,7 @@ describe('UpdateChecker.fetchChangelog()', () => {
 
   afterEach(() => {
     global.fetch = originalFetch;
+    // safe-git-allow: incremental-migration
     fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 
@@ -212,6 +214,7 @@ describe('UpdateChecker.rollback()', () => {
   });
 
   afterEach(() => {
+    // safe-git-allow: incremental-migration
     fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 
@@ -292,6 +295,7 @@ describe('UpdateChecker.check() with changeSummary', () => {
 
   afterEach(() => {
     global.fetch = originalFetch;
+    // safe-git-allow: incremental-migration
     fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 

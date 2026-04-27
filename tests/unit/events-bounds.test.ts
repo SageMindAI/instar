@@ -81,6 +81,7 @@ describe('Events endpoint — parameter bounds', () => {
 
   afterAll(async () => {
     try { await server?.stop(); } catch { /* ignore */ }
+    // safe-git-allow: incremental-migration
     fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 

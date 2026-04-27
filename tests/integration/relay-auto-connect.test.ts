@@ -22,6 +22,7 @@ import type { ReceivedMessage } from '../../src/threadline/client/ThreadlineClie
 
 function createTempDir() {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'relay-int-'));
+  // safe-git-allow: incremental-migration
   return { dir, cleanup: () => fs.rmSync(dir, { recursive: true, force: true }) };
 }
 

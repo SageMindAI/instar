@@ -18,6 +18,7 @@ describe('GlobalInstallCleanup', () => {
   });
 
   afterEach(() => {
+    // safe-git-allow: incremental-migration
     fs.rmSync(tmpBase, { recursive: true, force: true });
   });
 

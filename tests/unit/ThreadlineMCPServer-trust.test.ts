@@ -17,6 +17,7 @@ import type { ThreadlineMCPServerConfig, ThreadlineMCPDeps } from '../../src/thr
 
 function createTempDir() {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mcp-trust-test-'));
+  // safe-git-allow: incremental-migration
   return { dir, cleanup: () => fs.rmSync(dir, { recursive: true, force: true }) };
 }
 

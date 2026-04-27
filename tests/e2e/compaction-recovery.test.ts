@@ -93,6 +93,7 @@ describe('e2e compaction-recovery — structural invariants (spec § (c))', () =
 
     const planAbs = path.join(harness.projectDir, 'docs/slice-plan.md');
     const contentBefore = fs.readFileSync(planAbs, 'utf-8');
+    // safe-git-allow: incremental-migration
     const commitBefore = execFileSync(
       'git',
       ['-C', harness.projectDir, 'rev-parse', 'HEAD'],
@@ -103,6 +104,7 @@ describe('e2e compaction-recovery — structural invariants (spec § (c))', () =
     expect(result.exitCode).toBe(0);
 
     const contentAfter = fs.readFileSync(planAbs, 'utf-8');
+    // safe-git-allow: incremental-migration
     const commitAfter = execFileSync(
       'git',
       ['-C', harness.projectDir, 'rev-parse', 'HEAD'],

@@ -2282,6 +2282,7 @@ export function createRoutes(ctx: RouteContext): Router {
         let gitSyncJobEnabled = false;
         if (hasGitRepo) {
           try {
+            // safe-git-allow: incremental-migration
             const remote = execFileSync('git', ['remote'], { cwd: projectDir, stdio: 'pipe' }).toString().trim();
             hasRemote = remote.length > 0;
           } catch { /* no remote */ }
@@ -3032,6 +3033,7 @@ export function createRoutes(ctx: RouteContext): Router {
     // Detect GitHub repo from git remote
     let repo: string | null = null;
     try {
+      // safe-git-allow: incremental-migration
       const remoteUrl = execFileSync('git', ['remote', 'get-url', 'origin'], {
         cwd: projectDir,
         encoding: 'utf-8',
@@ -3171,6 +3173,7 @@ export function createRoutes(ctx: RouteContext): Router {
         const fpath = path.join(failDir, fname);
         try {
           if (fs.statSync(fpath).mtimeMs < cutoff) {
+            // safe-git-allow: incremental-migration
             fs.unlinkSync(fpath);
             purgedFiles++;
           }
@@ -8925,6 +8928,7 @@ export function createRoutes(ctx: RouteContext): Router {
 
       // Clear submissions log
       const submissionsLog = path.join(ctx.config.stateDir, 'telemetry', 'submissions.jsonl');
+      // safe-git-allow: incremental-migration
       try { fs.unlinkSync(submissionsLog); } catch { /* may not exist */ }
 
       // Update config.json

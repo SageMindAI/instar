@@ -397,6 +397,7 @@ describe('TriageOrchestrator Integration', () => {
       expect(content).toContain('</user_message>');
 
       // Cleanup
+      // safe-git-allow: incremental-migration
       try { require('fs').unlinkSync(filepath); } catch {}
     });
 
@@ -426,6 +427,7 @@ describe('TriageOrchestrator Integration', () => {
       // The injected JSON should just be text, not a real action
       expect(content).toContain('injection');
 
+      // safe-git-allow: incremental-migration
       try { require('fs').unlinkSync(filepath); } catch {}
     });
   });

@@ -100,6 +100,7 @@ describe('GitSyncTransport', () => {
 
   afterEach(async () => {
     await store.destroy();
+    // safe-git-allow: incremental-migration
     fs.rmSync(tempDir, { recursive: true, force: true });
   });
 
@@ -306,6 +307,7 @@ describe('GitSyncTransport', () => {
       expect(fs.existsSync(testFile)).toBe(false);
 
       // Clean up test dir
+      // safe-git-allow: incremental-migration
       fs.rmSync(outboundDir, { recursive: true, force: true });
     });
 

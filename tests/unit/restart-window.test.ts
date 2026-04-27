@@ -71,6 +71,7 @@ describe('Restart window', () => {
   afterEach(() => {
     vi.useRealTimers();
     vi.restoreAllMocks();
+    // safe-git-allow: incremental-migration
     fs.rmSync(dir, { recursive: true, force: true });
   });
 

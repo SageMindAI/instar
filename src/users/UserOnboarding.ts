@@ -336,6 +336,7 @@ export class JoinRequestManager {
       fs.writeFileSync(tmpPath, JSON.stringify(Array.from(this.requests.values()), null, 2));
       fs.renameSync(tmpPath, this.requestsFile);
     } catch (err) {
+      // safe-git-allow: incremental-migration
       try { fs.unlinkSync(tmpPath); } catch { /* ignore */ }
       throw err;
     }

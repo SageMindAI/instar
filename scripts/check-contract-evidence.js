@@ -36,12 +36,14 @@ const ADAPTER_PATHS = [
 let adapterChanges = [];
 try {
   // Find files changed since the last npm version tag
+  // safe-git-allow: incremental-migration
   const lastTag = execSync('git describe --tags --abbrev=0 2>/dev/null || echo ""', {
     encoding: 'utf-8',
     cwd: ROOT,
   }).trim();
 
   const diffBase = lastTag || 'HEAD~10';
+  // safe-git-allow: incremental-migration
   const changedFiles = execSync(`git diff --name-only ${diffBase}...HEAD 2>/dev/null || echo ""`, {
     encoding: 'utf-8',
     cwd: ROOT,

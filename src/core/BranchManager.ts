@@ -532,6 +532,7 @@ export class BranchManager {
   // ── Private: Git Helper ────────────────────────────────────────────
 
   private git(...args: string[]): string {
+    // safe-git-allow: incremental-migration
     return execFileSync('git', args, {
       cwd: this.projectDir,
       encoding: 'utf-8',

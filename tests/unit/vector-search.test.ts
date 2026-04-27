@@ -58,6 +58,7 @@ async function createTestDb(): Promise<TestSetup> {
     db,
     cleanup: () => {
       db.close();
+      // safe-git-allow: incremental-migration
       fs.rmSync(dir, { recursive: true, force: true });
     },
   };

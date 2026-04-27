@@ -55,6 +55,7 @@ describe('CustomReviewerLoader', () => {
   });
 
   afterEach(() => {
+    // safe-git-allow: incremental-migration
     fs.rmSync(stateDir, { recursive: true, force: true });
   });
 
@@ -306,6 +307,7 @@ describe('CustomReviewerLoader', () => {
         const specs = new CustomReviewerLoader(dir).loadAll();
         expect(specs).toHaveLength(1);
         expect(specs[0].priority).toBe(p);
+        // safe-git-allow: incremental-migration
         fs.rmSync(dir, { recursive: true, force: true });
       }
     });

@@ -18,6 +18,7 @@ describe('nuke command prerequisites', () => {
   });
 
   afterEach(() => {
+    // safe-git-allow: incremental-migration
     fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 
@@ -57,6 +58,7 @@ describe('nuke command prerequisites', () => {
     fs.writeFileSync(path.join(stateDir, 'config.json'), '{}');
     fs.writeFileSync(path.join(stateDir, 'MEMORY.md'), '# Memory');
 
+    // safe-git-allow: incremental-migration
     fs.rmSync(agentDir, { recursive: true, force: true });
     expect(fs.existsSync(agentDir)).toBe(false);
   });

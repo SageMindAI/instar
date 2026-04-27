@@ -165,6 +165,7 @@ async function destroyTestAgent(agent: TestAgent): Promise<void> {
   await agent.store.destroy();
   deleteAgentToken(agent.name);
   unregisterAgent(agent.projectDir);
+  // safe-git-allow: incremental-migration
   fs.rmSync(agent.projectDir, { recursive: true, force: true });
 }
 
@@ -447,11 +448,13 @@ describe('E2E: Multi-Agent Messaging (same machine)', () => {
         expect(remainingFiles.length).toBe(0);
 
         await pickupStore.destroy();
+        // safe-git-allow: incremental-migration
         fs.rmSync(pickupStoreDir, { recursive: true, force: true });
       } finally {
         deleteAgentToken(offlineAgent);
         // Clean up drop directory
         const dropDir = path.join(os.homedir(), '.instar', 'messages', 'drop', offlineAgent);
+        // safe-git-allow: incremental-migration
         try { fs.rmSync(dropDir, { recursive: true, force: true }); } catch { /* ignore */ }
       }
     });
@@ -496,10 +499,12 @@ describe('E2E: Multi-Agent Messaging (same machine)', () => {
         expect(result.rejections[0].reason).toContain('invalid HMAC');
 
         await pickupStore.destroy();
+        // safe-git-allow: incremental-migration
         fs.rmSync(pickupStoreDir, { recursive: true, force: true });
       } finally {
         deleteAgentToken(offlineAgent);
         const dropDir = path.join(os.homedir(), '.instar', 'messages', 'drop', offlineAgent);
+        // safe-git-allow: incremental-migration
         try { fs.rmSync(dropDir, { recursive: true, force: true }); } catch { /* ignore */ }
       }
     });
@@ -542,10 +547,12 @@ describe('E2E: Multi-Agent Messaging (same machine)', () => {
         }
 
         await pickupStore.destroy();
+        // safe-git-allow: incremental-migration
         fs.rmSync(pickupStoreDir, { recursive: true, force: true });
       } finally {
         deleteAgentToken(offlineAgent);
         const dropDir = path.join(os.homedir(), '.instar', 'messages', 'drop', offlineAgent);
+        // safe-git-allow: incremental-migration
         try { fs.rmSync(dropDir, { recursive: true, force: true }); } catch { /* ignore */ }
       }
     });

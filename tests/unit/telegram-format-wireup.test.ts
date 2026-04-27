@@ -105,6 +105,7 @@ describe('TelegramAdapter — formatter wire-up in apiCall', () => {
 
   afterEach(async () => {
     if (adapter) await adapter.stop();
+    // safe-git-allow: incremental-migration
     fs.rmSync(tmpDir, { recursive: true, force: true });
     vi.unstubAllGlobals();
   });

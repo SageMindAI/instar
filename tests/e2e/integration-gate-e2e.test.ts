@@ -28,6 +28,7 @@ function createTempStateDir(): { stateDir: string; cleanup: () => void } {
   fs.mkdirSync(path.join(stateDir, 'state', 'execution-journal', 'default'), { recursive: true });
   fs.mkdirSync(path.join(stateDir, 'ledger'), { recursive: true });
   fs.mkdirSync(path.join(stateDir, 'logs'), { recursive: true });
+  // safe-git-allow: incremental-migration
   return { stateDir, cleanup: () => fs.rmSync(dir, { recursive: true, force: true }) };
 }
 

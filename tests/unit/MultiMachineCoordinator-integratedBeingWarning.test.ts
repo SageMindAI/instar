@@ -41,6 +41,7 @@ describe('MultiMachineCoordinator — Integrated-Being multi-machine warning', (
   });
 
   afterEach(() => {
+    // safe-git-allow: incremental-migration
     fs.rmSync(dir, { recursive: true, force: true });
   });
 

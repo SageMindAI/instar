@@ -54,6 +54,7 @@ describe('WhatsApp UX Signals', () => {
 
   afterEach(() => {
     if (tmpDir && fs.existsSync(tmpDir)) {
+      // safe-git-allow: incremental-migration
       fs.rmSync(tmpDir, { recursive: true, force: true });
     }
   });

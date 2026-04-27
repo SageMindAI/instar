@@ -70,6 +70,7 @@ describe('PostUpdateMigrator — response-review hook', () => {
     expect(content).toContain('stopHookActive');
     expect(content).toContain('input.stop_hook_active');
 
+    // safe-git-allow: incremental-migration
     fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 
@@ -120,6 +121,7 @@ describe('PostUpdateMigrator — response-review hook', () => {
     const source = fs.readFileSync(migratorPath, 'utf-8');
     expect(source).toContain("'response-review.js'");
 
+    // safe-git-allow: incremental-migration
     fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 });

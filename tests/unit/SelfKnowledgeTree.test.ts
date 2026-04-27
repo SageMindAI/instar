@@ -41,6 +41,7 @@ Direct and technical. I don't waste words.
   });
 
   afterEach(() => {
+    // safe-git-allow: incremental-migration
     fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 

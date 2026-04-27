@@ -24,6 +24,7 @@ describe('WakeSocketServer', () => {
   });
 
   afterEach(() => {
+    // safe-git-allow: incremental-migration
     fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 
@@ -138,6 +139,7 @@ describe('PipeSessionSpawner', () => {
   });
 
   afterEach(() => {
+    // safe-git-allow: incremental-migration
     fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 
@@ -313,6 +315,7 @@ describe('ThreadResumeMap cross-machine migration', () => {
     const mockPath = path.join(targetDir, `${uuid}.jsonl`);
     if (!fs.existsSync(mockPath)) {
       fs.writeFileSync(mockPath, '{"mock": true}\n');
+      // safe-git-allow: incremental-migration
       afterEach(() => { try { fs.unlinkSync(mockPath); } catch { /* ignore */ } });
     }
   }
@@ -324,8 +327,10 @@ describe('ThreadResumeMap cross-machine migration', () => {
   });
 
   afterEach(() => {
+    // safe-git-allow: incremental-migration
     fs.rmSync(tmpDir, { recursive: true, force: true });
     if (mockProjectDir && fs.existsSync(mockProjectDir)) {
+      // safe-git-allow: incremental-migration
       fs.rmSync(mockProjectDir, { recursive: true, force: true });
       mockProjectDir = null;
     }
@@ -434,6 +439,7 @@ describe('HMAC inbox signing round-trip', () => {
   });
 
   afterEach(() => {
+    // safe-git-allow: incremental-migration
     fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 

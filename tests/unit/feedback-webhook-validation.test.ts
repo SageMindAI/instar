@@ -122,6 +122,7 @@ describe('FeedbackManager MAX_FEEDBACK_ITEMS cap', () => {
   });
 
   afterEach(() => {
+    // safe-git-allow: incremental-migration
     fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 
@@ -195,6 +196,7 @@ describe('FeedbackManager webhook HTTP error handling', () => {
 
   afterEach(() => {
     global.fetch = originalFetch;
+    // safe-git-allow: incremental-migration
     fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 
@@ -311,6 +313,7 @@ describe('FeedbackManager partial retry', () => {
 
   afterEach(() => {
     global.fetch = originalFetch;
+    // safe-git-allow: incremental-migration
     fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 

@@ -52,6 +52,7 @@ describe('PostUpdateMigrator — build-stop-hook.sh deployment', () => {
   });
 
   afterEach(() => {
+    // safe-git-allow: incremental-migration
     fs.rmSync(projectDir, { recursive: true, force: true });
   });
 
@@ -110,6 +111,7 @@ describe('PostUpdateMigrator — validateHookReferences', () => {
   });
 
   afterEach(() => {
+    // safe-git-allow: incremental-migration
     fs.rmSync(projectDir, { recursive: true, force: true });
   });
 

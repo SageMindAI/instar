@@ -44,6 +44,7 @@ describe('Upgrade guide lifecycle E2E', () => {
   });
 
   afterAll(() => {
+    // safe-git-allow: incremental-migration
     fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 
@@ -102,6 +103,7 @@ describe('Upgrade guide lifecycle E2E', () => {
         if (opts.shouldAcknowledge !== false) {
           // Simulate the session running `instar upgrade-ack`
           if (fs.existsSync(pendingGuidePath)) {
+            // safe-git-allow: incremental-migration
             fs.unlinkSync(pendingGuidePath);
           }
         }
@@ -144,10 +146,13 @@ Version ${version} adds exciting new features including improved search and bett
 
   function cleanState() {
     const processedFile = path.join(stateDir, 'state', 'processed-upgrades.json');
+    // safe-git-allow: incremental-migration
     if (fs.existsSync(processedFile)) fs.unlinkSync(processedFile);
+    // safe-git-allow: incremental-migration
     if (fs.existsSync(pendingPath())) fs.unlinkSync(pendingPath());
     // Clean guide files
     for (const f of fs.readdirSync(upgradesDir)) {
+      // safe-git-allow: incremental-migration
       fs.unlinkSync(path.join(upgradesDir, f));
     }
   }
@@ -360,6 +365,7 @@ New stuff.
 
         // Only acknowledge on second attempt (sonnet)
         if (attempt >= 2 && fs.existsSync(pendingPath())) {
+          // safe-git-allow: incremental-migration
           fs.unlinkSync(pendingPath());
         }
 

@@ -20,6 +20,7 @@ describe('Secret Manager Lifecycle', () => {
   });
 
   afterEach(() => {
+    // safe-git-allow: incremental-migration
     if (tmpDir) fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 

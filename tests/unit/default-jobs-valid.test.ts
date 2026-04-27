@@ -247,7 +247,9 @@ describe('Default Jobs Validation', () => {
     }
 
     // Cleanup
+    // safe-git-allow: incremental-migration
     fs.unlinkSync(tmpJobsFile);
+    // safe-git-allow: incremental-migration
     fs.rmdirSync(tmpDir);
   });
 });

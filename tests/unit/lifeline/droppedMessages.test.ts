@@ -19,6 +19,7 @@ describe('droppedMessages', () => {
 
   afterEach(() => {
     vi.restoreAllMocks();
+    // safe-git-allow: incremental-migration
     fs.rmSync(stateDir, { recursive: true, force: true });
   });
 

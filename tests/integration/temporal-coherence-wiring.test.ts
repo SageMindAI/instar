@@ -30,6 +30,7 @@ function createTmpProject(): { projectDir: string; stateDir: string; cleanup: ()
   return {
     projectDir,
     stateDir,
+    // safe-git-allow: incremental-migration
     cleanup: () => fs.rmSync(projectDir, { recursive: true, force: true }),
   };
 }
@@ -319,6 +320,7 @@ describe('TemporalCoherenceChecker integration', () => {
       expect(checker.hasStateDocuments).toBe(true);
 
       // Remove AGENT.md
+      // safe-git-allow: incremental-migration
       fs.unlinkSync(path.join(projectDir, 'AGENT.md'));
 
       // Should handle gracefully

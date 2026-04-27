@@ -113,6 +113,7 @@ describe('TopicMemory E2E lifecycle', () => {
   afterAll(async () => {
     await server.stop();
     topicMemory.close();
+    // safe-git-allow: incremental-migration
     fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 

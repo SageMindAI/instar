@@ -248,6 +248,7 @@ export class PasteManager {
     const file = this.findFileByPasteId(pasteId);
     if (!file) return false;
     try {
+      // safe-git-allow: incremental-migration
       fs.unlinkSync(file);
       this.removePendingEntry(pasteId);
       this.logAudit('paste_deleted', { pasteId });
@@ -350,11 +351,13 @@ export class PasteManager {
         const meta = this.readPasteMeta(filePath);
         if (!meta) {
           // Corrupt file — remove
+          // safe-git-allow: incremental-migration
           try { fs.unlinkSync(filePath); cleaned++; } catch {}
           continue;
         }
 
         if (new Date(meta.expiresAt) < new Date()) {
+          // safe-git-allow: incremental-migration
           try { fs.unlinkSync(filePath); cleaned++; } catch {}
         }
       }
@@ -366,6 +369,7 @@ export class PasteManager {
         try {
           const stat = fs.statSync(tmpPath);
           if (Date.now() - stat.mtimeMs > 60 * 60 * 1000) {
+            // safe-git-allow: incremental-migration
             fs.unlinkSync(tmpPath);
             cleaned++;
           }

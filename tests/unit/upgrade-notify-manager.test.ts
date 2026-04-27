@@ -84,6 +84,7 @@ Added hybrid search and MEMORY.md export.
   });
 
   afterEach(() => {
+    // safe-git-allow: incremental-migration
     fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 
@@ -122,6 +123,7 @@ Added hybrid search and MEMORY.md export.
   function acknowledgeGuide() {
     // Simulate the agent running `instar upgrade-ack` which removes the pending file
     if (fs.existsSync(pendingGuidePath)) {
+      // safe-git-allow: incremental-migration
       fs.unlinkSync(pendingGuidePath);
     }
   }

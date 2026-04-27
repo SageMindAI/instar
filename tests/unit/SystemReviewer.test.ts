@@ -149,6 +149,7 @@ describe('SystemReviewer', () => {
   afterEach(() => {
     reviewer.stop();
     try {
+      // safe-git-allow: incremental-migration
       fs.rmSync(stateDir, { recursive: true, force: true });
     } catch { /* ignore */ }
   });
@@ -199,6 +200,7 @@ describe('SystemReviewer', () => {
     expect(probes.find(p => p.id === 'test.nopre')?.prerequisitesMet).toBe(false);
 
     rev.stop();
+    // safe-git-allow: incremental-migration
     fs.rmSync(dir, { recursive: true, force: true });
   });
 
@@ -302,6 +304,7 @@ describe('SystemReviewer', () => {
     expect(report.skipped.some(s => s.probeId === 'test.disabled')).toBe(true);
     expect(report.skipped.find(s => s.probeId === 'test.disabled')?.reason).toContain('Disabled');
     rev.stop();
+    // safe-git-allow: incremental-migration
     fs.rmSync(dir, { recursive: true, force: true });
   });
 
@@ -470,6 +473,7 @@ describe('SystemReviewer', () => {
     }
 
     rev.stop();
+    // safe-git-allow: incremental-migration
     fs.rmSync(dir, { recursive: true, force: true });
   });
 
@@ -723,6 +727,7 @@ describe('SystemReviewer', () => {
 
     expect(rev.getHistory()).toHaveLength(3);
     rev.stop();
+    // safe-git-allow: incremental-migration
     fs.rmSync(dir, { recursive: true, force: true });
   });
 
@@ -770,6 +775,7 @@ describe('SystemReviewer', () => {
     expect(lines.length).toBe(3);
 
     rev.stop();
+    // safe-git-allow: incremental-migration
     fs.rmSync(dir, { recursive: true, force: true });
   });
 
@@ -784,6 +790,7 @@ describe('SystemReviewer', () => {
 
     // Create a directory where the history file should be (to cause write error)
     try {
+      // safe-git-allow: incremental-migration
       fs.unlinkSync(historyPath);
     } catch { /* may not exist */ }
     fs.mkdirSync(historyPath, { recursive: true });
@@ -797,6 +804,7 @@ describe('SystemReviewer', () => {
     expect(content).toContain('history-persist-error');
 
     // Cleanup: remove the directory we created
+    // safe-git-allow: incremental-migration
     fs.rmSync(historyPath, { recursive: true, force: true });
   });
 
@@ -881,6 +889,7 @@ describe('SystemReviewer', () => {
     expect(trend.direction).toBe('declining');
     rev2.stop();
     rev3.stop();
+    // safe-git-allow: incremental-migration
     fs.rmSync(dir2, { recursive: true, force: true });
   });
 
@@ -918,6 +927,7 @@ describe('SystemReviewer', () => {
     const trend = rev.getTrend();
     expect(trend.direction).toBe('improving');
     rev.stop();
+    // safe-git-allow: incremental-migration
     fs.rmSync(dir, { recursive: true, force: true });
   });
 
@@ -944,6 +954,7 @@ describe('SystemReviewer', () => {
     expect(trend.persistentFailures).toContain('test.broken');
     expect(trend.persistentFailures).not.toContain('test.ok');
     rev.stop();
+    // safe-git-allow: incremental-migration
     fs.rmSync(dir, { recursive: true, force: true });
   });
 
@@ -977,6 +988,7 @@ describe('SystemReviewer', () => {
     const trend = rev.getTrend();
     expect(trend.newFailures).toContain('test.flaky');
     rev.stop();
+    // safe-git-allow: incremental-migration
     fs.rmSync(dir, { recursive: true, force: true });
   });
 
@@ -1010,6 +1022,7 @@ describe('SystemReviewer', () => {
     const trend = rev.getTrend();
     expect(trend.recovered).toContain('test.fixed');
     rev.stop();
+    // safe-git-allow: incremental-migration
     fs.rmSync(dir, { recursive: true, force: true });
   });
 
@@ -1141,6 +1154,7 @@ describe('SystemReviewer', () => {
     expect(alertText).toContain('test.crit');
     expect(alertText).toContain('Expected 42, got 0');
     rev.stop();
+    // safe-git-allow: incremental-migration
     fs.rmSync(dir, { recursive: true, force: true });
   });
 
@@ -1161,6 +1175,7 @@ describe('SystemReviewer', () => {
     expect(alertText).toContain('test.high');
     expect(alertText).toContain('Expected 42, got 0');
     rev.stop();
+    // safe-git-allow: incremental-migration
     fs.rmSync(dir, { recursive: true, force: true });
   });
 
@@ -1177,6 +1192,7 @@ describe('SystemReviewer', () => {
 
     expect(sendAlert).not.toHaveBeenCalled();
     rev.stop();
+    // safe-git-allow: incremental-migration
     fs.rmSync(dir, { recursive: true, force: true });
   });
 
@@ -1197,6 +1213,7 @@ describe('SystemReviewer', () => {
     expect(sendAlert).toHaveBeenCalledOnce(); // Still 1
 
     rev.stop();
+    // safe-git-allow: incremental-migration
     fs.rmSync(dir, { recursive: true, force: true });
   });
 
@@ -1213,6 +1230,7 @@ describe('SystemReviewer', () => {
 
     expect(sendAlert).not.toHaveBeenCalled();
     rev.stop();
+    // safe-git-allow: incremental-migration
     fs.rmSync(dir, { recursive: true, force: true });
   });
 
@@ -1233,6 +1251,7 @@ describe('SystemReviewer', () => {
     expect(content).toContain('alert-send-error');
     expect(content).toContain('Telegram down');
     rev.stop();
+    // safe-git-allow: incremental-migration
     fs.rmSync(dir, { recursive: true, force: true });
   });
 
@@ -1253,6 +1272,7 @@ describe('SystemReviewer', () => {
     expect(submitFeedback.mock.calls[0][0].title).toContain('test.fail');
     expect(submitFeedback.mock.calls[0][0].type).toBe('bug');
     rev.stop();
+    // safe-git-allow: incremental-migration
     fs.rmSync(dir, { recursive: true, force: true });
   });
 
@@ -1269,6 +1289,7 @@ describe('SystemReviewer', () => {
 
     expect(submitFeedback).not.toHaveBeenCalled();
     rev.stop();
+    // safe-git-allow: incremental-migration
     fs.rmSync(dir, { recursive: true, force: true });
   });
 
@@ -1285,6 +1306,7 @@ describe('SystemReviewer', () => {
 
     expect(submitFeedback).not.toHaveBeenCalled();
     rev.stop();
+    // safe-git-allow: incremental-migration
     fs.rmSync(dir, { recursive: true, force: true });
   });
 
@@ -1304,6 +1326,7 @@ describe('SystemReviewer', () => {
     expect(submitFeedback).toHaveBeenCalledOnce(); // Still 1
 
     rev.stop();
+    // safe-git-allow: incremental-migration
     fs.rmSync(dir, { recursive: true, force: true });
   });
 
@@ -1321,6 +1344,7 @@ describe('SystemReviewer', () => {
 
     expect(redactSecrets).toHaveBeenCalled();
     rev.stop();
+    // safe-git-allow: incremental-migration
     fs.rmSync(dir, { recursive: true, force: true });
   });
 
@@ -1340,6 +1364,7 @@ describe('SystemReviewer', () => {
     const content = fs.readFileSync(deadLetterPath, 'utf-8');
     expect(content).toContain('feedback-submit-error');
     rev.stop();
+    // safe-git-allow: incremental-migration
     fs.rmSync(dir, { recursive: true, force: true });
   });
 
@@ -1388,6 +1413,7 @@ describe('SystemReviewer', () => {
     rev.start();
     // No timer should be set — nothing to assert directly, but stop() shouldn't throw
     rev.stop();
+    // safe-git-allow: incremental-migration
     fs.rmSync(dir, { recursive: true, force: true });
   });
 
@@ -1397,6 +1423,7 @@ describe('SystemReviewer', () => {
     rev.start();
     rev.start(); // Should not create a second timer
     rev.stop();
+    // safe-git-allow: incremental-migration
     fs.rmSync(dir, { recursive: true, force: true });
   });
 
@@ -1643,6 +1670,7 @@ describe('SchedulerProbes', () => {
     expect(result.description).toContain('mismatch');
     expect(result.expected).toContain('3');
     expect(result.actual).toContain('1');
+    // safe-git-allow: incremental-migration
     fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 
@@ -1663,6 +1691,7 @@ describe('SchedulerProbes', () => {
     const result = await probe.run();
     expect(result.passed).toBe(true);
     expect(result.description).toContain('matches jobs.json');
+    // safe-git-allow: incremental-migration
     fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 
@@ -1847,6 +1876,7 @@ describe('MessagingProbes', () => {
     const result = await probe.run();
     expect(result.passed).toBe(true);
     expect(result.description).toContain('active');
+    // safe-git-allow: incremental-migration
     fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 
@@ -1894,6 +1924,7 @@ describe('LifelineProbes', () => {
   });
 
   afterEach(() => {
+    // safe-git-allow: incremental-migration
     fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 

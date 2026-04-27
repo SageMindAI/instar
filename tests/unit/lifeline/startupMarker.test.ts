@@ -6,6 +6,7 @@ import { writeStartupMarker, readStartupMarker, markerPath } from '../../../src/
 
 let tmp: string;
 beforeEach(() => { tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'startup-marker-')); });
+// safe-git-allow: incremental-migration
 afterEach(() => { fs.rmSync(tmp, { recursive: true, force: true }); });
 
 describe('startupMarker', () => {

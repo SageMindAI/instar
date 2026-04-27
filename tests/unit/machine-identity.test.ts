@@ -38,6 +38,7 @@ function createTempDir(): string {
 }
 
 function cleanup(dir: string): void {
+  // safe-git-allow: incremental-migration
   fs.rmSync(dir, { recursive: true, force: true });
 }
 
@@ -422,6 +423,7 @@ describe('MachineIdentityManager', () => {
     it('self-registers when machine missing from registry (registry wiped scenario)', async () => {
       // Generate identity (this also registers it once), then simulate a wiped registry
       const identity = await manager.generateIdentity();
+      // safe-git-allow: incremental-migration
       fs.rmSync(path.join(instarDir, 'machines'), { recursive: true, force: true });
 
       const registered = manager.ensureSelfRegistered(identity, 'awake');
@@ -447,6 +449,7 @@ describe('MachineIdentityManager', () => {
 
     it('allows subsequent updateRole calls after self-registration', async () => {
       const identity = await manager.generateIdentity();
+      // safe-git-allow: incremental-migration
       fs.rmSync(path.join(instarDir, 'machines'), { recursive: true, force: true });
 
       manager.ensureSelfRegistered(identity, 'standby');

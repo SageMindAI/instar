@@ -117,6 +117,7 @@ describe('DispatchExecutor — missing required fields in steps', () => {
   });
 
   afterEach(() => {
+    // safe-git-allow: incremental-migration
     fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 
@@ -219,6 +220,7 @@ describe('DispatchManager — context file corrupted', () => {
   });
 
   afterEach(() => {
+    // safe-git-allow: incremental-migration
     fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 
@@ -293,6 +295,7 @@ describe('DispatchManager — last check file corrupted', () => {
 
   afterEach(() => {
     global.fetch = originalFetch;
+    // safe-git-allow: incremental-migration
     fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 
@@ -367,6 +370,7 @@ describe('DispatchManager — dispatch file write fails', () => {
   afterEach(() => {
     global.fetch = originalFetch;
     vi.restoreAllMocks();
+    // safe-git-allow: incremental-migration
     fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 
@@ -462,6 +466,7 @@ describe('DispatchManager — concurrent dispatch checks', () => {
 
   afterEach(() => {
     global.fetch = originalFetch;
+    // safe-git-allow: incremental-migration
     fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 
@@ -557,6 +562,7 @@ describe('DispatchManager — approval gate rejects', () => {
   });
 
   afterEach(() => {
+    // safe-git-allow: incremental-migration
     fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 

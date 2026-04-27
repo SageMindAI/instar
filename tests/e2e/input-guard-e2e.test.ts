@@ -34,6 +34,7 @@ function createTempDir(prefix: string): string {
 
 function cleanupDir(dir: string): void {
   try {
+    // safe-git-allow: incremental-migration
     fs.rmSync(dir, { recursive: true, force: true });
   } catch { /* best-effort */ }
 }
@@ -791,6 +792,7 @@ describe('Group 9: Full injectTelegramMessage integration', () => {
       try {
         const files = fs.readdirSync(telegramTmpDir).filter(f => f.startsWith('msg-'));
         for (const f of files) {
+          // safe-git-allow: incremental-migration
           try { fs.unlinkSync(path.join(telegramTmpDir, f)); } catch { /* ignore */ }
         }
       } catch { /* ignore */ }

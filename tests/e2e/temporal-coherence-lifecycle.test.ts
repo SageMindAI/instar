@@ -47,6 +47,7 @@ function setupAgent(name: string): AgentSetup {
     stateDir,
     registry,
     canonical,
+    // safe-git-allow: incremental-migration
     cleanup: () => fs.rmSync(projectDir, { recursive: true, force: true }),
   };
 }
@@ -486,6 +487,7 @@ describe('TemporalCoherenceChecker E2E lifecycle', () => {
       expect(r1.llmEvaluated).toBe(true);
 
       // Simulate state directory wipe (e.g., git clean)
+      // safe-git-allow: incremental-migration
       fs.rmSync(agent.stateDir, { recursive: true, force: true });
       fs.mkdirSync(agent.stateDir, { recursive: true });
 

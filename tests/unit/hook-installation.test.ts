@@ -33,6 +33,7 @@ describe('Hook installation for external operation safety', () => {
 
   afterEach(() => {
     process.chdir(originalCwd);
+    // safe-git-allow: incremental-migration
     fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 
@@ -190,6 +191,7 @@ describe('Hook installation for external operation safety', () => {
       // Script must exit cleanly (it ignores network failures by design)
       expect(result.status).toBe(0);
     } finally {
+      // safe-git-allow: incremental-migration
       fs.rmSync(esmHost, { recursive: true, force: true });
     }
   });

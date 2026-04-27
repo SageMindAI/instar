@@ -29,6 +29,7 @@ describe('PasteManager', () => {
 
   afterEach(() => {
     manager.shutdown();
+    // safe-git-allow: incremental-migration
     fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 

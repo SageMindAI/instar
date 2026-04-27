@@ -24,6 +24,7 @@ describe('Autonomous skill deployment', () => {
   const projectDir = path.join(testBase, projectName);
 
   afterAll(() => {
+    // safe-git-allow: incremental-migration
     fs.rmSync(testBase, { recursive: true, force: true });
   });
 

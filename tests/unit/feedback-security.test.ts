@@ -24,6 +24,7 @@ describe('FeedbackManager security headers', () => {
 
   afterEach(() => {
     global.fetch = originalFetch;
+    // safe-git-allow: incremental-migration
     fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 
@@ -155,6 +156,7 @@ describe('FeedbackManager webhook payload completeness', () => {
 
   afterEach(() => {
     global.fetch = originalFetch;
+    // safe-git-allow: incremental-migration
     fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 

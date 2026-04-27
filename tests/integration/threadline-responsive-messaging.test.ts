@@ -32,6 +32,7 @@ import type { PlaintextMessage } from '../../src/threadline/client/MessageEncryp
 function createTempDir(): { dir: string; cleanup: () => void } {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'threadline-e2e-'));
   fs.mkdirSync(path.join(dir, 'state'), { recursive: true });
+  // safe-git-allow: incremental-migration
   return { dir, cleanup: () => fs.rmSync(dir, { recursive: true, force: true }) };
 }
 

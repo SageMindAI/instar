@@ -52,6 +52,7 @@ async function createTestMemory(): Promise<TestSetup> {
     memory,
     cleanup: () => {
       memory.close();
+      // safe-git-allow: incremental-migration
       fs.rmSync(dir, { recursive: true, force: true });
     },
   };
@@ -864,6 +865,7 @@ describe('SemanticMemory', () => {
       expect(alice!.connections[0].entity.name).toBe('Portal');
 
       importDb.close();
+      // safe-git-allow: incremental-migration
       fs.rmSync(importDir, { recursive: true, force: true });
     });
 

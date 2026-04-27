@@ -40,6 +40,7 @@ function createTmpProject(): { projectDir: string; stateDir: string; cleanup: ()
   return {
     projectDir,
     stateDir,
+    // safe-git-allow: incremental-migration
     cleanup: () => fs.rmSync(projectDir, { recursive: true, force: true }),
   };
 }

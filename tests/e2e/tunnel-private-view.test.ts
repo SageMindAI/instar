@@ -140,6 +140,7 @@ describe('Tunnel + Private Viewer E2E', () => {
       await server.stop();
     } catch { /* ignore */ }
 
+    // safe-git-allow: incremental-migration
     fs.rmSync(stateDir, { recursive: true, force: true });
   }, 15_000);
 

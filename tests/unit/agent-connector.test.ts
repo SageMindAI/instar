@@ -24,6 +24,7 @@ describe('validateAgentState', () => {
   });
 
   afterEach(() => {
+    // safe-git-allow: incremental-migration
     fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 
@@ -255,6 +256,7 @@ describe('connectViaGit', () => {
   });
 
   afterEach(() => {
+    // safe-git-allow: incremental-migration
     fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 
@@ -326,6 +328,7 @@ describe('registerConnectedAgent', () => {
       originalContent = null;
     }
     // Remove to start clean
+    // safe-git-allow: incremental-migration
     try { fs.unlinkSync(registryPath); } catch { /* no file */ }
   });
 
@@ -335,6 +338,7 @@ describe('registerConnectedAgent', () => {
       fs.mkdirSync(path.dirname(registryPath), { recursive: true });
       fs.writeFileSync(registryPath, originalContent);
     } else {
+      // safe-git-allow: incremental-migration
       try { fs.unlinkSync(registryPath); } catch { /* no file */ }
     }
   });

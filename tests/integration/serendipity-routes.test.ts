@@ -111,6 +111,7 @@ describe('Serendipity routes', () => {
   beforeEach(() => {
     // Clean serendipity directory
     if (fs.existsSync(serendipityDir)) {
+      // safe-git-allow: incremental-migration
       fs.rmSync(serendipityDir, { recursive: true, force: true });
     }
   });
@@ -237,6 +238,7 @@ describe('WorktreeMonitor serendipity copy-back', () => {
     // Clean both directories
     for (const dir of [mainSerendipityDir, worktreeSerendipityDir]) {
       if (fs.existsSync(dir)) {
+        // safe-git-allow: incremental-migration
         fs.rmSync(dir, { recursive: true, force: true });
       }
     }

@@ -149,6 +149,7 @@ export async function bootstrapThreadline(
         daemonAlive = true;
       } catch {
         // PID file exists but process is dead — clean up stale PID
+        // safe-git-allow: incremental-migration
         try { fs.unlinkSync(daemonPidPath); } catch { /* ignore */ }
       }
     }

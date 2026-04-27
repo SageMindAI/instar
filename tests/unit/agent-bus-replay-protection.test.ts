@@ -78,6 +78,7 @@ function validMessage(overrides: Partial<AgentMessage> = {}): AgentMessage {
 
 describe('send-side replay field generation', () => {
   beforeEach(() => { tmpDir = freshDir(); });
+  // safe-git-allow: incremental-migration
   afterEach(() => { fs.rmSync(tmpDir, { recursive: true, force: true }); });
 
   it('attaches nonce and sequence when replay protection enabled', async () => {
@@ -174,6 +175,7 @@ describe('send-side replay field generation', () => {
 
 describe('receive-side replay protection validation', () => {
   beforeEach(() => { tmpDir = freshDir(); });
+  // safe-git-allow: incremental-migration
   afterEach(() => { fs.rmSync(tmpDir, { recursive: true, force: true }); });
 
   it('accepts valid message with fresh timestamp + unique nonce + valid sequence', () => {
@@ -325,6 +327,7 @@ describe('receive-side replay protection validation', () => {
 
 describe('fail-closed: messages without replay fields', () => {
   beforeEach(() => { tmpDir = freshDir(); });
+  // safe-git-allow: incremental-migration
   afterEach(() => { fs.rmSync(tmpDir, { recursive: true, force: true }); });
 
   it('rejects message with no nonce when protection enabled', () => {
@@ -418,6 +421,7 @@ describe('fail-closed: messages without replay fields', () => {
 
 describe('backward compatibility (protection disabled)', () => {
   beforeEach(() => { tmpDir = freshDir(); });
+  // safe-git-allow: incremental-migration
   afterEach(() => { fs.rmSync(tmpDir, { recursive: true, force: true }); });
 
   it('accepts legacy messages without nonce/sequence', () => {
@@ -480,6 +484,7 @@ describe('backward compatibility (protection disabled)', () => {
 
 describe('cross-bus replay protection', () => {
   beforeEach(() => { tmpDir = freshDir(); });
+  // safe-git-allow: incremental-migration
   afterEach(() => { fs.rmSync(tmpDir, { recursive: true, force: true }); });
 
   it('message from protected sender accepted by protected receiver', async () => {
@@ -554,6 +559,7 @@ describe('cross-bus replay protection', () => {
 
 describe('multi-peer sequence isolation', () => {
   beforeEach(() => { tmpDir = freshDir(); });
+  // safe-git-allow: incremental-migration
   afterEach(() => { fs.rmSync(tmpDir, { recursive: true, force: true }); });
 
   it('tracks sequences independently per sender', () => {
@@ -614,6 +620,7 @@ describe('multi-peer sequence isolation', () => {
 
 describe('nonce persistence across bus restarts', () => {
   beforeEach(() => { tmpDir = freshDir(); });
+  // safe-git-allow: incremental-migration
   afterEach(() => { fs.rmSync(tmpDir, { recursive: true, force: true }); });
 
   it('nonce seen before restart is still rejected after restart', () => {
@@ -670,6 +677,7 @@ describe('nonce persistence across bus restarts', () => {
 
 describe('custom timestamp window', () => {
   beforeEach(() => { tmpDir = freshDir(); });
+  // safe-git-allow: incremental-migration
   afterEach(() => { fs.rmSync(tmpDir, { recursive: true, force: true }); });
 
   it('respects custom timestamp window (shorter)', () => {
@@ -718,6 +726,7 @@ describe('custom timestamp window', () => {
 
 describe('replay-rejected event emission', () => {
   beforeEach(() => { tmpDir = freshDir(); });
+  // safe-git-allow: incremental-migration
   afterEach(() => { fs.rmSync(tmpDir, { recursive: true, force: true }); });
 
   it('emits replay-rejected with message and reason for timestamp failure', () => {
@@ -793,6 +802,7 @@ describe('replay-rejected event emission', () => {
 
 describe('replay protection + TTL interaction', () => {
   beforeEach(() => { tmpDir = freshDir(); });
+  // safe-git-allow: incremental-migration
   afterEach(() => { fs.rmSync(tmpDir, { recursive: true, force: true }); });
 
   it('TTL expiration checked before replay protection', () => {
@@ -853,6 +863,7 @@ describe('replay protection + TTL interaction', () => {
 
 describe('destroy cleans up NonceStore', () => {
   beforeEach(() => { tmpDir = freshDir(); });
+  // safe-git-allow: incremental-migration
   afterEach(() => { fs.rmSync(tmpDir, { recursive: true, force: true }); });
 
   it('destroy is safe to call multiple times', () => {
@@ -877,6 +888,7 @@ describe('destroy cleans up NonceStore', () => {
 
 describe('broadcast messages with replay protection', () => {
   beforeEach(() => { tmpDir = freshDir(); });
+  // safe-git-allow: incremental-migration
   afterEach(() => { fs.rmSync(tmpDir, { recursive: true, force: true }); });
 
   it('broadcast messages include nonce/sequence', async () => {
@@ -921,6 +933,7 @@ describe('broadcast messages with replay protection', () => {
 
 describe('HTTP transport with replay protection', () => {
   beforeEach(() => { tmpDir = freshDir(); });
+  // safe-git-allow: incremental-migration
   afterEach(() => { fs.rmSync(tmpDir, { recursive: true, force: true }); });
 
   it('handleHttpMessage validates replay fields', () => {

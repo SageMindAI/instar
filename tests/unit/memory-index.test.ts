@@ -29,6 +29,7 @@ function createTempDir(): string {
 }
 
 function cleanup(dir: string): void {
+  // safe-git-allow: incremental-migration
   fs.rmSync(dir, { recursive: true, force: true });
 }
 
@@ -117,6 +118,7 @@ describe('MemoryIndex', () => {
       const statsBefore = index.stats();
 
       // Delete a file
+      // safe-git-allow: incremental-migration
       fs.unlinkSync(path.join(stateDir, 'relationships', 'alice.json'));
 
       // Second sync should remove it

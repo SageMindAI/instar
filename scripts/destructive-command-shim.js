@@ -102,6 +102,7 @@ function dryRunGitClean(cwd, args) {
   // Use -n to count what would be removed
   const dryArgs = ['-C', cwd, 'clean', '-n', ...args.filter(a => a !== '-f')];
   try {
+    // safe-git-allow: incremental-migration
     const out = execFileSync('git', dryArgs, { encoding: 'utf-8', timeout: 5000 });
     return out.split('\n').filter(Boolean).length;
   } catch { return Number.POSITIVE_INFINITY; }

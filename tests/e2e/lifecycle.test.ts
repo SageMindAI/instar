@@ -196,6 +196,7 @@ describeMaybe('E2E: Instar lifecycle', () => {
     } catch {}
 
     await server?.stop();
+    // safe-git-allow: incremental-migration
     fs.rmSync(projectDir, { recursive: true, force: true });
   });
 

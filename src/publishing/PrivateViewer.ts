@@ -135,6 +135,7 @@ export class PrivateViewer {
     const filePath = path.join(this.viewsDir, `${id}.json`);
     try {
       if (!fs.existsSync(filePath)) return false;
+      // safe-git-allow: incremental-migration
       fs.unlinkSync(filePath);
       return true;
     } catch {

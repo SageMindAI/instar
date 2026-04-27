@@ -72,6 +72,7 @@ describe('DispatchManager local storage', () => {
   });
 
   afterEach(() => {
+    // safe-git-allow: incremental-migration
     fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 
@@ -187,6 +188,7 @@ describe('DispatchManager context generation', () => {
   });
 
   afterEach(() => {
+    // safe-git-allow: incremental-migration
     fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 
@@ -314,6 +316,7 @@ describe('DispatchManager polling', () => {
 
   afterEach(() => {
     global.fetch = originalFetch;
+    // safe-git-allow: incremental-migration
     fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 
@@ -518,6 +521,7 @@ describe('DispatchManager evaluation', () => {
   });
 
   afterEach(() => {
+    // safe-git-allow: incremental-migration
     fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 
@@ -607,6 +611,7 @@ describe('DispatchManager context file', () => {
   });
 
   afterEach(() => {
+    // safe-git-allow: incremental-migration
     fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 
@@ -739,6 +744,7 @@ describe('DispatchManager auto-apply', () => {
 
   afterEach(() => {
     global.fetch = originalFetch;
+    // safe-git-allow: incremental-migration
     fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 
@@ -1014,6 +1020,7 @@ describe('DispatchManager feedback', () => {
   });
 
   afterEach(() => {
+    // safe-git-allow: incremental-migration
     fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 
@@ -1133,6 +1140,7 @@ describe('DispatchManager stats', () => {
   });
 
   afterEach(() => {
+    // safe-git-allow: incremental-migration
     fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 

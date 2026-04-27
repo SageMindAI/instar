@@ -261,6 +261,7 @@ export async function addSlack(): Promise<void> {
       fs.chmodSync(tmpPath, 0o600);
       fs.renameSync(tmpPath, configPath);
     } catch (err) {
+      // safe-git-allow: incremental-migration
       try { fs.unlinkSync(tmpPath); } catch { /* ignore */ }
       throw err;
     }
@@ -349,6 +350,7 @@ export async function removeSlack(): Promise<void> {
     fs.writeFileSync(tmpPath, JSON.stringify(config, null, 2));
     fs.renameSync(tmpPath, configPath);
   } catch (err) {
+    // safe-git-allow: incremental-migration
     try { fs.unlinkSync(tmpPath); } catch { /* ignore */ }
     throw err;
   }
@@ -365,6 +367,7 @@ export async function removeSlack(): Promise<void> {
 
   for (const file of filesToDelete) {
     if (fs.existsSync(file)) {
+      // safe-git-allow: incremental-migration
       fs.unlinkSync(file);
       console.log(pc.dim(`  Deleted: ${path.basename(file)}`));
     }
@@ -372,6 +375,7 @@ export async function removeSlack(): Promise<void> {
 
   for (const dir of dirsToDelete) {
     if (fs.existsSync(dir)) {
+      // safe-git-allow: incremental-migration
       fs.rmSync(dir, { recursive: true });
       console.log(pc.dim(`  Deleted: ${path.basename(dir)}/`));
     }

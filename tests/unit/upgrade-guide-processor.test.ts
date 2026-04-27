@@ -78,6 +78,7 @@ Added feature C.
   });
 
   afterEach(() => {
+    // safe-git-allow: incremental-migration
     fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 
@@ -210,6 +211,7 @@ Added feature C.
 
   // 9. Returns empty when no upgrades dir
   it('returns empty result when upgrades dir does not exist', () => {
+    // safe-git-allow: incremental-migration
     fs.rmSync(upgradesDir, { recursive: true, force: true });
 
     const proc = createProcessor();

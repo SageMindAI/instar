@@ -35,6 +35,7 @@ describe('TelegramAdapter messaging', () => {
   afterEach(async () => {
     await adapter.stop();
     global.fetch = originalFetch;
+    // safe-git-allow: incremental-migration
     fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 

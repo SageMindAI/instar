@@ -207,6 +207,7 @@ export class CaffeinateManager extends EventEmitter {
   private removePidFile(): void {
     try {
       if (fs.existsSync(this.pidFile)) {
+        // safe-git-allow: incremental-migration
         fs.unlinkSync(this.pidFile);
       }
     } catch {

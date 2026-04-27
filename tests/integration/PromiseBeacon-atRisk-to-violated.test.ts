@@ -23,6 +23,7 @@ describe('PromiseBeacon — atRisk signal → violated authority', () => {
     fs.mkdirSync(path.join(dir, 'state'), { recursive: true });
     fs.writeFileSync(path.join(dir, 'config.json'), '{}');
   });
+  // safe-git-allow: incremental-migration
   afterEach(() => fs.rmSync(dir, { recursive: true, force: true }));
 
   it('classifier=stalled sets atRisk (non-terminal); session-epoch mismatch then promotes to violated', async () => {

@@ -82,6 +82,7 @@ async function createTestMemory(): Promise<TestSetup> {
     memory,
     cleanup: () => {
       memory.close();
+      // safe-git-allow: incremental-migration
       fs.rmSync(dir, { recursive: true, force: true });
     },
   };

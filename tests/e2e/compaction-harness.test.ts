@@ -174,6 +174,7 @@ describe('compaction harness — error surfaces', () => {
     harness = createCompactionHarness();
     // Remove the hook to simulate the "canonical not found" path.
     const hookPath = path.join(harness.stateDir, 'hooks', 'instar', 'compaction-recovery.sh');
+    // safe-git-allow: incremental-migration
     fs.unlinkSync(hookPath);
     expect(() => harness!.runCompactionRecovery()).toThrow(/compaction-recovery\.sh not found/);
   });

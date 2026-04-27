@@ -44,6 +44,7 @@ describe('E2E: Launchd crash loop prevention', () => {
   });
 
   afterAll(() => {
+    // safe-git-allow: incremental-migration
     fs.rmSync(projectDir, { recursive: true, force: true });
   });
 
@@ -151,6 +152,7 @@ rm -f "$CRASH_FILE" 2>/dev/null
       const crashFile = path.join(stateDir, 'state', 'boot-crashes.txt');
 
       // Remove any existing crash file
+      // safe-git-allow: incremental-migration
       try { fs.unlinkSync(crashFile); } catch { /* ok */ }
 
       // Make CLI exit with error
@@ -223,6 +225,7 @@ rm -f "$CRASH_FILE" 2>/dev/null
       const after = execSync(`xattr "${testFile}"`, { encoding: 'utf-8' });
       expect(after).not.toContain('com.apple.quarantine');
 
+      // safe-git-allow: incremental-migration
       fs.unlinkSync(testFile);
     });
 
@@ -235,6 +238,7 @@ rm -f "$CRASH_FILE" 2>/dev/null
         execFileSync('xattr', ['-w', 'com.apple.provenance', '', testFile]);
       } catch {
         // May not be settable — skip
+        // safe-git-allow: incremental-migration
         fs.unlinkSync(testFile);
         return;
       }
@@ -247,6 +251,7 @@ rm -f "$CRASH_FILE" 2>/dev/null
       // On macOS 15+, provenance persists despite removal attempt.
       // On older versions, it may actually be removed. Both are valid.
       // The important thing is that the removal attempt doesn't crash.
+      // safe-git-allow: incremental-migration
       fs.unlinkSync(testFile);
     });
 
@@ -296,6 +301,7 @@ rm -f "$CRASH_FILE" 2>/dev/null
         expect(err.status).not.toBe(0);
       } finally {
         fs.chmodSync(restrictedFile, 0o644);
+        // safe-git-allow: incremental-migration
         fs.unlinkSync(restrictedFile);
       }
     });
@@ -400,6 +406,7 @@ child.on('error', (err) => {
 
     it('JS boot wrapper records crash timestamp on failure', () => {
       const crashFile = path.join(stateDir, 'state', 'boot-crashes.txt');
+      // safe-git-allow: incremental-migration
       try { fs.unlinkSync(crashFile); } catch { /* ok */ }
 
       fs.writeFileSync(shadowCli, '#!/usr/bin/env node\nprocess.exit(1);');
@@ -482,6 +489,7 @@ child.on('error', (err) => {
       const crashFile = path.join(stateDir, 'state', 'boot-crashes.txt');
 
       // Clean start
+      // safe-git-allow: incremental-migration
       try { fs.unlinkSync(crashFile); } catch { /* ok */ }
 
       // Make CLI fail

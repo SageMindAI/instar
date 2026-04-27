@@ -109,6 +109,7 @@ describe('E2E: Discovery Evaluator', () => {
 
   afterAll(() => {
     registry?.close();
+    // safe-git-allow: incremental-migration
     fs.rmSync(projectDir, { recursive: true, force: true });
   });
 
@@ -652,6 +653,7 @@ describe('E2E: Discovery Evaluator', () => {
       expect(intelligence.callCount).toBe(0); // No LLM call
 
       emptyRegistry.close();
+      // safe-git-allow: incremental-migration
       fs.rmSync(emptyDir, { recursive: true, force: true });
     });
   });

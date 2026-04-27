@@ -51,6 +51,7 @@ describe('LedgerParaphraseDetector', () => {
 
   afterEach(() => {
     ledger.shutdown();
+    // safe-git-allow: incremental-migration
     fs.rmSync(dir, { recursive: true, force: true });
   });
 

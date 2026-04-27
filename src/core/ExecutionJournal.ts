@@ -276,6 +276,7 @@ export class ExecutionJournal {
   private removeSafe(filePath: string): void {
     try {
       if (fs.existsSync(filePath)) {
+        // safe-git-allow: incremental-migration
         fs.unlinkSync(filePath);
       }
     } catch {

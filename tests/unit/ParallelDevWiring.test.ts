@@ -14,6 +14,7 @@ import { WorktreeManager } from '../../src/core/WorktreeManager.js';
 
 let tmp: string;
 beforeEach(() => { tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'instar-wiring-')); });
+// safe-git-allow: incremental-migration
 afterEach(() => { fs.rmSync(tmp, { recursive: true, force: true }); });
 
 describe('wireParallelDev', () => {

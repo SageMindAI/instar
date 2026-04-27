@@ -313,10 +313,12 @@ export class SyncOrchestrator extends EventEmitter {
       const lock: SyncLock = JSON.parse(fs.readFileSync(lockPath, 'utf-8'));
       if (lock.machineId !== this.machineId) return false;
 
+      // safe-git-allow: incremental-migration
       fs.unlinkSync(lockPath);
       return true;
     } catch {
       // @silent-fallback-ok — corrupted lock file; attempt removal as cleanup
+      // safe-git-allow: incremental-migration
       try { fs.unlinkSync(lockPath); } catch { /* @silent-fallback-ok — lock file removal is best-effort cleanup */ }
       return true;
     }
@@ -1160,6 +1162,7 @@ export class SyncOrchestrator extends EventEmitter {
    * Execute a git command with safe error handling.
    */
   private gitExecSafe(args: string[]): string {
+    // safe-git-allow: incremental-migration
     return execFileSync('git', args, {
       cwd: this.projectDir,
       encoding: 'utf-8',

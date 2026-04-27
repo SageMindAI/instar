@@ -33,6 +33,7 @@ describe('NonceStore configurable parameters', () => {
 
   afterEach(() => {
     store?.destroy();
+    // safe-git-allow: incremental-migration
     fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 

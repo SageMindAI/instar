@@ -142,6 +142,7 @@ describe('Identity / Soul API Routes', () => {
     if (server) {
       await new Promise<void>((resolve) => server.close(() => resolve()));
     }
+    // safe-git-allow: incremental-migration
     fs.rmSync(projectDir, { recursive: true, force: true });
   });
 

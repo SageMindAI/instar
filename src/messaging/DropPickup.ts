@@ -143,6 +143,7 @@ export async function pickupDroppedMessages(
 /** Safely delete a file, ignoring errors */
 function unlinkSafe(filePath: string): void {
   try {
+    // safe-git-allow: incremental-migration
     fs.unlinkSync(filePath);
   } catch {
     // @silent-fallback-ok — file may already be deleted

@@ -566,6 +566,7 @@ export class DispatchManager {
     if (applied.length === 0) {
       // Remove context file if no applied dispatches
       if (fs.existsSync(this.contextFile)) {
+        // safe-git-allow: incremental-migration
         fs.unlinkSync(this.contextFile);
       }
       return;
@@ -627,6 +628,7 @@ export class DispatchManager {
       fs.writeFileSync(tmpPath, JSON.stringify(items, null, 2));
       fs.renameSync(tmpPath, this.dispatchFile);
     } catch (err) {
+      // safe-git-allow: incremental-migration
       try { fs.unlinkSync(tmpPath); } catch { /* ignore */ }
       throw err;
     }

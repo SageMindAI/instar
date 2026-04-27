@@ -81,6 +81,7 @@ export async function registerKeypair(opts: RegisterKeypairOptions): Promise<voi
     try {
       // Overwrite with zero-length before unlink — best-effort scrub.
       fs.writeFileSync(privAbs, '');
+      // safe-git-allow: incremental-migration
       fs.unlinkSync(privAbs);
     } catch (err) {
       console.error(pc.yellow(`  warning: could not delete input file ${privAbs}: ${(err as Error).message}`));

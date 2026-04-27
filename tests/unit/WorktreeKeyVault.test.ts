@@ -10,6 +10,7 @@ import { WorktreeKeyVault } from '../../src/core/WorktreeKeyVault.js';
 
 let tmp: string;
 beforeEach(() => { tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'instar-keyvault-')); });
+// safe-git-allow: incremental-migration
 afterEach(() => { fs.rmSync(tmp, { recursive: true, force: true }); });
 
 describe('WorktreeKeyVault', () => {

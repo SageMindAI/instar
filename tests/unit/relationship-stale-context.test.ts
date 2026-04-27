@@ -24,6 +24,7 @@ describe('Relationship stale detection and context', () => {
   });
 
   afterEach(() => {
+    // safe-git-allow: incremental-migration
     fs.rmSync(dir, { recursive: true, force: true });
   });
 

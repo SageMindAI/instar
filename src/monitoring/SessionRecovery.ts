@@ -723,6 +723,7 @@ export class SessionRecovery extends EventEmitter {
         try {
           const stat = fs.statSync(filePath);
           if (now - stat.mtimeMs > maxAgeMs) {
+            // safe-git-allow: incremental-migration
             fs.unlinkSync(filePath);
             cleaned++;
           }

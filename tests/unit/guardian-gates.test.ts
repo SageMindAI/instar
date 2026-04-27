@@ -54,6 +54,7 @@ function createTestProject(port: number = 4321): TestProject {
   return {
     dir,
     stateDir,
+    // safe-git-allow: incremental-migration
     cleanup: () => fs.rmSync(dir, { recursive: true, force: true }),
   };
 }

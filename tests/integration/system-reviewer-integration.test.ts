@@ -88,6 +88,7 @@ describe('SystemReviewer Integration: Full Orchestration', () => {
   });
 
   afterEach(() => {
+    // safe-git-allow: incremental-migration
     fs.rmSync(stateDir, { recursive: true, force: true });
   });
 
@@ -198,6 +199,7 @@ describe('SystemReviewer Integration: History Persistence', () => {
   });
 
   afterEach(() => {
+    // safe-git-allow: incremental-migration
     fs.rmSync(stateDir, { recursive: true, force: true });
   });
 
@@ -286,6 +288,7 @@ describe('SystemReviewer Integration: Alert Pipeline', () => {
   });
 
   afterEach(() => {
+    // safe-git-allow: incremental-migration
     fs.rmSync(stateDir, { recursive: true, force: true });
   });
 
@@ -356,6 +359,7 @@ describe('SystemReviewer Integration: Feedback Pipeline', () => {
   });
 
   afterEach(() => {
+    // safe-git-allow: incremental-migration
     fs.rmSync(stateDir, { recursive: true, force: true });
   });
 
@@ -445,6 +449,7 @@ describe('SystemReviewer Integration: Wiring Integrity', () => {
   });
 
   afterEach(() => {
+    // safe-git-allow: incremental-migration
     fs.rmSync(stateDir, { recursive: true, force: true });
   });
 
@@ -582,6 +587,7 @@ describe('SystemReviewer Integration: Concurrency', () => {
   });
 
   afterEach(() => {
+    // safe-git-allow: incremental-migration
     fs.rmSync(stateDir, { recursive: true, force: true });
   });
 
@@ -632,6 +638,7 @@ describe('SystemReviewer Integration: Dead Letter Fallback', () => {
   });
 
   afterEach(() => {
+    // safe-git-allow: incremental-migration
     fs.rmSync(stateDir, { recursive: true, force: true });
   });
 
@@ -691,6 +698,7 @@ describe('SystemReviewer Integration: Startup Sweep', () => {
   });
 
   afterEach(() => {
+    // safe-git-allow: incremental-migration
     fs.rmSync(stateDir, { recursive: true, force: true });
   });
 
@@ -740,6 +748,7 @@ describe('SystemReviewer Integration: Trend Accuracy', () => {
   });
 
   afterEach(() => {
+    // safe-git-allow: incremental-migration
     fs.rmSync(stateDir, { recursive: true, force: true });
   });
 

@@ -98,6 +98,7 @@ describe('Session Migration Lifecycle (e2e)', () => {
   });
 
   afterEach(() => {
+    // safe-git-allow: incremental-migration
     fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 

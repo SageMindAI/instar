@@ -34,6 +34,7 @@ describe('Migration', () => {
   });
 
   afterEach(() => {
+    // safe-git-allow: incremental-migration
     fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 
@@ -45,6 +46,7 @@ describe('Migration', () => {
     it('returns false when no legacy', () => {
       const emptyDir = fs.mkdtempSync(path.join(os.tmpdir(), 'empty-'));
       expect(hasLegacyIdentity(emptyDir)).toBe(false);
+      // safe-git-allow: incremental-migration
       fs.rmSync(emptyDir, { recursive: true });
     });
   });
@@ -104,6 +106,7 @@ describe('Migration', () => {
     it('throws if no legacy exists', () => {
       const emptyDir = fs.mkdtempSync(path.join(os.tmpdir(), 'empty-'));
       expect(() => migrateFromLegacy(emptyDir)).toThrow('No legacy identity');
+      // safe-git-allow: incremental-migration
       fs.rmSync(emptyDir, { recursive: true });
     });
 
@@ -122,6 +125,7 @@ describe('Migration', () => {
     it('returns null when no legacy exists', () => {
       const emptyDir = fs.mkdtempSync(path.join(os.tmpdir(), 'empty-'));
       expect(getLegacyFingerprint(emptyDir)).toBeNull();
+      // safe-git-allow: incremental-migration
       fs.rmSync(emptyDir, { recursive: true });
     });
   });

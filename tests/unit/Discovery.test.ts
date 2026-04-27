@@ -36,6 +36,7 @@ function createTempDir(): { dir: string; cleanup: () => void } {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'instar-discovery-test-'));
   return {
     dir,
+    // safe-git-allow: incremental-migration
     cleanup: () => fs.rmSync(dir, { recursive: true, force: true }),
   };
 }
@@ -637,6 +638,7 @@ describe('Setup Lock File', () => {
     origHomedir = os.homedir;
     // Clean up any real setup lock that might interfere (LOCK_PATH is computed at module load)
     const realLockPath = path.join(origHomedir(), '.instar', 'setup-lock.json');
+    // safe-git-allow: incremental-migration
     if (fs.existsSync(realLockPath)) fs.unlinkSync(realLockPath);
     (os as any).homedir = () => tmpHome.dir;
   });

@@ -42,6 +42,7 @@ describe('LedgerSessionRegistry', () => {
   });
 
   afterEach(() => {
+    // safe-git-allow: incremental-migration
     fs.rmSync(dir, { recursive: true, force: true });
   });
 

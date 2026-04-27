@@ -385,6 +385,7 @@ export class MachineIdentityManager {
   removeLocalIdentity(): void {
     for (const file of [this.identityPath, this.signingKeyPath, this.encryptionKeyPath]) {
       if (fs.existsSync(file)) {
+        // safe-git-allow: incremental-migration
         fs.unlinkSync(file);
       }
     }

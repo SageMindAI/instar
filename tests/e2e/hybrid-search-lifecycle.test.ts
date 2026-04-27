@@ -87,6 +87,7 @@ describe('Hybrid Search E2E lifecycle', () => {
 
   afterAll(() => {
     semanticMemory?.close();
+    // safe-git-allow: incremental-migration
     fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 

@@ -112,6 +112,7 @@ describe('CapabilityMapper', () => {
   });
 
   afterEach(() => {
+    // safe-git-allow: incremental-migration
     fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 
@@ -291,6 +292,7 @@ description: A newly added skill
     await mapper.refresh();
 
     // Remove a skill
+    // safe-git-allow: incremental-migration
     fs.rmSync(path.join(projectDir, '.claude', 'skills', 'test-skill'), { recursive: true, force: true });
 
     const mapper2 = new CapabilityMapper(config);

@@ -662,6 +662,7 @@ assert to the current user as your own. Entries include:
         if (!Number.isFinite(epoch)) continue;
         if (now - epoch > retentionMs) {
           try {
+            // safe-git-allow: incremental-migration
             fs.unlinkSync(path.join(this.stateDir, name));
             deleted += 1;
           } catch {

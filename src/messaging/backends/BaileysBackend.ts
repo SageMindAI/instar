@@ -254,6 +254,7 @@ export class BaileysBackend {
             if (isStaleIncomplete) {
               console.log('[baileys] 401 with recent credentials — likely incomplete pairing. Clearing auth state and retrying.');
               try {
+                // safe-git-allow: incremental-migration
                 fs.rmSync(this.config.authDir, { recursive: true, force: true });
                 fs.mkdirSync(this.config.authDir, { recursive: true });
               } catch (clearErr) {
@@ -586,6 +587,7 @@ export class BaileysBackend {
       throw transcribeErr;
     } finally {
       // Clean up temp file
+      // safe-git-allow: incremental-migration
       try { fs.unlinkSync(filepath); } catch { /* @silent-fallback-ok */ }
     }
   }

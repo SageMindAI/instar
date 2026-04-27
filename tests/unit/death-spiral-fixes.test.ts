@@ -198,6 +198,7 @@ describe('CoherenceMonitor suppresses known-pending updates', () => {
   });
 
   afterEach(() => {
+    // safe-git-allow: incremental-migration
     fs.rmSync(dir, { recursive: true, force: true });
     vi.restoreAllMocks();
   });

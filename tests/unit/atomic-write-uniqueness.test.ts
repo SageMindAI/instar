@@ -33,6 +33,7 @@ describe('StateManager — atomic write uniqueness', () => {
     expect(tmpFiles).toHaveLength(0);
 
     // Clean up
+    // safe-git-allow: incremental-migration
     fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 

@@ -295,10 +295,12 @@ export class FileClassifier {
       const manifestPath = path.join(this.projectDir, classification.manifestFile);
       if (fs.existsSync(manifestPath)) {
         try {
+          // safe-git-allow: incremental-migration
           execFileSync('git', ['checkout', '--ours', classification.manifestFile], {
             cwd: this.projectDir,
             stdio: 'pipe',
           });
+          // safe-git-allow: incremental-migration
           execFileSync('git', ['add', classification.manifestFile], {
             cwd: this.projectDir,
             stdio: 'pipe',
@@ -321,6 +323,7 @@ export class FileClassifier {
 
         // Stage the regenerated lockfile
         const relPath = path.relative(this.projectDir, filePath);
+        // safe-git-allow: incremental-migration
         execFileSync('git', ['add', relPath], {
           cwd: this.projectDir,
           stdio: 'pipe',
@@ -442,6 +445,7 @@ export class FileClassifier {
 
   private getStageHash(relPath: string, stage: number): string | null {
     try {
+      // safe-git-allow: incremental-migration
       const output = execFileSync(
         'git', ['ls-files', '-s', '--', relPath],
         { cwd: this.projectDir, encoding: 'utf-8', stdio: 'pipe' },

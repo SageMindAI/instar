@@ -80,6 +80,7 @@ describe('AgentServer — EADDRINUSE handling', () => {
     await expect(server.start()).rejects.toThrow(/already in use/i);
 
     // Clean up
+    // safe-git-allow: incremental-migration
     fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 });

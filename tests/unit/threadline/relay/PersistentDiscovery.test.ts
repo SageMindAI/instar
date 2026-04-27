@@ -50,6 +50,7 @@ describe('RegistryStore persistence', () => {
 
   afterEach(() => {
     store.destroy();
+    // safe-git-allow: incremental-migration
     fs.rmSync(dataDir, { recursive: true, force: true });
   });
 
@@ -144,6 +145,7 @@ describe('Discovery merge logic', () => {
 
   afterEach(() => {
     registry?.destroy();
+    // safe-git-allow: incremental-migration
     fs.rmSync(dataDir, { recursive: true, force: true });
   });
 
@@ -301,6 +303,7 @@ describe('Auto-registration of public agents', () => {
 
   afterEach(() => {
     registry?.destroy();
+    // safe-git-allow: incremental-migration
     fs.rmSync(dataDir, { recursive: true, force: true });
   });
 

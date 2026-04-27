@@ -427,7 +427,9 @@ export class GlobalSecretStore {
 
   /** Destroy all stored secrets and keys. For testing only. */
   destroy(): void {
+    // safe-git-allow: incremental-migration
     if (fs.existsSync(this.encryptedFile)) fs.unlinkSync(this.encryptedFile);
+    // safe-git-allow: incremental-migration
     if (fs.existsSync(this.keyFile)) fs.unlinkSync(this.keyFile);
     this.masterKey = null;
   }

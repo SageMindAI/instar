@@ -98,6 +98,7 @@ export class ForegroundRestartWatcher extends EventEmitter {
       console.log(`[ForegroundRestartWatcher] Restart requested by ${data.requestedBy} for v${data.targetVersion} (from v${data.previousVersion})`);
 
       // Clear the flag to prevent re-triggering on next startup
+      // safe-git-allow: incremental-migration
       try { fs.unlinkSync(this.flagPath); } catch { /* ignore */ }
 
       // Write a planned-exit marker so the supervisor (if running) knows this
@@ -139,6 +140,7 @@ export class ForegroundRestartWatcher extends EventEmitter {
       }
     } catch {
       // Malformed flag — clean up
+      // safe-git-allow: incremental-migration
       try { fs.unlinkSync(this.flagPath); } catch { /* ignore */ }
     }
   }

@@ -94,6 +94,7 @@ describe('E2E: Discovery Observability (Phase 5)', () => {
   afterAll(() => {
     registry?.close();
     server?.close();
+    // safe-git-allow: incremental-migration
     fs.rmSync(projectDir, { recursive: true, force: true });
   });
 

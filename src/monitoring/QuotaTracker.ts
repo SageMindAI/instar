@@ -171,6 +171,7 @@ export class QuotaTracker {
       fs.writeFileSync(tmpPath, JSON.stringify(state, null, 2));
       fs.renameSync(tmpPath, this.config.quotaFile);
     } catch (err) {
+      // safe-git-allow: incremental-migration
       try { fs.unlinkSync(tmpPath); } catch { /* ignore */ }
       throw err;
     }

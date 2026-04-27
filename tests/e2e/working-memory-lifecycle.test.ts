@@ -182,6 +182,7 @@ describe('Working Memory E2E lifecycle', () => {
   afterAll(async () => {
     await server.stop();
     semanticMemory?.close();
+    // safe-git-allow: incremental-migration
     fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 

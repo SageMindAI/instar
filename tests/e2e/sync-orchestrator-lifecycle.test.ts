@@ -148,6 +148,7 @@ describe('SyncOrchestrator E2E lifecycle', () => {
   });
 
   afterEach(() => {
+    // safe-git-allow: incremental-migration
     fs.rmSync(projectDir, { recursive: true, force: true });
   });
 

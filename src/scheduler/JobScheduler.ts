@@ -855,6 +855,7 @@ export class JobScheduler {
         });
         // Clean up sentinel file
         const sentinelPath = path.join(this.stateDir, 'state', 'execution-journal', `_ls-enabled-${job.slug}`);
+        // safe-git-allow: incremental-migration
         try { fs.unlinkSync(sentinelPath); } catch { /* already gone */ }
       } catch (err) {
         console.error(`[scheduler] ExecutionJournal finalization failed for "${job.slug}": ${err}`);

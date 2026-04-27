@@ -299,6 +299,7 @@ export class SecretStore {
   /** Delete the encrypted store file. */
   destroy(): void {
     if (fs.existsSync(this.encryptedPath)) {
+      // safe-git-allow: incremental-migration
       fs.unlinkSync(this.encryptedPath);
     }
   }

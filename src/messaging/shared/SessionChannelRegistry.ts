@@ -158,6 +158,7 @@ export class SessionChannelRegistry {
         fs.writeFileSync(tmpPath, JSON.stringify(data, null, 2));
         fs.renameSync(tmpPath, this.registryPath);
       } catch (writeErr) {
+        // safe-git-allow: incremental-migration
         try { fs.unlinkSync(tmpPath); } catch { /* ignore */ }
         throw writeErr;
       }

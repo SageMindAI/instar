@@ -15,6 +15,7 @@ describe('notifyMessageDropped', () => {
 
   afterEach(() => {
     DegradationReporter.resetForTesting();
+    // safe-git-allow: incremental-migration
     fs.rmSync(stateDir, { recursive: true, force: true });
   });
 

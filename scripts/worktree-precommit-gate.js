@@ -94,6 +94,7 @@ async function main() {
   // Collect staged files (from `git diff --cached --name-only`)
   let stagedFiles = [];
   try {
+    // safe-git-allow: incremental-migration
     stagedFiles = execSync('git diff --cached --name-only -z', { encoding: 'utf-8', cwd })
       .split('\0').filter(Boolean);
   } catch { /* @silent-fallback-ok */ }

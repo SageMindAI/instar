@@ -111,6 +111,7 @@ export async function runSetup(): Promise<void> {
   let gitRepoName = '';
   let gitRepoRoot = '';
   try {
+    // safe-git-allow: incremental-migration
     gitRepoRoot = execFileSync('git', ['rev-parse', '--show-toplevel'], {
       cwd: projectDir,
       encoding: 'utf-8',
@@ -585,6 +586,7 @@ export function uninstallAutoStart(projectName: string): boolean {
 
     // Remove file
     try {
+      // safe-git-allow: incremental-migration
       fs.unlinkSync(plistPath);
       return true;
     } catch {
@@ -600,6 +602,7 @@ export function uninstallAutoStart(projectName: string): boolean {
     } catch { /* not loaded */ }
 
     try {
+      // safe-git-allow: incremental-migration
       fs.unlinkSync(servicePath);
       execFileSync('systemctl', ['--user', 'daemon-reload'], { stdio: 'ignore' });
       return true;
@@ -728,6 +731,7 @@ export function ensureStableNodeSymlink(projectDir: string): string {
 
   // Create/update the symlink
   try {
+    // safe-git-allow: incremental-migration
     fs.unlinkSync(symlinkPath);
   } catch { /* didn't exist */ }
   fs.symlinkSync(durablePath, symlinkPath);
@@ -829,6 +833,7 @@ export function installBootWrapper(projectDir: string): { sh: string; js: string
   const jsPath = path.join(stateDir, `instar-boot${jsExt}`);
   // Clean up the other extension if it exists (prevents stale wrapper confusion)
   const altPath = path.join(stateDir, `instar-boot${usesCjs ? '.js' : '.cjs'}`);
+  // safe-git-allow: incremental-migration
   try { fs.unlinkSync(altPath); } catch { /* didn't exist */ }
 
   const shadowCli = path.join(stateDir, 'shadow-install', 'node_modules', 'instar', 'dist', 'cli.js');
@@ -1186,6 +1191,7 @@ ${argsXml}
       console.error(`[setup] CRITICAL: Generated plist failed validation: ${stderr}`);
       console.error(`[setup] Plist path: ${plistPath}`);
       // Remove the invalid plist so we don't leave a landmine
+      // safe-git-allow: incremental-migration
       try { fs.unlinkSync(plistPath); } catch { /* best effort */ }
       return false;
     }

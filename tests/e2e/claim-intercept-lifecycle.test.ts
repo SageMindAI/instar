@@ -89,12 +89,14 @@ function setupCanonicalState(facts: any[] = [], projects: any[] = [], antiPatter
 /** Clear rate limit file so each test starts fresh. */
 function clearRateLimit() {
   const rateFile = path.join(tmpDir, '.instar', 'state', '.claim-intercept-last.tmp');
+  // safe-git-allow: incremental-migration
   try { fs.unlinkSync(rateFile); } catch {}
 }
 
 /** Clear log file. */
 function clearLog() {
   const logFile = path.join(tmpDir, '.instar', 'state', 'claim-intercept.log');
+  // safe-git-allow: incremental-migration
   try { fs.unlinkSync(logFile); } catch {}
 }
 
@@ -192,6 +194,7 @@ beforeAll(() => {
 });
 
 afterAll(() => {
+  // safe-git-allow: incremental-migration
   fs.rmSync(tmpDir, { recursive: true, force: true });
 });
 
@@ -635,6 +638,7 @@ describe('Phase 5: Canonical State integration', () => {
     const stDir = path.join(tmpDir, '.instar', 'state');
     const origFacts = fs.readFileSync(path.join(stDir, 'quick-facts.json'), 'utf-8');
 
+    // safe-git-allow: incremental-migration
     fs.unlinkSync(path.join(stDir, 'quick-facts.json'));
 
     const r = runHook(postToolUseHook, {
@@ -1061,6 +1065,7 @@ describe('Phase 11: Edge cases', () => {
       }, { cwd: emptyDir });
       expect(r.exitCode).toBe(0);
     } finally {
+      // safe-git-allow: incremental-migration
       fs.rmSync(emptyDir, { recursive: true, force: true });
     }
   });
@@ -1219,6 +1224,7 @@ describe('Phase 13: CanonicalState class integration', () => {
     expect(fs.existsSync(path.join(freshStateDir, 'anti-patterns.json'))).toBe(true);
     expect(fs.existsSync(path.join(freshStateDir, 'project-registry.json'))).toBe(true);
 
+    // safe-git-allow: incremental-migration
     fs.rmSync(freshDir, { recursive: true, force: true });
   });
 

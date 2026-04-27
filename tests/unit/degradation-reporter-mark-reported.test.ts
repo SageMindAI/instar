@@ -21,6 +21,7 @@ describe('DegradationReporter.markReported', () => {
 
   afterEach(() => {
     DegradationReporter.resetForTesting();
+    // safe-git-allow: incremental-migration
     fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 

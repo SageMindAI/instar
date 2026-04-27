@@ -23,6 +23,7 @@ describe('ledger cleanup', () => {
   });
 
   afterEach(() => {
+    // safe-git-allow: incremental-migration
     fs.rmSync(stateDir, { recursive: true, force: true });
   });
 
@@ -75,6 +76,7 @@ describe('ledger cleanup', () => {
       });
       expect(result.deleted.length).toBe(0);
     } finally {
+      // safe-git-allow: incremental-migration
       fs.rmSync(fresh, { recursive: true, force: true });
     }
   });

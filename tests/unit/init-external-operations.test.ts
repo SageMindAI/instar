@@ -23,6 +23,7 @@ describe('Init external operations config', () => {
 
   afterEach(() => {
     process.chdir(originalCwd);
+    // safe-git-allow: incremental-migration
     fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 

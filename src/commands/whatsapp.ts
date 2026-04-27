@@ -131,6 +131,7 @@ export async function addWhatsApp(opts: AddWhatsAppOptions): Promise<void> {
     fs.writeFileSync(tmpPath, JSON.stringify(config, null, 2));
     fs.renameSync(tmpPath, configPath);
   } catch (err) {
+    // safe-git-allow: incremental-migration
     try { fs.unlinkSync(tmpPath); } catch { /* ignore */ }
     throw err;
   }

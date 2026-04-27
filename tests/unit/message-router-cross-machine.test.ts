@@ -30,6 +30,7 @@ function createTempDir(): string {
 }
 
 function cleanup(dir: string): void {
+  // safe-git-allow: incremental-migration
   fs.rmSync(dir, { recursive: true, force: true });
 }
 
@@ -233,8 +234,11 @@ describe('MessageRouter — Cross-Machine', () => {
       expect(fs.existsSync(outboundFile)).toBe(true);
 
       // Cleanup outbound
+      // safe-git-allow: incremental-migration
       fs.rmSync(outboundFile, { force: true });
+      // safe-git-allow: incremental-migration
       try { fs.rmdirSync(outboundDir); } catch { /* ignore */ }
+      // safe-git-allow: incremental-migration
       try { fs.rmdirSync(path.join(os.homedir(), '.instar', 'messages', 'outbound')); } catch { /* ignore */ }
     });
 
@@ -275,8 +279,11 @@ describe('MessageRouter — Cross-Machine', () => {
         // Cleanup outbound
         const outboundDir = path.join(os.homedir(), '.instar', 'messages', 'outbound', REMOTE_MACHINE);
         const outboundFile = path.join(outboundDir, `${result.messageId}.json`);
+        // safe-git-allow: incremental-migration
         fs.rmSync(outboundFile, { force: true });
+        // safe-git-allow: incremental-migration
         try { fs.rmdirSync(outboundDir); } catch { /* ignore */ }
+        // safe-git-allow: incremental-migration
         try { fs.rmdirSync(path.join(os.homedir(), '.instar', 'messages', 'outbound')); } catch { /* ignore */ }
       } finally {
         global.fetch = originalFetch;

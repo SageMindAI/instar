@@ -24,6 +24,7 @@ import type { LedgerEntry, MachineLedger } from '../../src/core/WorkLedger.js';
 // ── Helpers ──────────────────────────────────────────────────────────
 
 function git(args: string[], cwd: string): string {
+  // safe-git-allow: incremental-migration
   return execFileSync('git', args, {
     cwd,
     encoding: 'utf-8',
@@ -131,6 +132,7 @@ describe('HandoffManager E2E lifecycle', () => {
   });
 
   afterEach(() => {
+    // safe-git-allow: incremental-migration
     fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 

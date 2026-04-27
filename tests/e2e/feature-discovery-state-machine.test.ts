@@ -144,6 +144,7 @@ describe('E2E: Feature Discovery State Machine', () => {
       await new Promise<void>((resolve) => server.close(() => resolve()));
     }
     registry?.close();
+    // safe-git-allow: incremental-migration
     fs.rmSync(projectDir, { recursive: true, force: true });
   });
 

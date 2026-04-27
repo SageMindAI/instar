@@ -1026,6 +1026,7 @@ export class TriageOrchestrator extends EventEmitter {
 
     // Schedule cleanup
     setTimeout(() => {
+      // safe-git-allow: incremental-migration
       try { fs.unlinkSync(filepath); } catch { /* best-effort */ }
     }, this.config.evidenceRetentionMinutes * 60000);
 
@@ -1079,6 +1080,7 @@ export class TriageOrchestrator extends EventEmitter {
         const filepath = path.join(EVIDENCE_DIR, file);
         const stat = fs.statSync(filepath);
         if (now - stat.mtimeMs > this.config.evidenceRetentionMinutes * 60000) {
+          // safe-git-allow: incremental-migration
           fs.unlinkSync(filepath);
         }
       }

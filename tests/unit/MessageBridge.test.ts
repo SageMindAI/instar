@@ -47,6 +47,7 @@ describe('MessageBridge', () => {
 
   afterEach(() => {
     if (tmpDir && fs.existsSync(tmpDir)) {
+      // safe-git-allow: incremental-migration
       fs.rmSync(tmpDir, { recursive: true, force: true });
     }
   });

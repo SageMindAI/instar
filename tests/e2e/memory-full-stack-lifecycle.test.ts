@@ -193,6 +193,7 @@ describe('Full Memory Stack E2E lifecycle', () => {
     await server.stop();
     semanticMemory?.close();
     topicMemory?.close();
+    // safe-git-allow: incremental-migration
     fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 
@@ -938,6 +939,7 @@ describe('Full Memory Stack E2E lifecycle', () => {
       expect(searchResults[0].name).toBe('JWT Authentication');
 
       freshMemory.close();
+      // safe-git-allow: incremental-migration
       fs.rmSync(freshDir, { recursive: true, force: true });
     });
   });

@@ -159,6 +159,7 @@ describe('Threadline Integration Tests', () => {
   });
 
   afterEach(() => {
+    // safe-git-allow: incremental-migration
     fs.rmSync(tmpDir, { recursive: true, force: true });
     vi.restoreAllMocks();
   });
@@ -1441,7 +1442,9 @@ describe('Threadline Integration Tests', () => {
       expect(rawMap[threadId].state).toBe('idle');
 
       // Clean up the fake JSONL file
+      // safe-git-allow: incremental-migration
       fs.rmSync(jsonlPath, { force: true });
+      // safe-git-allow: incremental-migration
       try { fs.rmdirSync(claudeProjectDir); } catch { /* may not be empty */ }
     });
 
@@ -1896,7 +1899,9 @@ describe('Threadline Integration Tests', () => {
       expect(rawMap[threadId].state).toBe('failed');
 
       // Clean up
+      // safe-git-allow: incremental-migration
       fs.rmSync(jsonlPath, { force: true });
+      // safe-git-allow: incremental-migration
       try { fs.rmdirSync(claudeProjectDir); } catch { /* may not be empty */ }
     });
 

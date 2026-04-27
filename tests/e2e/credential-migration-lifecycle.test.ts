@@ -143,6 +143,7 @@ describe('Credential Migration Lifecycle (e2e)', () => {
 
   afterEach(() => {
     credManager.clear();
+    // safe-git-allow: incremental-migration
     fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 

@@ -286,6 +286,7 @@ export class UpgradeGuideProcessor {
       fs.writeFileSync(tmpPath, JSON.stringify(data, null, 2));
       fs.renameSync(tmpPath, this.processedFile);
     } catch {
+      // safe-git-allow: incremental-migration
       try { fs.unlinkSync(tmpPath); } catch { /* ignore */ }
     }
   }
@@ -296,6 +297,7 @@ export class UpgradeGuideProcessor {
   private cleanPendingGuide(): void {
     try {
       if (fs.existsSync(this.pendingGuidePath)) {
+        // safe-git-allow: incremental-migration
         fs.unlinkSync(this.pendingGuidePath);
       }
     } catch {

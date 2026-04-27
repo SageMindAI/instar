@@ -64,6 +64,7 @@ function testTmuxFdaAccess(tmuxPath: string): { hasAccess: boolean; error?: stri
     const output = fs.readFileSync(tmpFile, 'utf-8');
 
     // Clean up temp file
+    // safe-git-allow: incremental-migration
     try { fs.unlinkSync(tmpFile); } catch { /* ok */ }
 
     // Parse exit code from output
@@ -86,6 +87,7 @@ function testTmuxFdaAccess(tmuxPath: string): { hasAccess: boolean; error?: stri
   } catch (err) {
     // Clean up on any error
     try { execSync(`${tmuxPath} kill-session -t ${testSessionName} 2>/dev/null`, { timeout: 3000 }); } catch { /* ok */ }
+    // safe-git-allow: incremental-migration
     try { fs.unlinkSync(tmpFile); } catch { /* ok */ }
     return { hasAccess: true, error: `Probe failed: ${err instanceof Error ? err.message : String(err)}` };
   }

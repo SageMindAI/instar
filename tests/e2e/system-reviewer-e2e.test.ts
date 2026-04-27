@@ -155,6 +155,7 @@ describe('E2E: SystemReviewer Complete Lifecycle', () => {
 
   afterEach(() => {
     reviewer.stop();
+    // safe-git-allow: incremental-migration
     fs.rmSync(stateDir, { recursive: true, force: true });
   });
 
@@ -262,6 +263,7 @@ describe('E2E: SystemReviewer API Routes', () => {
 
   afterEach(() => {
     reviewer.stop();
+    // safe-git-allow: incremental-migration
     fs.rmSync(stateDir, { recursive: true, force: true });
   });
 
@@ -536,6 +538,7 @@ describe('E2E: SystemReviewer Persistence Across Restarts', () => {
   });
 
   afterEach(() => {
+    // safe-git-allow: incremental-migration
     fs.rmSync(stateDir, { recursive: true, force: true });
   });
 
@@ -624,6 +627,7 @@ describe('E2E: Real Probe Factories with SystemReviewer', () => {
   });
 
   afterEach(() => {
+    // safe-git-allow: incremental-migration
     fs.rmSync(stateDir, { recursive: true, force: true });
   });
 
@@ -715,6 +719,7 @@ describe('E2E: Real Probe Factories with SystemReviewer', () => {
     expect(queueResult?.passed).toBe(true);
 
     reviewer.stop();
+    // safe-git-allow: incremental-migration
     fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 
@@ -753,6 +758,7 @@ describe('E2E: Real Probe Factories with SystemReviewer', () => {
     expect(topicResult?.description).toContain('3 topic');
 
     reviewer.stop();
+    // safe-git-allow: incremental-migration
     fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 
@@ -814,6 +820,7 @@ describe('E2E: SystemReviewer Event Flow', () => {
   });
 
   afterEach(() => {
+    // safe-git-allow: incremental-migration
     fs.rmSync(stateDir, { recursive: true, force: true });
   });
 

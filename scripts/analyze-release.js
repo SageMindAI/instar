@@ -44,15 +44,18 @@ function log(msg) {
 
 function getLastReleaseTag() {
   try {
+    // safe-git-allow: incremental-migration
     return execSync('git describe --tags --abbrev=0', { cwd: ROOT, encoding: 'utf-8' }).trim();
   } catch {
     // No tags at all — diff against the initial commit
+    // safe-git-allow: incremental-migration
     return execSync('git rev-list --max-parents=0 HEAD', { cwd: ROOT, encoding: 'utf-8' }).trim();
   }
 }
 
 function getCommitsSinceTag(tag) {
   try {
+    // safe-git-allow: incremental-migration
     const raw = execSync(`git log ${tag}..HEAD --oneline --no-merges`, { cwd: ROOT, encoding: 'utf-8' });
     return raw.trim().split('\n').filter(Boolean).map(line => {
       const [hash, ...rest] = line.split(' ');
@@ -65,6 +68,7 @@ function getCommitsSinceTag(tag) {
 
 function getDiffStat(tag) {
   try {
+    // safe-git-allow: incremental-migration
     return execSync(`git diff ${tag}..HEAD --stat`, { cwd: ROOT, encoding: 'utf-8' }).trim();
   } catch {
     return '';
@@ -73,6 +77,7 @@ function getDiffStat(tag) {
 
 function getChangedFiles(tag) {
   try {
+    // safe-git-allow: incremental-migration
     const raw = execSync(`git diff ${tag}..HEAD --name-status`, { cwd: ROOT, encoding: 'utf-8' });
     return raw.trim().split('\n').filter(Boolean).map(line => {
       const [status, ...pathParts] = line.split('\t');
@@ -85,6 +90,7 @@ function getChangedFiles(tag) {
 
 function getFileDiff(tag, file) {
   try {
+    // safe-git-allow: incremental-migration
     return execSync(`git diff ${tag}..HEAD -- "${file}"`, { cwd: ROOT, encoding: 'utf-8' });
   } catch {
     return '';

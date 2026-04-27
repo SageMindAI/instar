@@ -155,8 +155,10 @@ export class TopicMemory {
           console.warn(`[TopicMemory] Database corrupt (${result[0]?.integrity_check}) — deleting and rebuilding`);
           this.db.close();
           this.db = null;
+          // safe-git-allow: incremental-migration
           fs.unlinkSync(this.dbPath);
           for (const ext of ['-wal', '-shm']) {
+            // safe-git-allow: incremental-migration
             try { fs.unlinkSync(this.dbPath + ext); } catch { /* may not exist */ }
           }
           this.db = new BetterSqlite3(this.dbPath);
@@ -167,8 +169,10 @@ export class TopicMemory {
         console.warn(`[TopicMemory] Database unreadable — deleting and rebuilding:`, err);
         try { this.db?.close(); } catch { /* ignore */ }
         this.db = null;
+        // safe-git-allow: incremental-migration
         try { fs.unlinkSync(this.dbPath); } catch { /* ignore */ }
         for (const ext of ['-wal', '-shm']) {
+          // safe-git-allow: incremental-migration
           try { fs.unlinkSync(this.dbPath + ext); } catch { /* may not exist */ }
         }
         this.db = new BetterSqlite3(this.dbPath);

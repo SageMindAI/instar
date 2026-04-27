@@ -23,6 +23,7 @@ describe('IntegrityManager', () => {
   });
 
   afterEach(() => {
+    // safe-git-allow: incremental-migration
     fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 
@@ -65,6 +66,7 @@ describe('IntegrityManager', () => {
     fs.writeFileSync(filePath, '# Temporary');
 
     manager.sign(filePath);
+    // safe-git-allow: incremental-migration
     fs.unlinkSync(filePath);
 
     const result = manager.verify(filePath);
@@ -139,6 +141,7 @@ describe('TreeTraversal with IntegrityManager', () => {
   });
 
   afterEach(() => {
+    // safe-git-allow: incremental-migration
     fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 

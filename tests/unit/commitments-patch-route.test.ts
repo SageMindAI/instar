@@ -19,6 +19,7 @@ function tmpState() {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'cmt-patch-'));
   fs.mkdirSync(path.join(dir, 'state'), { recursive: true });
   fs.writeFileSync(path.join(dir, 'config.json'), JSON.stringify({ authToken: 'test' }));
+  // safe-git-allow: incremental-migration
   return { dir, cleanup: () => fs.rmSync(dir, { recursive: true, force: true }) };
 }
 

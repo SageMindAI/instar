@@ -173,6 +173,7 @@ function createTempDir(): { dir: string; stateDir: string; cleanup: () => void }
   return {
     dir,
     stateDir,
+    // safe-git-allow: incremental-migration
     cleanup: () => fs.rmSync(dir, { recursive: true, force: true }),
   };
 }
@@ -189,6 +190,7 @@ function createFakeJsonl(uuid: string): void {
 function cleanupFakeJsonl(): void {
   const testProjectDir = path.join(os.homedir(), '.claude', 'projects', 'threadline-router-test');
   try {
+    // safe-git-allow: incremental-migration
     fs.rmSync(testProjectDir, { recursive: true, force: true });
   } catch {
     // May not exist

@@ -61,6 +61,7 @@ function makeUnprotectedBus(
 
 describe('full send → deliver → reject replay cycle', () => {
   beforeEach(() => { tmpDir = freshDir(); });
+  // safe-git-allow: incremental-migration
   afterEach(() => { fs.rmSync(tmpDir, { recursive: true, force: true }); });
 
   it('complete lifecycle: send, deliver, replay rejected', async () => {
@@ -144,6 +145,7 @@ describe('full send → deliver → reject replay cycle', () => {
 
 describe('protected receiver rejects unprotected sender', () => {
   beforeEach(() => { tmpDir = freshDir(); });
+  // safe-git-allow: incremental-migration
   afterEach(() => { fs.rmSync(tmpDir, { recursive: true, force: true }); });
 
   it('messages without nonce/sequence rejected (fail-closed)', async () => {
@@ -181,6 +183,7 @@ describe('protected receiver rejects unprotected sender', () => {
 
 describe('multi-machine scenario with isolated tracking', () => {
   beforeEach(() => { tmpDir = freshDir(); });
+  // safe-git-allow: incremental-migration
   afterEach(() => { fs.rmSync(tmpDir, { recursive: true, force: true }); });
 
   it('three machines communicate without interference', async () => {
@@ -265,6 +268,7 @@ describe('multi-machine scenario with isolated tracking', () => {
 
 describe('JSONL polling integration with replay protection', () => {
   beforeEach(() => { tmpDir = freshDir(); });
+  // safe-git-allow: incremental-migration
   afterEach(() => { fs.rmSync(tmpDir, { recursive: true, force: true }); });
 
   it('polling delivers valid messages and rejects replays', async () => {
@@ -315,6 +319,7 @@ describe('JSONL polling integration with replay protection', () => {
 
 describe('nonce store persistence across bus lifecycle', () => {
   beforeEach(() => { tmpDir = freshDir(); });
+  // safe-git-allow: incremental-migration
   afterEach(() => { fs.rmSync(tmpDir, { recursive: true, force: true }); });
 
   it('full lifecycle: bus1 receives → bus1 destroyed → bus2 rejects replay', async () => {
@@ -353,6 +358,7 @@ describe('nonce store persistence across bus lifecycle', () => {
 
 describe('real attack scenarios', () => {
   beforeEach(() => { tmpDir = freshDir(); });
+  // safe-git-allow: incremental-migration
   afterEach(() => { fs.rmSync(tmpDir, { recursive: true, force: true }); });
 
   it('attack: re-execute claimed job via captured work-announcement', async () => {
@@ -476,6 +482,7 @@ describe('real attack scenarios', () => {
 
 describe('custom nonce store directory', () => {
   beforeEach(() => { tmpDir = freshDir(); });
+  // safe-git-allow: incremental-migration
   afterEach(() => { fs.rmSync(tmpDir, { recursive: true, force: true }); });
 
   it('uses custom nonceStoreDir when specified', async () => {

@@ -62,6 +62,7 @@ describe('ServerSupervisor preflight self-heal', () => {
 
   afterEach(() => {
     vi.restoreAllMocks();
+    // safe-git-allow: incremental-migration
     try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch { /* cleanup */ }
   });
 

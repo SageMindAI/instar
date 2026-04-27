@@ -18,6 +18,7 @@ describe('InvitationManager', () => {
 
   afterEach(() => {
     vi.useRealTimers();
+    // safe-git-allow: incremental-migration
     fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 
@@ -288,6 +289,7 @@ describe('InvitationManager', () => {
         const result = manager2.validate(token);
         expect(result.status).toBe('invalid-hmac');
       } finally {
+        // safe-git-allow: incremental-migration
         fs.rmSync(tmpDir2, { recursive: true, force: true });
       }
     });
@@ -539,6 +541,7 @@ describe('InvitationManager', () => {
     it('handles missing invitations.json gracefully (empty state)', () => {
       manager.create();
       const filePath = path.join(tmpDir, 'threadline', 'invitations.json');
+      // safe-git-allow: incremental-migration
       fs.unlinkSync(filePath);
       manager.reload();
       expect(manager.list()).toEqual([]);

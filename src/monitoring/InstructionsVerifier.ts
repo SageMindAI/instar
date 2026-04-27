@@ -133,6 +133,7 @@ export class InstructionsVerifier {
   clearSession(sessionId?: string): void {
     const file = this.getTrackingFile(sessionId);
     if (fs.existsSync(file)) {
+      // safe-git-allow: incremental-migration
       fs.unlinkSync(file);
     }
   }

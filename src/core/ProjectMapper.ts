@@ -258,6 +258,7 @@ export class ProjectMapper {
 
   private detectGitRemote(): string | null {
     try {
+      // safe-git-allow: incremental-migration
       const result = execFileSync('git', ['remote', 'get-url', 'origin'], {
         cwd: this.config.projectDir,
         encoding: 'utf-8',
@@ -272,6 +273,7 @@ export class ProjectMapper {
 
   private detectGitBranch(): string | null {
     try {
+      // safe-git-allow: incremental-migration
       const result = execFileSync('git', ['rev-parse', '--abbrev-ref', 'HEAD'], {
         cwd: this.config.projectDir,
         encoding: 'utf-8',

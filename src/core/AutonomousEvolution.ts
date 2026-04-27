@@ -485,6 +485,7 @@ export class AutonomousEvolution {
     try {
       const p = this.sidecarPath(jobSlug);
       if (fs.existsSync(p)) {
+        // safe-git-allow: incremental-migration
         fs.unlinkSync(p);
       }
     } catch {

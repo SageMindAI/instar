@@ -34,6 +34,7 @@ describe('Telegraph E2E publish flow', () => {
 
   afterAll(() => {
     if (SKIP) return;
+    // safe-git-allow: incremental-migration
     fs.rmSync(stateDir, { recursive: true, force: true });
   });
 

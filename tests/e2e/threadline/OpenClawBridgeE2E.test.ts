@@ -127,6 +127,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  // safe-git-allow: incremental-migration
   fs.rmSync(tmpDir, { recursive: true, force: true });
 });
 
@@ -320,6 +321,7 @@ describe('OpenClawBridge E2E', () => {
         expect(r2).toContain('[bridge-error]');
         expect(r2).toContain('Compute budget exceeded');
       } finally {
+        // safe-git-allow: incremental-migration
         fs.rmSync(stateDir2, { recursive: true, force: true });
       }
     });
@@ -519,6 +521,7 @@ describe('OpenClawBridge E2E', () => {
         expect(typeof result).toBe('string');
         expect(result).toContain('[bridge-error]');
       } finally {
+        // safe-git-allow: incremental-migration
         fs.rmSync(stateDir2, { recursive: true, force: true });
       }
     });

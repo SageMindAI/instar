@@ -383,6 +383,7 @@ node_modules/
   // Initialize git repo
   try {
     const { execFileSync } = await import('node:child_process');
+    // safe-git-allow: incremental-migration
     execFileSync('git', ['init'], { cwd: projectDir, stdio: 'pipe' });
     console.log(`  ${pc.green('✓')} Initialized git repository`);
 
@@ -3326,6 +3327,7 @@ function refreshJobs(stateDir: string): void {
       let hasRemote = false;
       if (hasGit) {
         try {
+          // safe-git-allow: incremental-migration
           const remote = execFileSync('git', ['remote'], { cwd: projectDir, stdio: 'pipe' }).toString().trim();
           hasRemote = remote.length > 0;
         } catch { /* no git or no remote */ }

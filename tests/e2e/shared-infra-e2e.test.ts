@@ -37,6 +37,7 @@ describe('Phase 1 Shared Infrastructure — E2E', () => {
 
   afterEach(() => {
     Object.assign(SHARED_INFRA_FLAGS, originalFlags);
+    // safe-git-allow: incremental-migration
     fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 

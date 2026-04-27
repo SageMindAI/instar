@@ -31,6 +31,7 @@ describe('Shared Infrastructure Delegation', () => {
   afterEach(() => {
     // Restore original flags
     Object.assign(SHARED_INFRA_FLAGS, originalFlags);
+    // safe-git-allow: incremental-migration
     fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 

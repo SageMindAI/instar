@@ -35,6 +35,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  // safe-git-allow: incremental-migration
   fs.rmSync(testDir, { recursive: true, force: true });
 });
 

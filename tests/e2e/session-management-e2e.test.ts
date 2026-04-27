@@ -167,6 +167,7 @@ function createTestProject(): TestProject {
     dir,
     stateDir,
     state,
+    // safe-git-allow: incremental-migration
     cleanup: () => fs.rmSync(dir, { recursive: true, force: true }),
   };
 }
@@ -567,6 +568,7 @@ describeMaybe('Session Management E2E', () => {
 
         // Cleanup
         for (const f of files) {
+          // safe-git-allow: incremental-migration
           try { fs.unlinkSync(path.join(tmpDir, f)); } catch { /* ignore */ }
         }
       }

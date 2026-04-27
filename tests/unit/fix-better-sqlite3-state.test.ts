@@ -35,6 +35,7 @@ beforeEach(() => {
 
 afterEach(() => {
   try {
+    // safe-git-allow: incremental-migration
     if (fs.existsSync(tmpPkg)) fs.rmSync(tmpPkg, { recursive: true, force: true });
   } catch { /* best effort */ }
 });

@@ -99,6 +99,7 @@ describe('E2E: Discovery Agent Integration (Phase 4)', () => {
 
   afterAll(() => {
     registry?.close();
+    // safe-git-allow: incremental-migration
     fs.rmSync(projectDir, { recursive: true, force: true });
   });
 

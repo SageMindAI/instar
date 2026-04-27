@@ -167,6 +167,7 @@ afterEach(() => {
   vi.restoreAllMocks();
   try {
     if (harness?.stateDir && fs.existsSync(harness.stateDir)) {
+      // safe-git-allow: incremental-migration
       fs.rmSync(harness.stateDir, { recursive: true, force: true });
     }
   } catch {

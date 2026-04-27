@@ -142,6 +142,7 @@ function releaseLockFile(lockPath: string): void {
       const data = JSON.parse(raw);
       // Only remove if we own it
       if (data.pid === process.pid) {
+        // safe-git-allow: incremental-migration
         fs.unlinkSync(lockPath);
       }
     }

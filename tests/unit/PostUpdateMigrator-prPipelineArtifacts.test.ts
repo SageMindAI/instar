@@ -40,12 +40,15 @@ function createTempDir(): string {
 }
 
 function cleanup(dir: string): void {
+  // safe-git-allow: incremental-migration
   fs.rmSync(dir, { recursive: true, force: true });
 }
 
 function initGitRepo(dir: string, originUrl: string | null): void {
+  // safe-git-allow: incremental-migration
   execSync('git init -q', { cwd: dir, stdio: 'ignore' });
   if (originUrl) {
+    // safe-git-allow: incremental-migration
     execSync(`git remote add origin ${originUrl}`, { cwd: dir, stdio: 'ignore' });
   }
 }
@@ -199,6 +202,7 @@ describe('PostUpdateMigrator.migratePrPipelineArtifacts — instar source repo',
   it('accepts upstream remote when origin is a fork', () => {
     const forkDir = createTempDir();
     initGitRepo(forkDir, 'https://github.com/someone-forked/instar.git');
+    // safe-git-allow: incremental-migration
     execSync('git remote add upstream https://github.com/JKHeadley/instar.git', {
       cwd: forkDir, stdio: 'ignore',
     });

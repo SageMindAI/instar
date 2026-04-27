@@ -18,6 +18,7 @@ describe('TelegramAdapter registry and message log', () => {
 
   afterEach(async () => {
     await adapter.stop();
+    // safe-git-allow: incremental-migration
     fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 

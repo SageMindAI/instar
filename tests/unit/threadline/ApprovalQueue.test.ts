@@ -13,6 +13,7 @@ function createTempDir(): { stateDir: string; cleanup: () => void } {
   fs.mkdirSync(stateDir, { recursive: true });
   return {
     stateDir,
+    // safe-git-allow: incremental-migration
     cleanup: () => fs.rmSync(dir, { recursive: true, force: true }),
   };
 }

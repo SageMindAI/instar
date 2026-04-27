@@ -34,6 +34,7 @@ function createTempDir(): string {
 }
 
 function cleanup(dir: string): void {
+  // safe-git-allow: incremental-migration
   fs.rmSync(dir, { recursive: true, force: true });
 }
 
@@ -357,6 +358,7 @@ describe('BackupManager', () => {
 
       // Delete a file from the snapshot
       const snapshotMemory = path.join(stateDir, 'backups', snapshot.id, 'MEMORY.md');
+      // safe-git-allow: incremental-migration
       fs.unlinkSync(snapshotMemory);
 
       // Update manifest to remove integrity hash so it doesn't fail on that
@@ -374,6 +376,7 @@ describe('BackupManager', () => {
       const snapshot = manager.createSnapshot('manual');
 
       // Delete relationships
+      // safe-git-allow: incremental-migration
       fs.rmSync(path.join(stateDir, 'relationships'), { recursive: true });
       expect(fs.existsSync(path.join(stateDir, 'relationships'))).toBe(false);
 

@@ -2840,6 +2840,7 @@ export class TelegramAdapter implements MessagingAdapter {
           fs.writeFileSync(tmpPath, kept.join('\n') + '\n');
           fs.renameSync(tmpPath, this.messageLogPath);
         } catch (rotateErr) {
+          // safe-git-allow: incremental-migration
           try { fs.unlinkSync(tmpPath); } catch { /* ignore */ }
           throw rotateErr;
         }
@@ -3085,6 +3086,7 @@ export class TelegramAdapter implements MessagingAdapter {
         fs.writeFileSync(tmpPath, JSON.stringify(data, null, 2));
         fs.renameSync(tmpPath, this.registryPath);
       } catch (writeErr) {
+        // safe-git-allow: incremental-migration
         try { fs.unlinkSync(tmpPath); } catch { /* ignore */ }
         throw writeErr;
       }
@@ -3122,6 +3124,7 @@ export class TelegramAdapter implements MessagingAdapter {
         fs.writeFileSync(tmpPath, JSON.stringify({ lastUpdateId: this.lastUpdateId }));
         fs.renameSync(tmpPath, this.offsetPath);
       } catch (writeErr) {
+        // safe-git-allow: incremental-migration
         try { fs.unlinkSync(tmpPath); } catch { /* ignore */ }
         throw writeErr;
       }
@@ -3470,6 +3473,7 @@ export class TelegramAdapter implements MessagingAdapter {
       await this.sendToTopic(topicId, replyText).catch(() => {});
     } finally {
       // Clean up voice file after processing
+      // safe-git-allow: incremental-migration
       try { fs.unlinkSync(filepath); } catch { /* ignore */ }
     }
   }

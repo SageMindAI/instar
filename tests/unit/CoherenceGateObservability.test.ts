@@ -65,6 +65,7 @@ describe('CoherenceGate — Observability', () => {
 
   afterEach(() => {
     vi.restoreAllMocks();
+    // safe-git-allow: incremental-migration
     fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 

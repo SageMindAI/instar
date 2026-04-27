@@ -14,6 +14,7 @@ import os from 'node:os';
 
 function createTempDir() {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mcp-relay-test-'));
+  // safe-git-allow: incremental-migration
   return { dir, cleanup: () => fs.rmSync(dir, { recursive: true, force: true }) };
 }
 

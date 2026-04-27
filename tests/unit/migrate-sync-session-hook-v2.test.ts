@@ -42,6 +42,7 @@ describe('sync-session-hook --v2-mode=inject', () => {
   });
 
   afterEach(() => {
+    // safe-git-allow: incremental-migration
     fs.rmSync(project.projectDir, { recursive: true, force: true });
   });
 
@@ -129,6 +130,7 @@ describe('sync-session-hook --v2-mode=overwrite', () => {
   });
 
   afterEach(() => {
+    // safe-git-allow: incremental-migration
     fs.rmSync(project.projectDir, { recursive: true, force: true });
   });
 

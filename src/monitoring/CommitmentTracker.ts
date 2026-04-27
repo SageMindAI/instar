@@ -903,6 +903,7 @@ export class CommitmentTracker extends EventEmitter {
       } else {
         // No active commitments — remove the file so hooks skip injection
         if (fs.existsSync(this.rulesPath)) {
+          // safe-git-allow: incremental-migration
           fs.unlinkSync(this.rulesPath);
         }
       }

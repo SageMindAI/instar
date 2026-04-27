@@ -48,6 +48,7 @@ describe('PostUpdateMigrator — skill port hardcoding migration', () => {
   });
 
   afterEach(() => {
+    // safe-git-allow: incremental-migration
     fs.rmSync(projectDir, { recursive: true, force: true });
   });
 

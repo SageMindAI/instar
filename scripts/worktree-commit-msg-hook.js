@@ -38,11 +38,13 @@ function findSessionContext(startCwd) {
 
 function gitParents(cwd) {
   // Determine if this is a merge: presence of $GIT_REFLOG_ACTION=merge OR MERGE_HEAD file
+  // safe-git-allow: incremental-migration
   const gitDir = execFileSync('git', ['-C', cwd, 'rev-parse', '--git-dir'], { encoding: 'utf-8' }).trim();
   const mergeHeadPath = path.join(cwd, gitDir, 'MERGE_HEAD');
   let parents = [];
   // Primary parent = current HEAD (or 0...0 for initial commit)
   try {
+    // safe-git-allow: incremental-migration
     const head = execFileSync('git', ['-C', cwd, 'rev-parse', 'HEAD'], { encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'] }).trim();
     parents.push(head);
   } catch {
@@ -58,6 +60,7 @@ function gitParents(cwd) {
 function gitWriteTree(cwd) {
   // K-fix: honor $GIT_INDEX_FILE (set by `git commit -a` and `git commit <file>`)
   const env = { ...process.env };
+  // safe-git-allow: incremental-migration
   return execFileSync('git', ['-C', cwd, 'write-tree', '--missing-ok'], {
     encoding: 'utf-8', env,
   }).trim();
@@ -151,6 +154,7 @@ async function main() {
     trailerArgs.push('--trailer', t);
   }
   try {
+    // safe-git-allow: incremental-migration
     execFileSync('git', ['interpret-trailers', '--in-place', ...trailerArgs, commitMsgFile], {
       stdio: 'inherit',
     });

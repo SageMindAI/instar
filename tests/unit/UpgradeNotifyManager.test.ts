@@ -80,6 +80,7 @@ describe('UpgradeNotifyManager', () => {
   });
 
   afterEach(() => {
+    // safe-git-allow: incremental-migration
     fs.rmSync(tmpDir, { recursive: true, force: true });
     vi.restoreAllMocks();
   });
@@ -95,6 +96,7 @@ describe('UpgradeNotifyManager', () => {
       // Simulate upgrade-ack removing the pending guide
       // We need to remove it after spawnSession is called but before isAcknowledged is checked
       spawnSession.mockImplementation(async () => {
+        // safe-git-allow: incremental-migration
         fs.unlinkSync(guidePath);
         return session;
       });
@@ -111,6 +113,7 @@ describe('UpgradeNotifyManager', () => {
 
     it('logs success activity event', async () => {
       spawnSession.mockImplementation(async () => {
+        // safe-git-allow: incremental-migration
         fs.unlinkSync(guidePath);
         return makeSession('sess-001');
       });
@@ -137,6 +140,7 @@ describe('UpgradeNotifyManager', () => {
         callCount++;
         if (callCount === 2) {
           // Sonnet succeeds — remove the guide
+          // safe-git-allow: incremental-migration
           fs.unlinkSync(guidePath);
           return sonnetSession;
         }
@@ -204,6 +208,7 @@ describe('UpgradeNotifyManager', () => {
       spawnSession.mockImplementation(async () => {
         callCount++;
         if (callCount === 1) throw new Error('tmux session already exists');
+        // safe-git-allow: incremental-migration
         fs.unlinkSync(guidePath);
         return makeSession('sess-recovery');
       });
@@ -220,6 +225,7 @@ describe('UpgradeNotifyManager', () => {
   describe('notify() — no pending guide', () => {
     it('returns immediately when no pending guide exists', async () => {
       // Remove the guide
+      // safe-git-allow: incremental-migration
       fs.unlinkSync(guidePath);
 
       const manager = new UpgradeNotifyManager(config, spawnSession, isSessionComplete, logActivity, TEST_TIMING);
@@ -297,6 +303,7 @@ describe('UpgradeNotifyManager', () => {
     });
 
     it('returns true when pending guide has been removed', () => {
+      // safe-git-allow: incremental-migration
       fs.unlinkSync(guidePath);
       const manager = new UpgradeNotifyManager(config, spawnSession, isSessionComplete, logActivity, TEST_TIMING);
       expect(manager.isAcknowledged()).toBe(true);

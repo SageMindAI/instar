@@ -46,6 +46,7 @@ describe('ScopeCoherenceTracker', () => {
   });
 
   afterEach(() => {
+    // safe-git-allow: incremental-migration
     fs.rmSync(stateDir, { recursive: true, force: true });
   });
 

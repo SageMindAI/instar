@@ -74,6 +74,7 @@ Added hybrid search combining keyword and vector, plus MEMORY.md export from sem
   });
 
   afterAll(() => {
+    // safe-git-allow: incremental-migration
     fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 
@@ -116,8 +117,10 @@ Added hybrid search combining keyword and vector, plus MEMORY.md export from sem
   // 2. NEXT.md ignored
   it('NEXT.md is not delivered as an upgrade guide', () => {
     // Clean state
+    // safe-git-allow: incremental-migration
     if (fs.existsSync(pendingPath())) fs.unlinkSync(pendingPath());
     const processedFile = path.join(stateDir, 'state', 'processed-upgrades.json');
+    // safe-git-allow: incremental-migration
     if (fs.existsSync(processedFile)) fs.unlinkSync(processedFile);
 
     // Only write NEXT.md (no versioned file)
@@ -135,6 +138,7 @@ Something new.
     // Remove versioned guides
     for (const f of fs.readdirSync(upgradesDir)) {
       if (/^\d+\.\d+\.\d+\.md$/.test(f)) {
+        // safe-git-allow: incremental-migration
         fs.unlinkSync(path.join(upgradesDir, f));
       }
     }
@@ -150,7 +154,9 @@ Something new.
   it('delivers only guides between previousVersion and currentVersion', () => {
     // Clean state
     const processedFile = path.join(stateDir, 'state', 'processed-upgrades.json');
+    // safe-git-allow: incremental-migration
     if (fs.existsSync(processedFile)) fs.unlinkSync(processedFile);
+    // safe-git-allow: incremental-migration
     if (fs.existsSync(pendingPath())) fs.unlinkSync(pendingPath());
 
     writeGuide('0.9.80', `# Guide v0.9.80
@@ -183,6 +189,7 @@ Old feature.
   it('upgrade-ack (clearPendingGuide) removes the pending file', () => {
     // Clean state
     const processedFile = path.join(stateDir, 'state', 'processed-upgrades.json');
+    // safe-git-allow: incremental-migration
     if (fs.existsSync(processedFile)) fs.unlinkSync(processedFile);
 
     writeGuide('0.9.86', GUIDE_V86);
@@ -202,6 +209,7 @@ Old feature.
   it('after ack, re-processing finds nothing new (guides marked as processed)', () => {
     // Clean state
     const processedFile = path.join(stateDir, 'state', 'processed-upgrades.json');
+    // safe-git-allow: incremental-migration
     if (fs.existsSync(processedFile)) fs.unlinkSync(processedFile);
 
     writeGuide('0.9.86', GUIDE_V86);
@@ -222,6 +230,7 @@ Old feature.
   it('pending guide survives failed notification (not deleted by processor)', async () => {
     // Clean state
     const processedFile = path.join(stateDir, 'state', 'processed-upgrades.json');
+    // safe-git-allow: incremental-migration
     if (fs.existsSync(processedFile)) fs.unlinkSync(processedFile);
 
     writeGuide('0.9.86', GUIDE_V86);
@@ -280,9 +289,12 @@ Old feature.
   it('sequential version bumps each deliver their own guide exactly once', () => {
     // Clean ALL state including guide files from previous tests
     const processedFile = path.join(stateDir, 'state', 'processed-upgrades.json');
+    // safe-git-allow: incremental-migration
     if (fs.existsSync(processedFile)) fs.unlinkSync(processedFile);
+    // safe-git-allow: incremental-migration
     if (fs.existsSync(pendingPath())) fs.unlinkSync(pendingPath());
     for (const f of fs.readdirSync(upgradesDir)) {
+      // safe-git-allow: incremental-migration
       fs.unlinkSync(path.join(upgradesDir, f));
     }
 
@@ -313,9 +325,12 @@ Old feature.
   it('pending guide includes header with guide count', () => {
     // Clean ALL state including guide files from previous tests
     const processedFile = path.join(stateDir, 'state', 'processed-upgrades.json');
+    // safe-git-allow: incremental-migration
     if (fs.existsSync(processedFile)) fs.unlinkSync(processedFile);
+    // safe-git-allow: incremental-migration
     if (fs.existsSync(pendingPath())) fs.unlinkSync(pendingPath());
     for (const f of fs.readdirSync(upgradesDir)) {
+      // safe-git-allow: incremental-migration
       fs.unlinkSync(path.join(upgradesDir, f));
     }
 

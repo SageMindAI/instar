@@ -92,6 +92,7 @@ beforeEach(() => {
 
 afterEach(() => {
   server.close();
+  // safe-git-allow: incremental-migration
   fs.rmSync(tmpDir, { recursive: true, force: true });
 });
 

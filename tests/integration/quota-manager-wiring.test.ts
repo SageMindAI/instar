@@ -130,6 +130,7 @@ describe('QuotaManager Integration', () => {
 
   afterEach(() => {
     vi.useRealTimers();
+    // safe-git-allow: incremental-migration
     fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 

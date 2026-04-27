@@ -65,6 +65,7 @@ function createTestProject(opts: { port?: number; jobs?: object[] } = {}): TestP
     stateDir,
     jobsPath,
     configPath,
+    // safe-git-allow: incremental-migration
     cleanup: () => fs.rmSync(dir, { recursive: true, force: true }),
   };
 }
@@ -196,6 +197,7 @@ describe('refreshJobs()', () => {
       project = createTestProject({ jobs: [makeJob('health-check')] });
 
       // Delete config to simulate missing config
+      // safe-git-allow: incremental-migration
       fs.unlinkSync(project.configPath);
 
       refreshHooksAndSettings(project.dir, project.stateDir);

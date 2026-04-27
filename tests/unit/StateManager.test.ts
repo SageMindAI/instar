@@ -19,6 +19,7 @@ describe('StateManager', () => {
   });
 
   afterEach(() => {
+    // safe-git-allow: incremental-migration
     fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 
@@ -260,11 +261,13 @@ describe('StateManager', () => {
   describe('Empty Directory Handling', () => {
     it('returns empty list when sessions dir does not exist', () => {
       // Remove the sessions directory
+      // safe-git-allow: incremental-migration
       fs.rmSync(path.join(tmpDir, 'state', 'sessions'), { recursive: true, force: true });
       expect(state.listSessions()).toEqual([]);
     });
 
     it('returns empty events when logs dir does not exist', () => {
+      // safe-git-allow: incremental-migration
       fs.rmSync(path.join(tmpDir, 'logs'), { recursive: true, force: true });
       expect(state.queryEvents({})).toEqual([]);
     });

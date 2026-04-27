@@ -22,6 +22,7 @@ import type { TaskBranch, MergeResult } from '../../src/core/BranchManager.js';
 // ── Helpers ──────────────────────────────────────────────────────────
 
 function git(args: string[], cwd: string): string {
+  // safe-git-allow: incremental-migration
   return execFileSync('git', args, {
     cwd,
     encoding: 'utf-8',
@@ -134,6 +135,7 @@ describe('BranchManager E2E lifecycle', () => {
   });
 
   afterEach(() => {
+    // safe-git-allow: incremental-migration
     fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 
@@ -231,12 +233,14 @@ describe('BranchManager E2E lifecycle', () => {
       git(['commit', '-m', 'task: update port to 8080'], tmpDir);
 
       // Step 4: Switch to main and make a CONFLICTING change to the same file
+      // safe-git-allow: incremental-migration
       execFileSync('git', ['checkout', 'main'], { cwd: tmpDir });
       fs.writeFileSync(path.join(tmpDir, 'config.ts'), 'export const PORT = 4000;\nexport const DEBUG = true;\n');
       git(['add', 'config.ts'], tmpDir);
       git(['commit', '-m', 'main: update port to 4000'], tmpDir);
 
       // Switch back to the task branch before completeBranch
+      // safe-git-allow: incremental-migration
       execFileSync('git', ['checkout', 'task/test-machine/update-config'], { cwd: tmpDir });
 
       // Step 5: Try to complete the branch -- merge should fail
@@ -321,6 +325,7 @@ describe('BranchManager E2E lifecycle', () => {
       git(['commit', '-m', 'feat: add feature A'], tmpDir);
 
       // Step 3: Switch back to main to create branch B
+      // safe-git-allow: incremental-migration
       execFileSync('git', ['checkout', 'main'], { cwd: tmpDir });
 
       const branchB = bm.createBranch({
@@ -342,6 +347,7 @@ describe('BranchManager E2E lifecycle', () => {
 
       // Step 6: Complete branch A first
       // Need to switch to branch A before completing
+      // safe-git-allow: incremental-migration
       execFileSync('git', ['checkout', 'task/test-machine/feature-a'], { cwd: tmpDir });
       const resultA = bm.completeBranch(branchA.name);
       expect(resultA.success).toBe(true);
@@ -356,6 +362,7 @@ describe('BranchManager E2E lifecycle', () => {
       expect(fs.existsSync(path.join(tmpDir, 'feature-a.ts'))).toBe(true);
 
       // Step 9: Complete branch B
+      // safe-git-allow: incremental-migration
       execFileSync('git', ['checkout', 'task/test-machine/feature-b'], { cwd: tmpDir });
       const resultB = bm.completeBranch(branchB.name);
       expect(resultB.success).toBe(true);
@@ -453,6 +460,7 @@ describe('BranchManager E2E lifecycle', () => {
       fs.writeFileSync(path.join(tmpDir, 'orphan.ts'), 'orphan\n');
       git(['add', 'orphan.ts'], tmpDir);
       git(['commit', '-m', 'orphaned work'], tmpDir);
+      // safe-git-allow: incremental-migration
       execFileSync('git', ['checkout', 'main'], { cwd: tmpDir });
 
       // Step 2: Check health -- should detect orphan
@@ -567,6 +575,7 @@ describe('BranchManager E2E lifecycle', () => {
       expect(bm.getCurrentBranch()).toBe('task/test-machine/awareness-test');
 
       // Switch back to main
+      // safe-git-allow: incremental-migration
       execFileSync('git', ['checkout', 'main'], { cwd: tmpDir });
       expect(bm.isOnTaskBranch()).toBe(false);
       expect(bm.getCurrentBranch()).toBe('main');

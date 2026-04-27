@@ -58,6 +58,7 @@ function throwingResolver(code: string): DNSResolverFn {
 
 afterEach(() => {
   for (const dir of tmpDirs) {
+    // safe-git-allow: incremental-migration
     try { fs.rmSync(dir, { recursive: true, force: true }); } catch { /* ignore */ }
   }
   tmpDirs = [];

@@ -19,6 +19,7 @@ describe('Self-Knowledge Init/Doctor (Phase 3)', () => {
   });
 
   afterEach(() => {
+    // safe-git-allow: incremental-migration
     fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 

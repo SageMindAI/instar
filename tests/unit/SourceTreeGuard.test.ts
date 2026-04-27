@@ -17,6 +17,7 @@ function mkSandbox(): string {
 
 function rmrf(p: string): void {
   try {
+    // safe-git-allow: incremental-migration
     fs.rmSync(p, { recursive: true, force: true });
   } catch {
     // best-effort
@@ -333,6 +334,7 @@ describe('SourceTreeGuard — symlink canonicalization', () => {
   });
   afterEach(() => {
     try {
+      // safe-git-allow: incremental-migration
       fs.unlinkSync(linkDir);
     } catch {
       // ignore

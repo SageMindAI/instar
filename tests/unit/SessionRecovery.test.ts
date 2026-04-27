@@ -77,6 +77,7 @@ describe('SessionRecovery', () => {
     vi.useRealTimers();
     vi.restoreAllMocks();
     try {
+      // safe-git-allow: incremental-migration
       fs.rmSync(tmpDir, { recursive: true, force: true });
     } catch { /* cleanup best-effort */ }
   });

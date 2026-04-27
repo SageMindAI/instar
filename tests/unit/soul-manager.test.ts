@@ -37,6 +37,7 @@ function createTestSetup(opts?: { skipInit?: boolean }): TestSetup {
     dir,
     stateDir,
     manager,
+    // safe-git-allow: incremental-migration
     cleanup: () => fs.rmSync(dir, { recursive: true, force: true }),
   };
 }
@@ -317,6 +318,7 @@ describe('SoulManager', () => {
 
     it('reports no drift without init snapshot', () => {
       // Delete the init snapshot
+      // safe-git-allow: incremental-migration
       fs.unlinkSync(path.join(setup.stateDir, 'state', 'soul.init.md'));
 
       const drift = setup.manager.analyzeDrift();

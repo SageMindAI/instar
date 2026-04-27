@@ -133,6 +133,7 @@ describe('WorktreeMonitor', () => {
 
   afterEach(() => {
     monitor.stop();
+    // safe-git-allow: incremental-migration
     fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 

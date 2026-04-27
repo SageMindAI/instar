@@ -26,6 +26,7 @@ describe('AgentServer — graceful shutdown', () => {
   });
 
   afterEach(() => {
+    // safe-git-allow: incremental-migration
     fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 

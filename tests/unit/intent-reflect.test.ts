@@ -56,6 +56,7 @@ describe('intent reflect', () => {
   afterEach(() => {
     process.exit = originalExit;
     vi.restoreAllMocks();
+    // safe-git-allow: incremental-migration
     fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 

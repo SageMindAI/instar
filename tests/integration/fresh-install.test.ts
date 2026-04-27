@@ -18,6 +18,7 @@ describe('Fresh install: instar init <project-name>', () => {
   const projectDir = path.join(testBase, projectName);
 
   afterAll(() => {
+    // safe-git-allow: incremental-migration
     fs.rmSync(testBase, { recursive: true, force: true });
   });
 
@@ -252,6 +253,7 @@ describe('Existing project: instar init (no project name)', () => {
   const testDir = fs.mkdtempSync(path.join(os.tmpdir(), 'instar-existing-'));
 
   afterAll(() => {
+    // safe-git-allow: incremental-migration
     fs.rmSync(testDir, { recursive: true, force: true });
   });
 
@@ -288,6 +290,7 @@ describe('Existing project: instar init (no project name)', () => {
     expect(result).toContain('This is my project.');
     expect(result).toContain('## Agent Infrastructure');
 
+    // safe-git-allow: incremental-migration
     fs.rmSync(anotherDir, { recursive: true, force: true });
   });
 
@@ -303,6 +306,7 @@ describe('Existing project: instar init (no project name)', () => {
     const count = (result.match(/## Agent Infrastructure/g) || []).length;
     expect(count).toBe(1);
 
+    // safe-git-allow: incremental-migration
     fs.rmSync(anotherDir, { recursive: true, force: true });
   });
 });

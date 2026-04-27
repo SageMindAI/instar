@@ -564,6 +564,7 @@ export class SoulManager {
       try {
         const stat = fs.statSync(this.lockPath);
         if (Date.now() - stat.mtimeMs > 30000) {
+          // safe-git-allow: incremental-migration
           fs.unlinkSync(this.lockPath);
           break;
         }
@@ -586,6 +587,7 @@ export class SoulManager {
 
   private releaseLock(): void {
     try {
+      // safe-git-allow: incremental-migration
       fs.unlinkSync(this.lockPath);
     } catch {
       // Already released

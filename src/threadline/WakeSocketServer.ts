@@ -47,6 +47,7 @@ export class WakeSocketServer extends EventEmitter {
     // Clean up stale socket file
     if (fs.existsSync(this.socketPath)) {
       try {
+        // safe-git-allow: incremental-migration
         fs.unlinkSync(this.socketPath);
       } catch {
         // May fail if another process holds it
@@ -112,6 +113,7 @@ export class WakeSocketServer extends EventEmitter {
     // Remove socket file
     try {
       if (fs.existsSync(this.socketPath)) {
+        // safe-git-allow: incremental-migration
         fs.unlinkSync(this.socketPath);
       }
     } catch {

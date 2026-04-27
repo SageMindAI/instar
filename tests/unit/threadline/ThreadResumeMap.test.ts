@@ -14,6 +14,7 @@ function createTempDir(): { dir: string; stateDir: string; cleanup: () => void }
   return {
     dir,
     stateDir,
+    // safe-git-allow: incremental-migration
     cleanup: () => fs.rmSync(dir, { recursive: true, force: true }),
   };
 }
@@ -52,6 +53,7 @@ function createFakeJsonl(uuid: string): string {
 function cleanupFakeJsonl(): void {
   const testProjectDir = path.join(os.homedir(), '.claude', 'projects', 'threadline-test-project');
   try {
+    // safe-git-allow: incremental-migration
     fs.rmSync(testProjectDir, { recursive: true, force: true });
   } catch {
     // May not exist
@@ -527,6 +529,7 @@ describe('ThreadResumeMap', () => {
       const threadlineDir = path.join(freshStateDir, 'threadline');
       expect(fs.existsSync(threadlineDir)).toBe(true);
 
+      // safe-git-allow: incremental-migration
       fs.rmSync(freshDir, { recursive: true, force: true });
     });
   });

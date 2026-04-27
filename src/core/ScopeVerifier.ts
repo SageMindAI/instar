@@ -446,6 +446,7 @@ export class ScopeVerifier {
 
   private detectGitRemote(): string | null {
     try {
+      // safe-git-allow: incremental-migration
       return execFileSync('git', ['remote', 'get-url', 'origin'], {
         cwd: this.config.projectDir,
         encoding: 'utf-8',

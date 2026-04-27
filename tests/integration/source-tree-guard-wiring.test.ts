@@ -141,12 +141,16 @@ describe('SourceTreeGuard — legitimate sandbox construction succeeds', () => {
     stateDir = path.join(sandbox, '.instar');
     // Make it a real git repo so BranchManager has something to work with,
     // though the guard decision happens before git runs.
+    // safe-git-allow: incremental-migration
     execFileSync('git', ['init', '-b', 'main'], { cwd: sandbox });
+    // safe-git-allow: incremental-migration
     execFileSync('git', ['config', 'user.email', 'test@test.com'], { cwd: sandbox });
+    // safe-git-allow: incremental-migration
     execFileSync('git', ['config', 'user.name', 'Test'], { cwd: sandbox });
   });
 
   afterEach(() => {
+    // safe-git-allow: incremental-migration
     fs.rmSync(sandbox, { recursive: true, force: true });
   });
 

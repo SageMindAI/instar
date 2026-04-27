@@ -289,6 +289,7 @@ export class FeedbackManager {
       fs.writeFileSync(tmpPath, JSON.stringify(items, null, 2));
       fs.renameSync(tmpPath, this.feedbackFile);
     } catch (err) {
+      // safe-git-allow: incremental-migration
       try { fs.unlinkSync(tmpPath); } catch { /* ignore */ }
       throw err;
     }

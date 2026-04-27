@@ -49,6 +49,7 @@ function branchStateFile(stateDir: string): string {
 }
 
 function git(cwd: string, ...args: string[]): string {
+  // safe-git-allow: incremental-migration
   return execFileSync('git', args, {
     cwd,
     encoding: 'utf-8',
@@ -77,11 +78,16 @@ describe('BranchManager wiring integrity', () => {
     stateDir = path.join(tmpDir, '.instar');
 
     // Initialize a real git repository
+    // safe-git-allow: incremental-migration
     execFileSync('git', ['init', '-b', 'main'], { cwd: tmpDir });
+    // safe-git-allow: incremental-migration
     execFileSync('git', ['config', 'user.email', 'test@test.com'], { cwd: tmpDir });
+    // safe-git-allow: incremental-migration
     execFileSync('git', ['config', 'user.name', 'Test'], { cwd: tmpDir });
     fs.writeFileSync(path.join(tmpDir, 'README.md'), '# Test\n');
+    // safe-git-allow: incremental-migration
     execFileSync('git', ['add', '.'], { cwd: tmpDir });
+    // safe-git-allow: incremental-migration
     execFileSync('git', ['commit', '-m', 'init'], { cwd: tmpDir });
   });
 
@@ -92,6 +98,7 @@ describe('BranchManager wiring integrity', () => {
     } catch {
       // Repo may already be cleaned up
     }
+    // safe-git-allow: incremental-migration
     fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 

@@ -628,6 +628,7 @@ export class SessionMigrator extends EventEmitter {
   private releaseLock(): void {
     try {
       if (fs.existsSync(this.lockPath)) {
+        // safe-git-allow: incremental-migration
         fs.unlinkSync(this.lockPath);
       }
     } catch {

@@ -14,6 +14,7 @@ function createTmpState(): { stateDir: string; cleanup: () => void } {
   const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), 'helper-watchdog-test-'));
   return {
     stateDir,
+    // safe-git-allow: incremental-migration
     cleanup: () => fs.rmSync(stateDir, { recursive: true, force: true }),
   };
 }

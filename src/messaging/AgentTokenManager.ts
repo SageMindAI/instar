@@ -204,6 +204,7 @@ export function deleteAgentToken(agentName: string): boolean {
 
   const filePath = tokenPath(agentName);
   try {
+    // safe-git-allow: incremental-migration
     fs.unlinkSync(filePath);
     return true;
   } catch {

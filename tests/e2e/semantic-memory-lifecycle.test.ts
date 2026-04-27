@@ -261,6 +261,7 @@ Use email for longer-form communication.
   afterAll(async () => {
     await server.stop();
     semanticMemory.close();
+    // safe-git-allow: incremental-migration
     fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 

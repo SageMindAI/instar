@@ -54,6 +54,7 @@ function generateKeypair() {
 function verifyStash() {
   let stashList;
   try {
+    // safe-git-allow: incremental-migration
     stashList = execSync('git stash list', { encoding: 'utf-8' });
   } catch (err) {
     logStep(`No stash present (or not a git repo). Skipping stash verification.`);

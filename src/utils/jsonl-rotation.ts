@@ -71,6 +71,7 @@ export function maybeRotateJsonl(filePath: string, options?: RotationOptions): b
     try {
       const tmpPath = filePath + '.rotation-tmp';
       if (fs.existsSync(tmpPath)) {
+        // safe-git-allow: incremental-migration
         fs.unlinkSync(tmpPath);
       }
     } catch {

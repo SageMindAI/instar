@@ -68,6 +68,7 @@ describe('PostUpdateMigrator — telegram-reply.sh 408 migration', () => {
   });
 
   afterEach(() => {
+    // safe-git-allow: incremental-migration
     fs.rmSync(projectDir, { recursive: true, force: true });
   });
 
@@ -180,6 +181,7 @@ describe('PostUpdateMigrator — slack-reply.sh 408 migration', () => {
     scriptPath = path.join(scriptsDir, 'slack-reply.sh');
   });
   afterEach(() => {
+    // safe-git-allow: incremental-migration
     fs.rmSync(projectDir, { recursive: true, force: true });
   });
 
@@ -220,6 +222,7 @@ describe('PostUpdateMigrator — whatsapp-reply.sh 408 migration', () => {
     scriptPath = path.join(whatsappScriptsDir, 'whatsapp-reply.sh');
   });
   afterEach(() => {
+    // safe-git-allow: incremental-migration
     fs.rmSync(projectDir, { recursive: true, force: true });
   });
 

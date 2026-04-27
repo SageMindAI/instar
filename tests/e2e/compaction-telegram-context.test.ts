@@ -38,6 +38,7 @@ describe('Compaction & Telegram context recovery E2E', () => {
   });
 
   afterAll(() => {
+    // safe-git-allow: incremental-migration
     fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 

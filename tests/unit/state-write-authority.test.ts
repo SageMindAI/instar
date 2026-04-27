@@ -154,7 +154,9 @@ describe('OfflineQueue', () => {
 
   afterEach(() => {
     process.env.HOME = originalHome;
+    // safe-git-allow: incremental-migration
     fs.rmSync(tmpDir, { recursive: true, force: true });
+    // safe-git-allow: incremental-migration
     fs.rmSync(tmpHome, { recursive: true, force: true });
   });
 

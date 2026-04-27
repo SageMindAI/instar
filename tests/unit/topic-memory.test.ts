@@ -38,6 +38,7 @@ describe('TopicMemory', () => {
 
   afterEach(() => {
     topicMemory.close();
+    // safe-git-allow: incremental-migration
     fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 
@@ -877,6 +878,7 @@ describe('TopicMemory', () => {
         expect(fresh.getLastImportStats()).toBeNull();
       } finally {
         fresh.close();
+        // safe-git-allow: incremental-migration
         fs.rmSync(freshDir, { recursive: true, force: true });
       }
     });
