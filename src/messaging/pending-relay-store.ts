@@ -321,6 +321,42 @@ export class PendingRelayStore {
     return row.n;
   }
 
+  /**
+   * Layer 3 sentinel selector — returns rows whose `state` is in
+   * (`queued`, `claimed`) and whose `next_attempt_at` (when set) is at
+   * or before `nowIso`. Sorted by `attempted_at` ascending so the
+   * sentinel can drain oldest-first within per-topic rate caps.
+   *
+   * The query is bounded at `limit` to prevent a runaway tick scan.
+   * The sentinel handles its own batching above this layer.
+   */
+  selectClaimable(nowIso: string, limit = 100): PendingRelayRow[] {
+    const stmt = this.db.prepare(
+      `SELECT * FROM entries
+         WHERE state IN ('queued', 'claimed')
+           AND (next_attempt_at IS NULL OR next_attempt_at <= @now)
+         ORDER BY attempted_at ASC
+         LIMIT @limit`,
+    );
+    return stmt.all({ now: nowIso, limit }) as PendingRelayRow[];
+  }
+
+  /**
+   * Layer 3 restore-purge — drops queued/claimed rows whose
+   * `attempted_at` is older than `cutoffIso`. Called once at sentinel
+   * startup (spec §3h). Returns the number of rows deleted so the
+   * caller can emit a one-line restore log.
+   */
+  purgeStaleClaimable(cutoffIso: string): number {
+    const stmt = this.db.prepare(
+      `DELETE FROM entries
+         WHERE state IN ('queued', 'claimed')
+           AND attempted_at < @cutoff`,
+    );
+    const result = stmt.run({ cutoff: cutoffIso });
+    return result.changes ?? 0;
+  }
+
   pathOnDisk(): string {
     return this.path;
   }

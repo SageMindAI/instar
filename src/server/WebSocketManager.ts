@@ -366,6 +366,17 @@ export class WebSocketManager {
    * Used by PasteManager for paste_delivered / paste_acknowledged events.
    */
   broadcastEvent(event: Record<string, unknown>): void {
+    // Notify in-process subscribers BEFORE the WebSocket fan-out so a
+    // listener (e.g. the Layer 3 DeliveryFailureSentinel) reacts even
+    // when no dashboard clients are connected. The sentinel does not
+    // need a live WebSocket — it needs the event itself.
+    for (const fn of this.eventSubscribers) {
+      try {
+        fn(event);
+      } catch (err) {
+        console.warn('[ws] in-process event subscriber threw:', err);
+      }
+    }
     if (this.clients.size === 0) return;
     const msg = JSON.stringify(event);
     for (const client of this.clients.values()) {
@@ -373,6 +384,23 @@ export class WebSocketManager {
         client.ws.send(msg);
       }
     }
+  }
+
+  /**
+   * Register an in-process subscriber for events broadcast through this
+   * manager. Returns an unsubscribe handle.
+   *
+   * Used by the Layer 3 DeliveryFailureSentinel to receive
+   * `delivery_failed` events emitted by the script-side detector
+   * (Layer 2c). The sentinel reacts in <1s rather than waiting for
+   * its 5-minute watchdog tick.
+   */
+  private eventSubscribers = new Set<(event: Record<string, unknown>) => void>();
+  subscribeEvents(fn: (event: Record<string, unknown>) => void): () => void {
+    this.eventSubscribers.add(fn);
+    return () => {
+      this.eventSubscribers.delete(fn);
+    };
   }
 
   private broadcastSessionList(): void {

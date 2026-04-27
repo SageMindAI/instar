@@ -177,6 +177,9 @@ import type { PasteManager } from '../paste/PasteManager.js';
 import type { WebSocketManager } from './WebSocketManager.js';
 import { TruncationDetector } from '../paste/TruncationDetector.js';
 import { SecretDrop } from './SecretDrop.js';
+import { matchesSystemTemplate } from '../messaging/system-templates.js';
+import { resolvePendingRelayPath } from '../messaging/pending-relay-store.js';
+import Database from 'better-sqlite3';
 
 /**
  * Build the /whoami request handler.
@@ -644,6 +647,35 @@ export function createRoutes(ctx: RouteContext): Router {
 
   // Truncation detector for Telegram messages (Drop Zone integration)
   const truncationDetector = new TruncationDetector();
+
+  // ── /telegram/reply X-Instar-DeliveryId dedup LRU (Layer 3 §3d step 4) ──
+  // 24h sliding window of seen delivery_ids. Map preserves insertion order;
+  // we GC entries whose timestamp is older than 24h on each access.
+  const DELIVERY_LRU_MAX = 10_000;
+  const DELIVERY_LRU_TTL_MS = 24 * 60 * 60 * 1000;
+  const deliveryIdLru = new Map<string, number>();
+  function deliveryLruHas(id: string): boolean {
+    const at = deliveryIdLru.get(id);
+    if (at === undefined) return false;
+    if (Date.now() - at > DELIVERY_LRU_TTL_MS) {
+      deliveryIdLru.delete(id);
+      return false;
+    }
+    return true;
+  }
+  function deliveryLruRecord(id: string): void {
+    if (deliveryIdLru.size >= DELIVERY_LRU_MAX) {
+      // Drop oldest insertion-ordered entry.
+      const first = deliveryIdLru.keys().next().value;
+      if (first !== undefined) deliveryIdLru.delete(first);
+    }
+    deliveryIdLru.set(id, Date.now());
+  }
+  // Wrap Map.has to use TTL-aware logic without rewriting call sites.
+  // We export via a small object so the route handler can call .has and .set.
+  // (Not using a Set — we need TTL.) Helper functions above provide that.
+  const deliveryIdLruHelpers = { has: deliveryLruHas, record: deliveryLruRecord };
+  void deliveryIdLruHelpers; // referenced via the helpers; alias kept for grep
 
   // ── Messaging tone gate ──────────────────────────────────────────
   //
@@ -4454,6 +4486,32 @@ export function createRoutes(ctx: RouteContext): Router {
       return;
     }
 
+    // ── X-Instar-DeliveryId server-side dedup (Layer 3 spec §3d step 4) ──
+    // 24h LRU keyed on the header value. A duplicate POST with the same
+    // delivery_id returns 200 idempotent without sending again. This
+    // closes the "200-but-client-blind" double-send class where the
+    // sentinel re-sends a queued message that actually landed the first
+    // time but the script-side response was lost.
+    const deliveryIdHeader = req.headers['x-instar-deliveryid'];
+    const deliveryId = Array.isArray(deliveryIdHeader) ? deliveryIdHeader[0] : deliveryIdHeader;
+    if (deliveryId && typeof deliveryId === 'string' && /^[0-9a-f-]{16,64}$/i.test(deliveryId)) {
+      if (deliveryLruHas(deliveryId)) {
+        res.json({ ok: true, topicId, idempotent: true });
+        return;
+      }
+    }
+
+    // ── X-Instar-System bypass (Layer 3 spec §3f) ──
+    // For sentinel-emitted templates, bypass the tone gate IF the body
+    // matches a known system template. The bypass is deliberately
+    // restricted to fixed templates whose content was reviewed at
+    // code-review time. Membership check uses regex / SHA-256 against
+    // the compiled-in template set; arbitrary text fails through to the
+    // normal gate.
+    const systemHeader = req.headers['x-instar-system'];
+    const systemFlag = Array.isArray(systemHeader) ? systemHeader[0] : systemHeader;
+    const isSystemTemplate = systemFlag === 'true' && matchesSystemTemplate(text);
+
     // Outbound gate — single authority. Skipped for proxy messages (PresenceProxy
     // etc. are system-generated). The authority receives structured signals from
     // the junk-payload and dedup detectors alongside conversational context, and
@@ -4464,6 +4522,7 @@ export function createRoutes(ctx: RouteContext): Router {
     const allowDuplicate = metadata?.allowDuplicate === true;
     if (
       !isProxy &&
+      !isSystemTemplate &&
       (await checkOutboundMessage(text, 'telegram', res, {
         topicId,
         allowDebugText,
@@ -4479,9 +4538,60 @@ export function createRoutes(ctx: RouteContext): Router {
       if (!isProxy) {
         ctx.sessionManager.clearInjectionTracker(topicId);
       }
+      // Record successful delivery in the dedup LRU so a sentinel retry
+      // with the same delivery_id returns 200-idempotent.
+      if (deliveryId && typeof deliveryId === 'string' && /^[0-9a-f-]{16,64}$/i.test(deliveryId)) {
+        deliveryLruRecord(deliveryId);
+      }
       res.json({ ok: true, topicId });
     } catch (err) {
       res.status(500).json({ error: err instanceof Error ? err.message : String(err) });
+    }
+  });
+
+  // ── GET /delivery-queue (Layer 3 spec §3i) ──
+  // Authed read-only view of the pending-relay queue depth/oldest age
+  // for the current agent. Used by the dashboard "Pending Replies" panel
+  // and ops health checks. Read-only: never mutates queue rows.
+  router.get('/delivery-queue', (_req, res) => {
+    const stateDir = ctx.config.stateDir;
+    const agentId = ctx.config.projectName;
+    if (!stateDir || !agentId) {
+      res.status(503).json({ error: 'state directory or agent id not configured' });
+      return;
+    }
+    const dbPath = resolvePendingRelayPath(stateDir, agentId);
+    let db: import('better-sqlite3').Database | null = null;
+    try {
+      db = new Database(dbPath, { readonly: true, fileMustExist: true });
+      const totalRow = db.prepare('SELECT COUNT(*) AS n FROM entries').get() as { n: number };
+      const total = totalRow?.n ?? 0;
+      const byState = db.prepare(
+        'SELECT state, COUNT(*) AS n FROM entries GROUP BY state',
+      ).all() as Array<{ state: string; n: number }>;
+      const oldestRow = db.prepare(
+        "SELECT MIN(attempted_at) AS oldest FROM entries WHERE state IN ('queued','claimed')",
+      ).get() as { oldest: string | null };
+      const oldestAgeSeconds = oldestRow?.oldest
+        ? Math.max(0, Math.floor((Date.now() - Date.parse(oldestRow.oldest)) / 1000))
+        : 0;
+      res.json({
+        depth: total,
+        oldest_age_seconds: oldestAgeSeconds,
+        by_state: Object.fromEntries(byState.map((r) => [r.state, r.n])),
+      });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      // Missing-file is a normal "no queue yet" state — return zeros, not 500.
+      if (/unable to open|no such file|does not exist|cannot open/i.test(msg)) {
+        res.json({ depth: 0, oldest_age_seconds: 0, by_state: {} });
+        return;
+      }
+      res.status(500).json({ error: msg });
+    } finally {
+      if (db) {
+        try { db.close(); } catch { /* best-effort */ }
+      }
     }
   });
 

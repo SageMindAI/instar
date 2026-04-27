@@ -44,7 +44,9 @@ import { createWorktreeRoutes, createOidcWorktreeRoutes } from './worktreeRoutes
 import type { WorktreeManager } from '../core/WorktreeManager.js';
 import { corsMiddleware, authMiddleware, requestTimeout, errorHandler, dashboardSecurityHeaders } from './middleware.js';
 import { WebSocketManager } from './WebSocketManager.js';
-import { assertSqliteAvailable } from '../messaging/pending-relay-store.js';
+import { assertSqliteAvailable, PendingRelayStore } from '../messaging/pending-relay-store.js';
+import { getOrCreateBootId } from './boot-id.js';
+import { DeliveryFailureSentinel } from '../monitoring/delivery-failure-sentinel.js';
 
 export class AgentServer {
   private app: Express;
@@ -56,6 +58,9 @@ export class AgentServer {
   private state: StateManager;
   private hookEventReceiver?: import('../monitoring/HookEventReceiver.js').HookEventReceiver;
   private routeContext: { wsManager: import('./WebSocketManager.js').WebSocketManager | null } | null = null;
+  private deliverySentinel: DeliveryFailureSentinel | null = null;
+  private deliveryStore: PendingRelayStore | null = null;
+  private toneGate: import('../core/MessagingToneGate.js').MessagingToneGate | null = null;
 
   constructor(options: {
     config: InstarConfig;
@@ -154,6 +159,7 @@ export class AgentServer {
     this.sessionManager = options.sessionManager;
     this.state = options.state;
     this.hookEventReceiver = options.hookEventReceiver ?? undefined;
+    this.toneGate = options.messagingToneGate ?? null;
     this.app = express();
 
     // Middleware
@@ -436,6 +442,19 @@ export class AgentServer {
       console.warn('[instar] sqlite boot self-check raised:', err);
     }
 
+    // Layer 3 spec §3b: create boot.id SYNCHRONOUSLY before binding the
+    // listener. The sentinel reads this at start() to disambiguate stale
+    // leases from prior boots (PID reuse). Any I/O failure here is
+    // non-fatal — boot id is best-effort infrastructure for the sentinel,
+    // which is itself feature-flagged default-off.
+    try {
+      if (this.config.stateDir) {
+        getOrCreateBootId(this.config.stateDir, this.config.version);
+      }
+    } catch (err) {
+      console.warn('[instar] boot.id creation raised (sentinel will fail to start):', err);
+    }
+
     return new Promise((resolve, reject) => {
       const host = this.config.host || '127.0.0.1';
       this.server = this.app.listen(this.config.port, host, () => {
@@ -457,6 +476,23 @@ export class AgentServer {
           this.routeContext.wsManager = this.wsManager;
         }
 
+        // ── Layer 3 DeliveryFailureSentinel — default-OFF feature flag ──
+        // Spec § 3j: `monitoring.deliveryFailureSentinel.enabled` defaults
+        // false. The sentinel only spins up when an operator explicitly
+        // opts in. Layer 1 + Layer 2 ship unconditionally; Layer 3 is the
+        // opt-in upgrade for general delivery resilience.
+        const monitoringCfg = (this.config as { monitoring?: { deliveryFailureSentinel?: { enabled?: boolean } } }).monitoring;
+        const sentinelEnabled = monitoringCfg?.deliveryFailureSentinel?.enabled === true;
+        if (sentinelEnabled && this.config.stateDir) {
+          try {
+            this.startDeliverySentinel().catch((err) => {
+              console.warn('[instar] delivery-failure-sentinel start failed:', err);
+            });
+          } catch (err) {
+            console.warn('[instar] delivery-failure-sentinel start raised:', err);
+          }
+        }
+
         resolve();
       });
       this.server.on('error', (err: NodeJS.ErrnoException) => {
@@ -470,10 +506,89 @@ export class AgentServer {
   }
 
   /**
+   * Spin up the Layer 3 DeliveryFailureSentinel. Opens the per-agent
+   * pending-relay SQLite store (creating it lazily if needed), wires
+   * the sentinel into the WebSocket event stream so `delivery_failed`
+   * events drive recovery in <1s, and arms the watchdog tick.
+   *
+   * Failures here are isolated — the sentinel is opt-in default-OFF
+   * infrastructure, not a critical-path dependency. Any error here is
+   * logged and the rest of the server continues running.
+   */
+  private async startDeliverySentinel(): Promise<void> {
+    const stateDir = this.config.stateDir;
+    const agentId = this.config.projectName;
+    if (!stateDir || !agentId) return;
+
+    let store: PendingRelayStore;
+    try {
+      store = PendingRelayStore.open(agentId, stateDir);
+    } catch (err) {
+      console.warn('[delivery-sentinel] pending-relay-store open failed; sentinel disabled:', err);
+      return;
+    }
+    this.deliveryStore = store;
+
+    const bootId = (await import('./boot-id.js')).getCurrentBootId();
+    if (!bootId) {
+      console.warn('[delivery-sentinel] bootId not initialized; sentinel cannot start');
+      return;
+    }
+
+    const configPath = path.join(stateDir, 'config.json');
+    const sentinel = new DeliveryFailureSentinel(
+      {
+        store,
+        configPath,
+        readConfig: () => ({
+          port: this.config.port,
+          authToken: this.config.authToken ?? '',
+          agentId,
+        }),
+        bootId,
+        toneGate: this.toneGate,
+        subscribeFailureEvents: this.wsManager
+          ? (listener) => {
+              const handler = (event: Record<string, unknown>) => {
+                if (event.type === 'delivery_failed' && event.agentId === agentId) {
+                  listener(event as unknown as { delivery_id: string; topic_id: number; agentId: string });
+                }
+              };
+              return this.wsManager!.subscribeEvents(handler);
+            }
+          : undefined,
+      },
+    );
+    this.deliverySentinel = sentinel;
+    await sentinel.start();
+    console.log('[instar] delivery-failure-sentinel started (Layer 3 recovery active)');
+  }
+
+  /**
    * Stop the HTTP server gracefully.
    * Closes keep-alive connections after a timeout to prevent hanging.
    */
   async stop(): Promise<void> {
+    // Stop the Layer 3 sentinel BEFORE the WebSocket manager — the
+    // sentinel's SSE subscription needs an alive wsManager to clean up
+    // its listener. Order: sentinel → wsManager → server.
+    if (this.deliverySentinel) {
+      try {
+        await this.deliverySentinel.stop();
+      } catch (err) {
+        console.warn('[instar] delivery-failure-sentinel stop raised:', err);
+      }
+      this.deliverySentinel = null;
+    }
+    if (this.deliveryStore) {
+      try {
+        this.deliveryStore.close();
+      } catch {
+        // best-effort
+      }
+      this.deliveryStore = null;
+    }
+
     // Shutdown WebSocket manager first
     if (this.wsManager) {
       this.wsManager.shutdown();

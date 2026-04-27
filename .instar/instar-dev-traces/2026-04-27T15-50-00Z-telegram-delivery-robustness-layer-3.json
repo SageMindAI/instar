@@ -1,0 +1,33 @@
+{
+  "sessionId": "echo-telegram-delivery-robustness-layer-3",
+  "timestamp": "2026-04-27T15:50:00.000Z",
+  "artifactPath": "upgrades/side-effects/telegram-delivery-robustness-layer-3.md",
+  "artifactSha256": "47218b598a86f23df99664ec648efb67ac28c02591150d7cf9b90576bd2cb05a",
+  "specPath": "docs/specs/telegram-delivery-robustness.md",
+  "coveredFiles": [
+    "src/monitoring/delivery-failure-sentinel.ts",
+    "src/monitoring/delivery-failure-sentinel/recovery-policy.ts",
+    "src/messaging/system-templates.ts",
+    "src/messaging/whoami-cache.ts",
+    "src/messaging/secret-patterns.ts",
+    "src/messaging/local-tone-check.ts",
+    "src/messaging/pending-relay-store.ts",
+    "src/server/boot-id.ts",
+    "src/server/AgentServer.ts",
+    "src/server/WebSocketManager.ts",
+    "src/server/routes.ts",
+    "tests/unit/recovery-policy.test.ts",
+    "tests/unit/system-templates.test.ts",
+    "tests/unit/whoami-cache.test.ts",
+    "tests/unit/boot-id.test.ts",
+    "tests/unit/delivery-queue-route.test.ts",
+    "tests/integration/sentinel-recovery.test.ts",
+    "tests/integration/sentinel-circuit-breaker.test.ts",
+    "tests/integration/sentinel-tone-gate-recovery.test.ts",
+    "tests/integration/sentinel-stampede-digest.test.ts"
+  ],
+  "phase": "complete",
+  "secondPass": "in-scope-followup",
+  "reviewerConcurred": true,
+  "convergenceNote": "Layer 3 implementation of the already-converged docs/specs/telegram-delivery-robustness.md spec. Builds on Layer 1 (commit f9b5e3bb, PR #100) and Layer 2 (commit 5b953c17, PR #101). Default-OFF feature flag (monitoring.deliveryFailureSentinel.enabled) — Layer 3 ships behind opt-in until the canary criteria in spec § 3i are met. Layer 1 alone closes the originating incident; Layer 3 is the upgrade for general delivery resilience. 5 unit test files (63 cases), 4 integration test files (5 cases) — all NEW tests pass; pre-existing failing tests (security.test.ts > zero execSync; ListenerSessionManager > starts in dead state; agent-registry > port allocation) remain failing as documented in the task scope and are not introduced by this PR."
+}
