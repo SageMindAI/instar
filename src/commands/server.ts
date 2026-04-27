@@ -40,6 +40,7 @@ import { UpgradeGuideProcessor } from '../core/UpgradeGuideProcessor.js';
 import { EvolutionManager } from '../core/EvolutionManager.js';
 import { TopicMemory } from '../memory/TopicMemory.js';
 import { SemanticMemory } from '../memory/SemanticMemory.js';
+import { WorkingMemoryAssembler } from '../memory/WorkingMemoryAssembler.js';
 import { QuotaTracker } from '../monitoring/QuotaTracker.js';
 import { AccountSwitcher } from '../monitoring/AccountSwitcher.js';
 import { QuotaNotifier } from '../monitoring/QuotaNotifier.js';
@@ -3324,6 +3325,10 @@ export async function startServer(options: StartOptions): Promise<void> {
       });
     }
 
+    // WorkingMemoryAssembler is initialized after activitySentinel (see below)
+    // so it can wire episodicMemory from the sentinel.
+    let workingMemory: WorkingMemoryAssembler | undefined;
+
     // Fast startup purge — remove session records for dead tmux sessions BEFORE
     // monitoring starts. Prevents the death spiral where stale sessions overwhelm
     // the health endpoint (synchronous tmux has-session calls) and cause the
@@ -3537,6 +3542,15 @@ export async function startServer(options: StartOptions): Promise<void> {
 
       console.log(pc.green('  Episodic memory sentinel enabled (LLM-powered digestion)'));
     }
+
+    // Initialize WorkingMemoryAssembler — token-budgeted context assembly for session-start hooks.
+    // Placed after activitySentinel so episodicMemory can be wired from the sentinel.
+    workingMemory = new WorkingMemoryAssembler({
+      semanticMemory,
+      episodicMemory: activitySentinel?.getEpisodicMemory(),
+    });
+    const epStatus = activitySentinel ? 'yes' : 'no';
+    console.log(pc.green(`  WorkingMemoryAssembler: ready (semantic: ${semanticMemory ? 'yes' : 'no'}, episodic: ${epStatus})`));
 
     // Session Watchdog — auto-remediation for stuck commands
     let watchdog: SessionWatchdog | undefined;
@@ -6043,7 +6057,7 @@ export async function startServer(options: StartOptions): Promise<void> {
     const { InitiativeTracker } = await import('../core/InitiativeTracker.js');
     const initiativeTracker = new InitiativeTracker(config.stateDir);
 
-    const server = new AgentServer({ config, sessionManager, state, scheduler, telegram, relationships, feedback, feedbackAnomalyDetector, dispatches, updateChecker, autoUpdater, autoDispatcher, quotaTracker, quotaManager, publisher, viewer, tunnel, evolution, watchdog, topicMemory, triageNurse, projectMapper, coherenceGate: scopeVerifier, contextHierarchy, canonicalState, operationGate, sentinel, adaptiveTrust, memoryMonitor, orphanReaper, coherenceMonitor, commitmentTracker, semanticMemory, activitySentinel, messageRouter, summarySentinel, spawnManager, systemReviewer, capabilityMapper, selfKnowledgeTree, coverageAuditor, topicResumeMap: _topicResumeMap ?? undefined, autonomyManager, trustElevationTracker, autonomousEvolution, coordinator: coordinator.enabled ? coordinator : undefined, localSigningKeyPem, whatsapp: whatsappAdapter, slack: slackAdapter, imessage: imessageAdapter, whatsappBusinessBackend, messageBridge, hookEventReceiver, worktreeMonitor, subagentTracker, instructionsVerifier, handshakeManager: threadlineHandshake, threadlineRouter, threadlineRelayClient, threadlineReplyWaiters, listenerManager: listenerManager ?? undefined, responseReviewGate, messagingToneGate, outboundDedupGate, telemetryHeartbeat, pasteManager, featureRegistry, discoveryEvaluator, unifiedTrust, liveConfig, sharedStateLedger, ledgerSessionRegistry, worktreeManager, oidcEnrolledRepos: parallelDevConfig?.oidcEnrolledRepos, initiativeTracker, proxyCoordinator });
+    const server = new AgentServer({ config, sessionManager, state, scheduler, telegram, relationships, feedback, feedbackAnomalyDetector, dispatches, updateChecker, autoUpdater, autoDispatcher, quotaTracker, quotaManager, publisher, viewer, tunnel, evolution, watchdog, topicMemory, triageNurse, projectMapper, coherenceGate: scopeVerifier, contextHierarchy, canonicalState, operationGate, sentinel, adaptiveTrust, memoryMonitor, orphanReaper, coherenceMonitor, commitmentTracker, semanticMemory, activitySentinel, messageRouter, summarySentinel, spawnManager, systemReviewer, capabilityMapper, selfKnowledgeTree, coverageAuditor, topicResumeMap: _topicResumeMap ?? undefined, autonomyManager, trustElevationTracker, autonomousEvolution, coordinator: coordinator.enabled ? coordinator : undefined, localSigningKeyPem, whatsapp: whatsappAdapter, slack: slackAdapter, imessage: imessageAdapter, whatsappBusinessBackend, messageBridge, hookEventReceiver, worktreeMonitor, subagentTracker, instructionsVerifier, handshakeManager: threadlineHandshake, threadlineRouter, threadlineRelayClient, threadlineReplyWaiters, listenerManager: listenerManager ?? undefined, responseReviewGate, messagingToneGate, outboundDedupGate, telemetryHeartbeat, pasteManager, featureRegistry, discoveryEvaluator, unifiedTrust, liveConfig, sharedStateLedger, ledgerSessionRegistry, worktreeManager, oidcEnrolledRepos: parallelDevConfig?.oidcEnrolledRepos, initiativeTracker, proxyCoordinator, workingMemory });
     await server.start();
 
     // Connect DegradationReporter downstream systems now that everything is initialized.
