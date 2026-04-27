@@ -33,6 +33,12 @@ Fix: `sanitizeEnv` now reads the host's git identity once (via direct `execFileS
 
 Test setup that depended on `git config --global user.email ...` updated to set `GIT_AUTHOR_*` / `GIT_COMMITTER_*` env vars directly. One source-grep test (`whatsapp-message-routing-e2e.test.ts:369`) updated to match `safeRmSync` as well as `rmSync`.
 
+## CI follow-up — identity env vars short-circuit on every call
+
+Second CI run on PR #99 surfaced a subtler issue: tests that mock `execFileSync` (without setting `GIT_AUTHOR_*`/`GIT_COMMITTER_*` env vars) had their first two mocked returns silently consumed by the cached identity-config reads SafeGitExecutor performs on first commit. Result: the test's intended diff/commit/push call sequence got the wrong return values; the diff-staged check returned `''`, and the manager exited early thinking nothing was staged. Test asserted `git push` called once, got zero.
+
+Fix: `getHostGitIdentity` now checks env vars on every call (not just on first call before the cache is populated). If both name and email are present in `process.env`, no `execFileSync` calls to read gitconfig happen at all. A new `tests/vitest-setup.ts` file pre-sets test-default `GIT_AUTHOR_*`/`GIT_COMMITTER_*` env vars across the entire test suite, so any existing test that mocks `execFileSync` is unaffected by the identity-lookup path.
+
 Generic git-helper methods (`BranchManager.git`, `HandoffManager.git`, `GitSync.gitExec`, `SyncOrchestrator.gitExecSafe`, `GitStateManager.git`) take dynamic args and could be either read-only or destructive at the call site. They now route through the new `SafeGitExecutor.run(args, opts)` dispatcher, which inspects the verb (and shape for ambiguous verbs like `branch`, `remote`, `worktree`, `config`) and forwards to `readSync` or `execSync` accordingly.
 
 ## Decision-point inventory

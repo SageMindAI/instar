@@ -149,33 +149,37 @@ const GIT_ENV_DENYLIST: ReadonlySet<string> = new Set([
   'GIT_DISCOVERY_ACROSS_FILESYSTEM',
 ]);
 
-// Cache of host's git identity, read once before we neutralize the global
-// gitconfig. Identity is not an alias-attack vector — it's just who-am-I.
-// Neutralizing gitconfig kills it, so we re-inject as env vars below.
-let _cachedIdentity: { name?: string; email?: string } | null = null;
+// Cache of host's git identity, read once from gitconfig (only if env vars
+// don't supply it). Identity is not an alias-attack vector — it's just
+// who-am-I. Neutralizing gitconfig kills it, so we re-inject as env vars
+// in sanitizeEnv. We always check env vars first on every call, so tests
+// that set GIT_AUTHOR_*/GIT_COMMITTER_* can short-circuit the gitconfig read.
+let _cachedConfigIdentity: { name?: string; email?: string } | null = null;
 function getHostGitIdentity(): { name?: string; email?: string } {
-  if (_cachedIdentity) return _cachedIdentity;
-  _cachedIdentity = {};
-  // Allow tests to override.
+  // Env vars always win — checked on every call so tests setting them can
+  // bypass the gitconfig read entirely.
+  const fromEnv: { name?: string; email?: string } = {};
   if (process.env.GIT_AUTHOR_NAME || process.env.GIT_COMMITTER_NAME) {
-    _cachedIdentity.name = process.env.GIT_AUTHOR_NAME || process.env.GIT_COMMITTER_NAME;
+    fromEnv.name = process.env.GIT_AUTHOR_NAME || process.env.GIT_COMMITTER_NAME;
   }
   if (process.env.GIT_AUTHOR_EMAIL || process.env.GIT_COMMITTER_EMAIL) {
-    _cachedIdentity.email = process.env.GIT_AUTHOR_EMAIL || process.env.GIT_COMMITTER_EMAIL;
+    fromEnv.email = process.env.GIT_AUTHOR_EMAIL || process.env.GIT_COMMITTER_EMAIL;
   }
-  // Fall back to host gitconfig — read directly via execFileSync since we
-  // haven't yet neutralized GIT_CONFIG_GLOBAL.
-  try {
-    if (!_cachedIdentity.name) {
-      _cachedIdentity.name = execFileSync('git', ['config', '--global', 'user.name'], { encoding: 'utf-8', stdio: ['pipe', 'pipe', 'ignore'] }).toString().trim() || undefined;
-    }
-  } catch { /* not configured */ }
-  try {
-    if (!_cachedIdentity.email) {
-      _cachedIdentity.email = execFileSync('git', ['config', '--global', 'user.email'], { encoding: 'utf-8', stdio: ['pipe', 'pipe', 'ignore'] }).toString().trim() || undefined;
-    }
-  } catch { /* not configured */ }
-  return _cachedIdentity;
+  if (fromEnv.name && fromEnv.email) return fromEnv;
+  // Fall back to host gitconfig — read once and cache.
+  if (!_cachedConfigIdentity) {
+    _cachedConfigIdentity = {};
+    try {
+      _cachedConfigIdentity.name = execFileSync('git', ['config', '--global', 'user.name'], { encoding: 'utf-8', stdio: ['pipe', 'pipe', 'ignore'] }).toString().trim() || undefined;
+    } catch { /* not configured */ }
+    try {
+      _cachedConfigIdentity.email = execFileSync('git', ['config', '--global', 'user.email'], { encoding: 'utf-8', stdio: ['pipe', 'pipe', 'ignore'] }).toString().trim() || undefined;
+    } catch { /* not configured */ }
+  }
+  return {
+    name: fromEnv.name ?? _cachedConfigIdentity.name,
+    email: fromEnv.email ?? _cachedConfigIdentity.email,
+  };
 }
 
 function sanitizeEnv(callerEnv?: NodeJS.ProcessEnv): NodeJS.ProcessEnv {

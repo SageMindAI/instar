@@ -190,6 +190,7 @@ export default defineConfig({
   test: {
     include: ['tests/unit/**/*.test.ts', 'tests/integration/**/*.test.ts', 'tests/e2e/**/*.test.ts'],
     exclude: FLAKY_TESTS,
+    setupFiles: ['./tests/vitest-setup.ts'],
     environment: 'node',
     testTimeout: 10000,
     fileParallelism: false,

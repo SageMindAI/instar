@@ -3,6 +3,7 @@ import { defineConfig } from 'vitest/config';
 export default defineConfig({
   test: {
     include: ['tests/unit/**/*.test.ts', 'tests/integration/**/*.test.ts', 'tests/e2e/**/*.test.ts'],
+    setupFiles: ['./tests/vitest-setup.ts'],
     environment: 'node',
     testTimeout: 10000,
     // Run test files sequentially to prevent port collisions, file lock
