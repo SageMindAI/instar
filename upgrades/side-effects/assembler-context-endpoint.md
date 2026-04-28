@@ -1,7 +1,7 @@
 # Side-Effects Review — Wire WorkingMemoryAssembler into session context API
 
 **Version / slug:** `assembler-context-endpoint`
-**Date:** 2026-04-27
+**Date:** 2026-04-28
 **Author:** gfrankgva (contributor)
 **Second-pass reviewer:** Echo (EchoOfDawn), 3 review rounds
 
@@ -9,13 +9,14 @@
 
 Two files touched:
 
-1. `src/commands/server.ts` — WorkingMemoryAssembler construction is moved from line 3258 (before activitySentinel) to after activitySentinel initialization (~line 3475). This enables wiring `episodicMemory` via `activitySentinel.getEpisodicMemory()`, which was previously left as a TODO comment. The assembler now receives both `semanticMemory` and `episodicMemory`, making the 400-token episode budget functional in production.
+1. `src/commands/server.ts` — WorkingMemoryAssembler construction is moved from line 3258 (before activitySentinel) to after activitySentinel initialization (~line 3475). This enables wiring `episodicMemory` via `activitySentinel.getEpisodicMemory()`, which was previously left as a TODO comment. The assembler now receives both `semanticMemory` and `episodicMemory`, making the 400-token episode budget functional in production. Construction is guarded by `if (semanticMemory || activitySentinel)` — skipped entirely in minimal-config setups where neither memory system is available.
 
 2. `src/server/routes.ts` — The two assembled-context endpoints (`/topic/context/:topicId?assembled=true` and `/session/context/:topicId`) are refactored to call a shared `assembleAndRespond()` helper instead of duplicating the assembly + response logic. The helper takes the assembler instance, topicId, options, and the Express response object. Auth confirmation is added to the JSDoc for the session context route.
 
 ## Decision-point inventory
 
 - `WorkingMemoryAssembler` construction order — **modify** (move later in init sequence for dependency availability).
+- `WorkingMemoryAssembler` construction guard — **add** (skip when both `semanticMemory` and `activitySentinel` are undefined).
 - `episodicMemory` wiring — **add** (was commented out, now passed via `activitySentinel?.getEpisodicMemory()`).
 - `assembleAndRespond()` helper — **add** (extracts duplicated assembly logic).
 - Route handlers — **modify** (delegate to shared helper instead of inline assembly).

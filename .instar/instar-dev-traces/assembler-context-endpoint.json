@@ -1,0 +1,12 @@
+{
+  "phase": "complete",
+  "slug": "assembler-context-endpoint",
+  "coveredFiles": [
+    "src/commands/server.ts",
+    "src/server/routes.ts"
+  ],
+  "artifactPath": "upgrades/side-effects/assembler-context-endpoint.md",
+  "artifactSha256": "b61ac2d9b87f954d3306b399dafbe8c85325a2a1c1ba833f011db96087e36bcb",
+  "specPath": "docs/specs/ASSEMBLER-CONTEXT-ENDPOINT-SPEC.md",
+  "createdAt": "2026-04-28T07:45:00Z"
+}

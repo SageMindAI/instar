@@ -3371,12 +3371,15 @@ export async function startServer(options: StartOptions): Promise<void> {
 
     // Initialize WorkingMemoryAssembler — token-budgeted context assembly for session-start hooks.
     // Placed after activitySentinel so episodicMemory can be wired from the sentinel.
-    workingMemory = new WorkingMemoryAssembler({
-      semanticMemory,
-      episodicMemory: activitySentinel?.getEpisodicMemory(),
-    });
-    const epStatus = activitySentinel ? 'yes' : 'no';
-    console.log(pc.green(`  WorkingMemoryAssembler: ready (semantic: ${semanticMemory ? 'yes' : 'no'}, episodic: ${epStatus})`));
+    // Skipped in minimal-config setups where neither memory system is available.
+    if (semanticMemory || activitySentinel) {
+      workingMemory = new WorkingMemoryAssembler({
+        semanticMemory,
+        episodicMemory: activitySentinel?.getEpisodicMemory(),
+      });
+      const epStatus = activitySentinel ? 'yes' : 'no';
+      console.log(pc.green(`  WorkingMemoryAssembler: ready (semantic: ${semanticMemory ? 'yes' : 'no'}, episodic: ${epStatus})`));
+    }
 
     // Session Watchdog — auto-remediation for stuck commands
     let watchdog: SessionWatchdog | undefined;
