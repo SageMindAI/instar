@@ -6058,6 +6058,12 @@ export async function startServer(options: StartOptions): Promise<void> {
           return Promise.resolve();
         },
         alertTopicId,
+        // The MessagingToneGate is the single authority for outbound user
+        // messages — degradation alerts go through the same gate as agent
+        // replies do. Without this wire-in, health alerts bypass the
+        // jargon / self-heal / CTA discipline and the user sees raw
+        // ops-pager output. See upgrades/side-effects/agent-health-alert-authority-routing.md.
+        toneGate: messagingToneGate ?? null,
       });
     }
 

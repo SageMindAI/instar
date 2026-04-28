@@ -30,6 +30,8 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
+import { detectJargon } from '../core/JargonDetector.js';
+import type { MessagingToneGate } from '../core/MessagingToneGate.js';
 
 export interface DegradationEvent {
   /** Which feature degraded */
@@ -51,6 +53,20 @@ export interface DegradationEvent {
 }
 
 type TelegramSender = (topicId: number, text: string) => Promise<unknown>;
+/**
+ * Self-heal callback. Returns true if the heal succeeded and the user
+ * message should be suppressed; false if the heal failed or was not
+ * possible. Producers register one healer per feature name. If no healer
+ * is registered for a feature, the alert path proceeds without an
+ * attempt and the selfHeal signal reports `attempted: false`.
+ */
+export type SelfHealer = (event: DegradationEvent) => Promise<boolean>;
+/**
+ * Safe fallback template used when the tone gate blocks the candidate
+ * health-alert message. Plain English, ends with a yes/no the user can
+ * answer in one word.
+ */
+const SAFE_HEALTH_ALERT_TEMPLATE = 'Something on my end stopped working and I haven\'t been able to fix it on my own. Want me to dig in?';
 type FeedbackSubmitter = (item: {
   type: 'bug';
   title: string;
@@ -77,6 +93,8 @@ export class DegradationReporter {
   private feedbackSubmitter: FeedbackSubmitter | null = null;
   private telegramSender: TelegramSender | null = null;
   private alertTopicId: number | null = null;
+  private toneGate: MessagingToneGate | null = null;
+  private healers: Map<string, SelfHealer> = new Map();
 
   // Dedup: track last alert time per feature to avoid spamming Telegram
   private lastAlertTime: Map<string, number> = new Map();
@@ -120,13 +138,28 @@ export class DegradationReporter {
     feedbackSubmitter?: FeedbackSubmitter;
     telegramSender?: TelegramSender;
     alertTopicId?: number | null;
+    toneGate?: MessagingToneGate | null;
   }): void {
     this.feedbackSubmitter = opts.feedbackSubmitter ?? null;
     this.telegramSender = opts.telegramSender ?? null;
     this.alertTopicId = opts.alertTopicId ?? null;
+    this.toneGate = opts.toneGate ?? null;
 
     // Drain queued events that weren't reported yet
     this.drainQueue();
+  }
+
+  /**
+   * Register a self-heal callback for a feature. When a degradation for
+   * that feature is reported, the callback is invoked BEFORE the user
+   * alert path runs. If it returns true, the user alert is suppressed
+   * (the issue is already fixed). If it returns false, the alert proceeds.
+   *
+   * Healers should be idempotent — they may be invoked on every report
+   * for that feature.
+   */
+  registerHealer(feature: string, healer: SelfHealer): void {
+    this.healers.set(feature, healer);
   }
 
   /**
@@ -282,15 +315,27 @@ export class DegradationReporter {
       const now = Date.now();
 
       if (now - lastAlert >= ALERT_COOLDOWN_MS) {
-        try {
-          await this.telegramSender(
-            this.alertTopicId,
-            DegradationReporter.narrativeFor(event),
-          );
+        // Self-heal-first. Try the registered healer (if any) before
+        // bothering the user. If it succeeds, suppress the alert.
+        const healResult = await this.attemptSelfHeal(event);
+        if (healResult.succeeded === true) {
           event.alerted = true;
           this.lastAlertTime.set(event.feature, now);
-        } catch {
-          // Don't fail on alerting failures
+          console.warn(
+            `[DEGRADATION] ${event.feature}: self-heal succeeded after ${healResult.attempts} attempt(s); user alert suppressed.`
+          );
+        } else {
+          // Compose the narrative, route it through the tone gate with
+          // health-alert signals, fall back to the safe template if blocked.
+          const candidate = DegradationReporter.narrativeFor(event);
+          const finalText = await this.gateHealthAlert(candidate, healResult);
+          try {
+            await this.telegramSender(this.alertTopicId, finalText);
+            event.alerted = true;
+            this.lastAlertTime.set(event.feature, now);
+          } catch {
+            // Don't fail on alerting failures
+          }
         }
       } else {
         // Within cooldown — suppress the alert but mark as handled
@@ -300,6 +345,71 @@ export class DegradationReporter {
 
     // Update persisted state
     this.persistToDisk(event);
+  }
+
+  /**
+   * Attempt the registered self-healer for a feature, if any. Returns the
+   * structured signal payload the tone gate expects.
+   *
+   * No healer registered → `{attempted: false, succeeded: null, attempts: 0}`
+   * Healer threw         → `{attempted: true,  succeeded: false, attempts: 1}`
+   * Healer returned      → `{attempted: true,  succeeded: result, attempts: 1}`
+   */
+  private async attemptSelfHeal(event: DegradationEvent): Promise<{
+    attempted: boolean;
+    succeeded: boolean | null;
+    attempts: number;
+  }> {
+    const healer = this.healers.get(event.feature);
+    if (!healer) {
+      return { attempted: false, succeeded: null, attempts: 0 };
+    }
+    try {
+      const ok = await healer(event);
+      return { attempted: true, succeeded: !!ok, attempts: 1 };
+    } catch (err) {
+      console.warn(
+        `[DEGRADATION] ${event.feature}: self-healer threw — ${err instanceof Error ? err.message : err}`
+      );
+      return { attempted: true, succeeded: false, attempts: 1 };
+    }
+  }
+
+  /**
+   * Route a candidate health-alert message through the MessagingToneGate
+   * with the jargon + selfHeal signals attached. If the gate blocks (rule
+   * B12/B13/B14) the candidate is replaced with the safe-template fallback.
+   *
+   * The gate is the single authority. If no gate is wired (early startup,
+   * tests, etc.) the candidate is sent unchanged — fail-open is consistent
+   * with how the rest of the outbound surface treats gate-unavailable.
+   */
+  private async gateHealthAlert(
+    candidate: string,
+    healSignal: { attempted: boolean; succeeded: boolean | null; attempts: number },
+  ): Promise<string> {
+    if (!this.toneGate) {
+      return candidate;
+    }
+    const jargon = detectJargon(candidate);
+    try {
+      const result = await this.toneGate.review(candidate, {
+        channel: 'telegram',
+        messageKind: 'health-alert',
+        signals: {
+          jargon: { detected: jargon.detected, terms: jargon.terms, score: jargon.score },
+          selfHeal: healSignal,
+        },
+      });
+      if (result.pass) {
+        return candidate;
+      }
+      return SAFE_HEALTH_ALERT_TEMPLATE;
+    } catch {
+      // Fail-open on unexpected gate errors — at least the user hears
+      // SOMETHING about the degradation.
+      return candidate;
+    }
   }
 
   private drainQueue(): void {
