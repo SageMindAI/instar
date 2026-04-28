@@ -3721,7 +3721,20 @@ process.stdin.on('end', async () => {
    * old SHAs (they remain valid migration sources).
    */
   // eslint-disable-next-line @typescript-eslint/naming-convention
-  private static readonly TELEGRAM_REPLY_PRIOR_SHIPPED_SHAS: ReadonlySet<string> = new Set([
+  public static readonly TELEGRAM_REPLY_PRIOR_SHIPPED_SHAS: ReadonlySet<string> = new Set([
+    // Tier-1 initial-init shipped version. Shipped at 362ff59d.
+    '98f70b86856e37f2719c39ecec152adf07ec30ce73c8134ab831b35c5b1c25b3',
+    // Rebrand to Instar (no behavioral change). Shipped at 686f5758.
+    '6ebc835e0077dc1cd52ec15820722b7059cf11bf5796775902f82034d43b29c4',
+    // Batch feedback fixes — auth headers, job topics race, session limits.
+    // Shipped at d28120f0.
+    'ce73a2fd1941381b63eb591d7c30ed761496202437a8c7fffa4926c6dfa2b7cb',
+    // Tone-gate inline check on outbound messaging (no 408 handling yet).
+    // Shipped at 2cb50a9a.
+    'f3aa0c8aae3f3275d0efb45b333ad83c14f7513a9e27c743039a9a113c0d16ff',
+    // Adds 120s timeout + HTTP 408 ambiguous-outcome path (no port-from-
+    // config yet). Shipped at a049fc5f.
+    '4f8787df1bf6384545dd7f19093fd77daa1bf993ed48a8ab02b6598d41a2007c',
     // Pre-port-config version (HTTP 408 handling, INSTAR_PORT-or-4040 default,
     // no agent-id header). Shipped through 2026-04-27.
     '3d08c63c6280d0a7ba94a345c259673a461ee5c1d116cb47c95c7626c67cee23',
@@ -3730,6 +3743,12 @@ process.stdin.on('end', async () => {
     // PR #100. Adding here so the Layer 2 migration cleanly upgrades from
     // a Layer-1-deployed copy without producing a `.new` candidate.
     '5ec2eb19bf35310471f107cb54219097698abad1c11166eb14daf746a63a2f08',
+    // Layer 2 shipped version (durable SQLite queue + structured failure
+    // events). Shipped 2026-04-27 with the Layer 2 PR #101. Recorded here
+    // (rather than left as the implicit current-template SHA) because the
+    // verifier and lint both treat any deployed SHA matching this set as
+    // a known-shipped instar version, not user-modified content.
+    '371d7e8f4f72146bf8bd07115873bdbbaaf32e851ac6e1318ba5b8929cd06e68',
   ]);
 
   /**

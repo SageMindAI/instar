@@ -2893,6 +2893,25 @@ If no overdue or stale items, exit silently.`,
       tags: ['cat:maintenance', 'role:worker', 'exec:skill'],
     },
     {
+      slug: 'templates-drift-verifier',
+      name: 'Templates Drift Verifier',
+      description: 'Scan deployed instar relay-script templates across host agents and report drift via DegradationReporter. Default-on; disable via config.monitoring.templatesDriftVerifier.enabled = false for intentional customizations.',
+      schedule: '0 2 * * *',
+      priority: 'low',
+      expectedDurationMinutes: 1,
+      model: 'haiku',
+      enabled: true,
+      // Pre-flight gate: only run when the kill switch is unset OR true.
+      // The verifier itself also honors the same flag, but gating here
+      // skips the spawn entirely when disabled.
+      gate: `python3 -c "import json,sys; c=json.load(open('.instar/config.json')); sys.exit(0 if (c.get('monitoring') or {}).get('templatesDriftVerifier',{}).get('enabled', True) else 1)" 2>/dev/null`,
+      execute: {
+        type: 'script',
+        value: `cd "$(npm root -g 2>/dev/null)/instar" 2>/dev/null || cd "$(dirname $(which instar 2>/dev/null) 2>/dev/null)/.." 2>/dev/null; pnpm tsx scripts/verify-deployed-templates.ts 2>&1 || node -e "console.log('templates-drift-verifier: instar source not locally available; skipping')"`,
+      },
+      tags: ['cat:guardian', 'role:worker', 'exec:script'],
+    },
+    {
       slug: 'degradation-digest',
       name: 'Degradation Digest',
       description: 'Read DegradationReporter events, group repeated patterns, and escalate trends that need attention.',
