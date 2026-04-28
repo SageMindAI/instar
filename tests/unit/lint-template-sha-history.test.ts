@@ -41,11 +41,24 @@ function gitAvailable(): boolean {
   }
 }
 
+function isShallowClone(): boolean {
+  try {
+    const out = execFileSync('git', ['rev-parse', '--is-shallow-repository'], {
+      cwd: REPO_ROOT,
+      encoding: 'utf-8',
+    }).trim();
+    return out === 'true';
+  } catch {
+    return false;
+  }
+}
+
 describe('lint-template-sha-history', () => {
   it('passes against the current PostUpdateMigrator.TELEGRAM_REPLY_PRIOR_SHIPPED_SHAS', () => {
-    if (!gitAvailable()) {
-      // Tarball / sandboxed install — skip via a passing assertion that
-      // surfaces the skip in the run log.
+    if (!gitAvailable() || isShallowClone()) {
+      // Tarball / sandboxed install / shallow CI checkout — skip via a
+      // passing assertion that surfaces the skip in the run log. CI deep
+      // clones (fetch-depth: 0) exercise the real assertion.
       expect(true).toBe(true);
       return;
     }
@@ -67,7 +80,7 @@ describe('lint-template-sha-history', () => {
   });
 
   it('would FAIL if a historical SHA is removed from the prior-shipped set', () => {
-    if (!gitAvailable()) {
+    if (!gitAvailable() || isShallowClone()) {
       expect(true).toBe(true);
       return;
     }

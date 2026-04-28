@@ -31,6 +31,12 @@ jobs:
         shard: [1, 2, 3, 4]
     steps:
       - uses: actions/checkout@v4
+        with:
+          # lint-template-sha-history walks `git log -- src/templates/scripts/
+          # telegram-reply.sh` to assert every historical SHIPPED content is
+          # in the migrator's prior-shipped set. A shallow clone (default
+          # depth=1) defeats that — and silently rubber-stamps the assertion.
+          fetch-depth: 0
       - uses: actions/setup-node@v4
         with:
           node-version: ${{ matrix.node-version }}
