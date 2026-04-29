@@ -45,6 +45,7 @@ import {
 } from './forwardErrors.js';
 import { writeStartupMarker } from './startupMarker.js';
 import { RestartOrchestrator } from './RestartOrchestrator.js';
+import { detectLaunchdSupervised } from './detectLaunchdSupervised.js';
 import {
   LifelineHealthWatchdog,
   DEFAULT_WATCHDOG_THRESHOLDS,
@@ -471,9 +472,13 @@ export class TelegramLifeline {
    * rate-limit state on disk.
    */
   private installOrchestratorAndWatchdog(): void {
-    const isSupervised =
-      process.env.INSTAR_SUPERVISED === '1' ||
-      process.env.NODE_ENV !== 'test' && process.ppid === 1;
+    // Detect whether launchd / systemd will respawn us after exit. Robust
+    // multi-signal detection — see src/lifeline/detectLaunchdSupervised.ts.
+    // The previous `process.ppid === 1` check missed user-domain launchd
+    // (`gui/<uid>/...`), which is how every macOS user-installed agent runs.
+    // That gap caused the Inspec 2026-04-29 silent crash-loop — orchestrator
+    // refused to exit-for-self-heal because it thought it was unsupervised.
+    const isSupervised = detectLaunchdSupervised();
 
     this.orchestrator = new RestartOrchestrator({
       quiesce: () => this.quiesceEverything(),
