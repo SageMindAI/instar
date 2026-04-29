@@ -1165,6 +1165,8 @@ ${argsXml}
     <dict>
         <key>PATH</key>
         <string>${escapeXml(process.env.PATH || '/usr/local/bin:/usr/bin:/bin')}</string>
+        <key>INSTAR_SUPERVISED</key>
+        <string>1</string>
     </dict>
     <key>ThrottleInterval</key>
     <integer>10</integer>

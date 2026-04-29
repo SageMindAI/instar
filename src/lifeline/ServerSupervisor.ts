@@ -63,6 +63,13 @@ export class ServerSupervisor extends EventEmitter {
   private maxRetriesExhaustedAt = 0;
   private consecutiveFailures = 0; // Hysteresis: require 2 consecutive failures before marking unhealthy
   private readonly unhealthyThreshold = 2;
+  // Bind-failure escalation — incremented when a spawn produces a server that
+  // never reaches a healthy /health response before crashing. After 2+ in a
+  // row, the next preflight forces an aggressive better-sqlite3 rebuild
+  // regardless of what the require-load probe reports. Reset on any healthy
+  // tick. See preflightSelfHeal native-module branch.
+  private consecutiveBindFailures = 0;
+  private readonly bindFailureEscalationThreshold = 2;
   private readonly processAliveThreshold = 6; // When process is alive but unresponsive (e.g., high CPU load), require 6 failures (~60s) before restarting
   private stateDir: string | null;
 
@@ -403,53 +410,71 @@ export class ServerSupervisor extends EventEmitter {
 
     // 4. Native module mismatch — better-sqlite3 compiled for wrong Node version.
     //    This is the #1 cause of server crash-loops after a Node upgrade.
+    //
     //    IMPORTANT: Test with the node binary the SERVER will use (.instar/bin/node),
     //    not process.execPath (the lifeline's node), since these may differ.
+    //
+    //    IMPORTANT: Scan ALL nested copies under shadow-install/node_modules.
+    //    A previous version checked only the top-level hoisted path
+    //    `shadow-install/node_modules/better-sqlite3/...`, but npm does not
+    //    always hoist; the actually-loaded copy can live at the nested path
+    //    `shadow-install/node_modules/instar/node_modules/better-sqlite3/...`.
+    //    This was the root cause of the Inspec 2026-04-29 silent crash-loop.
     if (this.stateDir) {
-      const sqliteNode = path.join(this.stateDir, 'shadow-install', 'node_modules', 'better-sqlite3', 'build', 'Release', 'better_sqlite3.node');
       const serverNode = path.join(this.stateDir, 'bin', 'node');
       const checkNode = (fs.existsSync(serverNode)) ? serverNode : process.execPath;
-      if (fs.existsSync(sqliteNode)) {
+      const shadowNodeModules = path.join(this.stateDir, 'shadow-install', 'node_modules');
+      const sqliteCopies = findBetterSqlite3Copies(shadowNodeModules);
+      const force = this.consecutiveBindFailures >= 2;
+      if (force) {
+        console.log(`[Supervisor] Preflight: ${this.consecutiveBindFailures} consecutive bind failures — forcing aggressive better-sqlite3 rebuild`);
+      }
+      for (const copy of sqliteCopies) {
         try {
-          // Try loading the native module with the SERVER's Node — if it fails, rebuild
-          const result = spawnSync(checkNode, ['-e', `require('${sqliteNode.replace(/'/g, "\\'")}')`], {
+          // Try loading the native module with the SERVER's Node — if it fails, rebuild.
+          // When we're escalating after consecutive bind failures, force the rebuild
+          // even if the require-load succeeds (the load may pass for one copy while
+          // a different cached copy is what actually got resolved at runtime).
+          const result = spawnSync(checkNode, ['-e', `require('${copy.binaryPath.replace(/'/g, "\\'")}')`], {
             encoding: 'utf-8',
             timeout: 10_000,
             cwd: this.projectDir,
           });
-          if (result.status !== 0 && result.stderr?.includes('NODE_MODULE_VERSION')) {
-            console.log(`[Supervisor] Preflight: better-sqlite3 native module version mismatch — rebuilding (server node: ${checkNode})`);
-            const npmPath = this.findNpmPath();
-            if (npmPath) {
-              // Use the server's node for the rebuild so the native module matches
-              const rebuildEnv: Record<string, string | undefined> = { ...process.env, npm_config_node_gyp: undefined };
-              if (checkNode !== process.execPath) {
-                rebuildEnv.npm_node_execpath = checkNode;
-              }
-              const rebuildResult = spawnSync(checkNode, [npmPath, 'rebuild', 'better-sqlite3', '--prefix', path.join(this.stateDir, 'shadow-install')], {
-                encoding: 'utf-8',
-                timeout: 60_000,
-                cwd: this.projectDir,
-                env: rebuildEnv,
-              });
-              if (rebuildResult.status === 0) {
-                // Verify the rebuild actually produced a working module
-                const verifyResult = spawnSync(checkNode, ['-e', `require('${sqliteNode.replace(/'/g, "\\'")}')`], {
-                  encoding: 'utf-8', timeout: 10_000, cwd: this.projectDir,
-                });
-                if (verifyResult.status === 0) {
-                  healed.push('better-sqlite3 rebuilt for current Node');
-                  console.log('[Supervisor] Preflight: better-sqlite3 rebuilt and verified successfully');
-                } else {
-                  console.error(`[Supervisor] Preflight: better-sqlite3 rebuild succeeded but module still fails to load: ${(verifyResult.stderr || '').slice(-200)}`);
-                }
-              } else {
-                console.error(`[Supervisor] Preflight: better-sqlite3 rebuild failed: ${(rebuildResult.stderr || '').slice(-200)}`);
-              }
-            }
+          const needsRebuild = force || (result.status !== 0 && result.stderr?.includes('NODE_MODULE_VERSION'));
+          if (!needsRebuild) continue;
+          console.log(`[Supervisor] Preflight: better-sqlite3 ${force ? 'force-rebuild' : 'version mismatch'} at ${copy.packageDir} — rebuilding (server node: ${checkNode})`);
+          const npmPath = this.findNpmPath();
+          if (!npmPath) {
+            console.error('[Supervisor] Preflight: no npm binary found — cannot rebuild better-sqlite3');
+            continue;
+          }
+          const rebuildEnv: Record<string, string | undefined> = { ...process.env, npm_config_node_gyp: undefined };
+          if (checkNode !== process.execPath) {
+            rebuildEnv.npm_node_execpath = checkNode;
+          }
+          const rebuildArgs = ['rebuild', 'better-sqlite3', '--prefix', copy.prefixDir];
+          if (force) rebuildArgs.push('--force');
+          const rebuildResult = spawnSync(checkNode, [npmPath, ...rebuildArgs], {
+            encoding: 'utf-8',
+            timeout: 120_000,
+            cwd: this.projectDir,
+            env: rebuildEnv,
+          });
+          if (rebuildResult.status !== 0) {
+            console.error(`[Supervisor] Preflight: better-sqlite3 rebuild failed at ${copy.packageDir}: ${(rebuildResult.stderr || '').slice(-200)}`);
+            continue;
+          }
+          const verifyResult = spawnSync(checkNode, ['-e', `require('${copy.binaryPath.replace(/'/g, "\\'")}')`], {
+            encoding: 'utf-8', timeout: 10_000, cwd: this.projectDir,
+          });
+          if (verifyResult.status === 0) {
+            healed.push(`better-sqlite3 rebuilt at ${path.relative(this.stateDir, copy.packageDir)}`);
+            console.log(`[Supervisor] Preflight: better-sqlite3 rebuilt and verified at ${copy.packageDir}`);
+          } else {
+            console.error(`[Supervisor] Preflight: better-sqlite3 rebuild succeeded but module still fails to load at ${copy.packageDir}: ${(verifyResult.stderr || '').slice(-200)}`);
           }
         } catch (err) {
-          console.error(`[Supervisor] Preflight: native module check failed: ${err}`);
+          console.error(`[Supervisor] Preflight: native module check failed at ${copy.packageDir}: ${err}`);
         }
       }
     }
@@ -709,6 +734,7 @@ export class ServerSupervisor extends EventEmitter {
           this.lastHealthy = Date.now();
           this.restartAttempts = 0;
           this.consecutiveFailures = 0;
+          this.consecutiveBindFailures = 0;
 
           // If circuit breaker was tripped and we recovered, reset it
           if (this.circuitBroken) {
@@ -1059,6 +1085,18 @@ export class ServerSupervisor extends EventEmitter {
     }
     this.consecutiveFailures = 0; // Reset after triggering action
 
+    // Bind-failure tracking — if the server never reached a healthy /health
+    // tick during this spawn cycle (lastHealthy is older than spawnedAt),
+    // the spawn produced a process that crashed before binding. After 2+ in
+    // a row, preflightSelfHeal will force an aggressive better-sqlite3
+    // rebuild on the next attempt.
+    if (this.spawnedAt > 0 && this.lastHealthy < this.spawnedAt) {
+      this.consecutiveBindFailures++;
+      if (this.consecutiveBindFailures >= this.bindFailureEscalationThreshold) {
+        console.log(`[Supervisor] Bind-failure escalation armed: ${this.consecutiveBindFailures} consecutive spawns failed before binding. Next preflight will force-rebuild native modules.`);
+      }
+    }
+
     // After max retries exhausted, wait for cooldown before trying again.
     // IMPORTANT: Check cooldown BEFORE incrementing totalFailures. Otherwise, passive health check
     // failures during cooldown accumulate and trip the circuit breaker, escalating a recoverable
@@ -1292,4 +1330,85 @@ export class ServerSupervisor extends EventEmitter {
       }
     } catch { /* ignore */ }
   }
+}
+
+/**
+ * Information about a discovered better-sqlite3 install copy.
+ */
+export interface BetterSqlite3Copy {
+  /** Absolute path to the package directory (contains package.json). */
+  packageDir: string;
+  /** Absolute path to the compiled .node binary. */
+  binaryPath: string;
+  /** Absolute path to use as `--prefix` when invoking npm rebuild. */
+  prefixDir: string;
+}
+
+/**
+ * Scan a node_modules tree for every copy of better-sqlite3 that has a
+ * compiled binary. Bounded depth (5) and bounded count (5) to guarantee
+ * termination on pathological trees.
+ *
+ * Why this exists: npm does not always hoist `better-sqlite3` to the top of
+ * `shadow-install/node_modules/`. A common shape is the package nested under
+ * `instar/node_modules/better-sqlite3/...`. The previous preflight only
+ * checked the hoisted path and silently missed the nested copy that was
+ * actually being loaded — root cause of the Inspec 2026-04-29 silent
+ * crash-loop.
+ *
+ * Exported for testing.
+ */
+export function findBetterSqlite3Copies(nodeModulesRoot: string): BetterSqlite3Copy[] {
+  const found: BetterSqlite3Copy[] = [];
+  const MAX_DEPTH = 5;
+  const MAX_COPIES = 5;
+
+  if (!fs.existsSync(nodeModulesRoot)) return found;
+
+  let capHit = false;
+  const visit = (dir: string, depth: number): void => {
+    if (depth > MAX_DEPTH) return;
+    if (found.length >= MAX_COPIES) {
+      capHit = true;
+      return;
+    }
+    let entries: fs.Dirent[];
+    try {
+      entries = fs.readdirSync(dir, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const entry of entries) {
+      if (found.length >= MAX_COPIES) return;
+      if (!entry.isDirectory()) continue;
+      const childPath = path.join(dir, entry.name);
+      if (entry.name === 'better-sqlite3') {
+        const binaryPath = path.join(childPath, 'build', 'Release', 'better_sqlite3.node');
+        if (fs.existsSync(binaryPath)) {
+          // The prefix for `npm rebuild` is the parent of the package's
+          // node_modules dir — i.e., the package whose deps contain the copy.
+          // For a top-level copy (`shadow-install/node_modules/better-sqlite3`),
+          // prefix = shadow-install. For a nested copy
+          // (`shadow-install/node_modules/instar/node_modules/better-sqlite3`),
+          // prefix = shadow-install/node_modules/instar.
+          const prefixDir = path.dirname(path.dirname(childPath));
+          found.push({ packageDir: childPath, binaryPath, prefixDir });
+        }
+        // Don't descend into better-sqlite3's own node_modules; deps of
+        // better-sqlite3 itself are not better-sqlite3.
+        continue;
+      }
+      // Descend into nested node_modules trees only.
+      const nestedNodeModules = path.join(childPath, 'node_modules');
+      if (fs.existsSync(nestedNodeModules)) {
+        visit(nestedNodeModules, depth + 1);
+      }
+    }
+  };
+
+  visit(nodeModulesRoot, 0);
+  if (capHit) {
+    console.warn(`[Supervisor] findBetterSqlite3Copies: hit MAX_COPIES=${MAX_COPIES} cap under ${nodeModulesRoot} — additional copies will not be checked. If this is a real install layout (not pathological), raise the cap.`);
+  }
+  return found;
 }
