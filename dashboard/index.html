@@ -2418,6 +2418,7 @@
           <button class="tab" data-tab="pr-pipeline" onclick="switchTab('pr-pipeline')">PR Pipeline</button>
           <button class="tab" data-tab="initiatives" onclick="switchTab('initiatives')">Initiatives <span class="tab-count" id="tabInitiativeCount">0</span></button>
           <button class="tab" data-tab="commitments" onclick="switchTab('commitments')">Commitments <span class="tab-count" id="tabCommitmentCount">0</span></button>
+          <button class="tab" data-tab="tokens" onclick="switchTab('tokens')">Tokens</button>
         </nav>
       </div>
       <div class="vital-signs" id="vitalSigns">
@@ -2844,6 +2845,41 @@
         No open promises.
       </div>
       <div id="commitmentsList" style="display:flex;flex-direction:column;gap:12px"></div>
+    </div>
+
+    <!-- Tokens Tab — read-only token-usage observability -->
+    <div id="tokensPanel" style="display:none;flex-direction:column;padding:20px;gap:16px;overflow-y:auto">
+      <div style="display:flex;justify-content:space-between;align-items:center">
+        <h2 style="margin:0">Tokens</h2>
+        <button onclick="loadTokens()" style="padding:6px 12px">Refresh</button>
+      </div>
+      <div style="font-size:12px;color:var(--text-dim);line-height:1.4">
+        Token usage rolled up from Claude Code session transcripts. Last 24 hours unless noted.
+      </div>
+
+      <!-- Summary card -->
+      <div id="tokensSummaryCard" style="border:1px solid var(--border);border-radius:8px;padding:16px;display:flex;flex-direction:column;gap:8px">
+        <div style="font-weight:600">Last 24h</div>
+        <div id="tokensSummaryBody" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:12px;font-size:13px">
+          <div style="color:var(--text-dim)">Loading...</div>
+        </div>
+      </div>
+
+      <!-- Top sessions -->
+      <div style="border:1px solid var(--border);border-radius:8px;padding:16px;display:flex;flex-direction:column;gap:8px">
+        <div style="font-weight:600">Top Sessions</div>
+        <div id="tokensSessionsBody" style="font-size:13px">
+          <div style="color:var(--text-dim)">Loading...</div>
+        </div>
+      </div>
+
+      <!-- Orphans -->
+      <div style="border:1px solid var(--border);border-radius:8px;padding:16px;display:flex;flex-direction:column;gap:8px">
+        <div style="font-weight:600">Idle Sessions (&gt; 30 min)</div>
+        <div id="tokensOrphansBody" style="font-size:13px">
+          <div style="color:var(--text-dim)">Loading...</div>
+        </div>
+      </div>
     </div>
 
     <!-- Health Tab (was Systems) -->
@@ -3893,6 +3929,12 @@
         onActivate: () => { if (typeof loadCommitments === 'function') loadCommitments(); },
       },
       {
+        id: 'tokens',
+        panels: ['tokensPanel'],
+        display: ['flex'],
+        onActivate: () => { if (typeof loadTokens === 'function') loadTokens(); },
+      },
+      {
         id: 'secrets',
         panels: ['secretsPanel'],
         display: ['flex'],
@@ -3995,6 +4037,96 @@
         throw new Error(data.error || `HTTP ${resp.status}`);
       }
       return resp.json();
+    }
+
+    // ── Tokens Tab ──────────────────────────────────────────────────
+    function fmtTokens(n) {
+      if (n == null) return '0';
+      if (n >= 1e9) return (n / 1e9).toFixed(2) + 'B';
+      if (n >= 1e6) return (n / 1e6).toFixed(2) + 'M';
+      if (n >= 1e3) return (n / 1e3).toFixed(1) + 'k';
+      return String(n);
+    }
+    function fmtRelTime(ts) {
+      if (!ts) return '—';
+      const diff = Date.now() - ts;
+      const min = Math.floor(diff / 60000);
+      if (min < 1) return 'just now';
+      if (min < 60) return min + 'm ago';
+      const hr = Math.floor(min / 60);
+      if (hr < 24) return hr + 'h ago';
+      return Math.floor(hr / 24) + 'd ago';
+    }
+    function escapeHtml(s) {
+      return String(s ?? '').replace(/[&<>"']/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c]));
+    }
+    async function loadTokens() {
+      const summaryEl = document.getElementById('tokensSummaryBody');
+      const sessionsEl = document.getElementById('tokensSessionsBody');
+      const orphansEl = document.getElementById('tokensOrphansBody');
+      try {
+        const [summaryResp, sessionsResp, orphansResp] = await Promise.all([
+          apiFetch('/tokens/summary'),
+          apiFetch('/tokens/sessions?limit=10'),
+          apiFetch('/tokens/orphans?idleMs=' + (30 * 60 * 1000)),
+        ]);
+        const s = summaryResp.summary || {};
+        summaryEl.innerHTML = `
+          <div><div style="color:var(--text-dim)">Total tokens</div><div style="font-size:18px;font-weight:600">${fmtTokens(s.totalTokens)}</div></div>
+          <div><div style="color:var(--text-dim)">Input</div><div>${fmtTokens(s.totalInput)}</div></div>
+          <div><div style="color:var(--text-dim)">Output</div><div>${fmtTokens(s.totalOutput)}</div></div>
+          <div><div style="color:var(--text-dim)">Cache read</div><div>${fmtTokens(s.totalCacheRead)}</div></div>
+          <div><div style="color:var(--text-dim)">Cache create</div><div>${fmtTokens(s.totalCacheCreate)}</div></div>
+          <div><div style="color:var(--text-dim)">Events</div><div>${fmtTokens(s.eventCount)}</div></div>
+          <div><div style="color:var(--text-dim)">Sessions</div><div>${fmtTokens(s.sessionsActive)}</div></div>
+        `;
+
+        const sessions = sessionsResp.sessions || [];
+        if (sessions.length === 0) {
+          sessionsEl.innerHTML = '<div style="color:var(--text-dim)">No sessions in window.</div>';
+        } else {
+          sessionsEl.innerHTML = `
+            <table style="width:100%;border-collapse:collapse;font-size:13px">
+              <thead><tr style="text-align:left;color:var(--text-dim)">
+                <th style="padding:6px 8px">Session</th>
+                <th style="padding:6px 8px">Project</th>
+                <th style="padding:6px 8px;text-align:right">Tokens</th>
+                <th style="padding:6px 8px;text-align:right">Events</th>
+                <th style="padding:6px 8px">Last activity</th>
+              </tr></thead>
+              <tbody>
+                ${sessions.map(r => `
+                  <tr style="border-top:1px solid var(--border)">
+                    <td style="padding:6px 8px;font-family:monospace">${escapeHtml((r.sessionId || '').slice(0, 8))}</td>
+                    <td style="padding:6px 8px">${escapeHtml(r.projectPath || '—')}</td>
+                    <td style="padding:6px 8px;text-align:right">${fmtTokens(r.totalTokens)}</td>
+                    <td style="padding:6px 8px;text-align:right">${fmtTokens(r.eventCount)}</td>
+                    <td style="padding:6px 8px">${fmtRelTime(r.lastTs)}</td>
+                  </tr>
+                `).join('')}
+              </tbody>
+            </table>
+          `;
+        }
+
+        const orphans = orphansResp.orphans || [];
+        if (orphans.length === 0) {
+          orphansEl.innerHTML = '<div style="color:var(--text-dim)">No idle sessions.</div>';
+        } else {
+          orphansEl.innerHTML = orphans.map(o => `
+            <div style="padding:6px 0;border-top:1px solid var(--border);display:flex;justify-content:space-between;font-family:monospace;font-size:12px">
+              <span>${escapeHtml((o.sessionId || '').slice(0, 12))}</span>
+              <span style="color:var(--text-dim)">${escapeHtml(o.projectPath || '—')}</span>
+              <span>${fmtRelTime(o.lastTs)}</span>
+            </div>
+          `).join('');
+        }
+      } catch (err) {
+        const msg = `<div style="color:var(--red)">Error: ${escapeHtml(err.message || String(err))}</div>`;
+        summaryEl.innerHTML = msg;
+        sessionsEl.innerHTML = '';
+        orphansEl.innerHTML = '';
+      }
     }
 
     async function loadFileTree() {

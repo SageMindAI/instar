@@ -589,6 +589,9 @@ export interface RouteContext {
    *  the evaluate route will still produce a response, just without
    *  persistence. */
   stopGateDb: StopGateDb | null;
+  /** Token-usage ledger (read-only observability over Claude Code JSONL
+   *  transcripts). Null when stateDir is unavailable. */
+  tokenLedger: import('../monitoring/TokenLedger.js').TokenLedger | null;
   startTime: Date;
 }
 
@@ -3761,6 +3764,68 @@ export function createRoutes(ctx: RouteContext): Router {
     } catch (err) {
       res.status(500).json({ error: err instanceof Error ? err.message : String(err) });
     }
+  });
+
+  // ── Token Ledger ────────────────────────────────────────────────
+  // Read-only token-usage observability backed by SQLite. Source data
+  // is Claude Code's per-session JSONL transcripts at
+  // ~/.claude/projects/<encoded-cwd>/<sessionId>.jsonl.
+  // Auth is enforced globally by authMiddleware.
+
+  const TOKEN_DEFAULT_WINDOW_MS = 24 * 60 * 60 * 1000;
+  const TOKEN_DEFAULT_ORPHAN_IDLE_MS = 30 * 60 * 1000;
+
+  function parseSinceMs(raw: unknown): number {
+    if (typeof raw === 'string' && /^\d+$/.test(raw)) {
+      const n = Number(raw);
+      if (n >= 0) return n;
+    }
+    return Date.now() - TOKEN_DEFAULT_WINDOW_MS;
+  }
+
+  router.get('/tokens/summary', (req, res) => {
+    if (!ctx.tokenLedger) {
+      res.status(503).json({ error: 'token ledger unavailable' });
+      return;
+    }
+    const sinceMs = parseSinceMs(req.query.since);
+    res.json({ sinceMs, summary: ctx.tokenLedger.summary({ sinceMs }) });
+  });
+
+  router.get('/tokens/sessions', (req, res) => {
+    if (!ctx.tokenLedger) {
+      res.status(503).json({ error: 'token ledger unavailable' });
+      return;
+    }
+    const sinceMs = parseSinceMs(req.query.since);
+    let limit = 20;
+    if (typeof req.query.limit === 'string' && /^\d+$/.test(req.query.limit)) {
+      const n = Number(req.query.limit);
+      if (n > 0 && n <= 500) limit = n;
+    }
+    res.json({ sinceMs, limit, sessions: ctx.tokenLedger.topSessions({ limit, sinceMs }) });
+  });
+
+  router.get('/tokens/by-project', (req, res) => {
+    if (!ctx.tokenLedger) {
+      res.status(503).json({ error: 'token ledger unavailable' });
+      return;
+    }
+    const sinceMs = parseSinceMs(req.query.since);
+    res.json({ sinceMs, projects: ctx.tokenLedger.byProject({ sinceMs }) });
+  });
+
+  router.get('/tokens/orphans', (req, res) => {
+    if (!ctx.tokenLedger) {
+      res.status(503).json({ error: 'token ledger unavailable' });
+      return;
+    }
+    let idleMs = TOKEN_DEFAULT_ORPHAN_IDLE_MS;
+    if (typeof req.query.idleMs === 'string' && /^\d+$/.test(req.query.idleMs)) {
+      const n = Number(req.query.idleMs);
+      if (n > 0) idleMs = n;
+    }
+    res.json({ idleMs, orphans: ctx.tokenLedger.orphans({ idleMs }) });
   });
 
   // ── Jobs ────────────────────────────────────────────────────────
