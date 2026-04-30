@@ -6,23 +6,26 @@
 
 ## Summary of the change
 
-Systematic replacement of `new URL(import.meta.url).pathname` with `__dirname` (or `fileURLToPath()`) across 10 source files. The former preserves `%20`-encoded spaces in filesystem paths, causing `fs.readFileSync`, `path.resolve`, and similar operations to fail when the project directory contains spaces.
+Systematic replacement of `new URL(import.meta.url).pathname` with `__dirname` (or `fileURLToPath()`) across 13 source files. The former preserves `%20`-encoded spaces in filesystem paths, causing `fs.readFileSync`, `path.resolve`, and similar operations to fail when the project directory contains spaces.
 
 **Files changed (source):**
 - `src/commands/init.ts` (4 occurrences)
 - `src/commands/playbook.ts` (1)
-- `src/commands/server.ts` (1)
-- `src/commands/setup.ts` (2)
+- `src/commands/server.ts` (4)
+- `src/commands/setup.ts` (3)
 - `src/core/Config.ts` (1)
 - `src/core/PostUpdateMigrator.ts` (2)
 - `src/core/SessionManager.ts` (1)
 - `src/core/UpdateChecker.ts` (1)
 - `src/core/UpgradeGuideProcessor.ts` (1)
 - `src/threadline/ThreadlineBootstrap.ts` (1)
+- `src/lifeline/ServerSupervisor.ts` (1)
 
 **Files changed (tests):** 5 test files with unquoted `execSync` paths or test expectation updates.
 
 **Files changed (generated):** `src/data/builtin-manifest.json` — content hashes updated to reflect changed source files.
+
+**Files changed (infrastructure):** `scripts/pre-push-gate.js` — added regression guard (check 5) that prevents re-introduction of the `URL.pathname` antipattern.
 
 ## Decision-point inventory
 

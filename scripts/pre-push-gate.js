@@ -203,6 +203,32 @@ try {
   // Git commands may fail in CI or detached HEAD — skip gracefully
 }
 
+// ── 5. URL.pathname filesystem guard ──────────────────────────────────
+// new URL(..., import.meta.url).pathname preserves %20-encoded spaces,
+// breaking filesystem operations. Use __dirname (via fileURLToPath) instead.
+
+try {
+  const srcDir = path.join(ROOT, 'src');
+  const { execSync } = await import('node:child_process');
+  const matches = execSync(
+    `grep -rn "new URL(.*import\\.meta\\.url.*)\\.pathname" "${srcDir}" 2>/dev/null || true`,
+    { encoding: 'utf-8' }
+  ).trim();
+
+  if (matches) {
+    const lines = matches.split('\n').filter(Boolean);
+    errors.push(
+      `${lines.length} instance(s) of URL.pathname for filesystem paths found in src/.\n` +
+      `      This breaks when the project directory contains spaces (%20 encoding).\n` +
+      `      Use path.resolve(__dirname, '...') instead.\n` +
+      lines.slice(0, 5).map(l => `        • ${l.replace(srcDir + '/', 'src/')}`).join('\n') +
+      (lines.length > 5 ? `\n        • ...and ${lines.length - 5} more` : '')
+    );
+  }
+} catch {
+  // grep not available — skip gracefully
+}
+
 // ── Report ────────────────────────────────────────────────────────────
 
 if (errors.length > 0 || warnings.length > 0) {

@@ -739,7 +739,7 @@ function findInstarCli(): string {
   } catch { /* npm prefix failed */ }
 
   // Fallback: use the dist/cli.js from the npm package — but ONLY if not in npx cache
-  const cliPath = new URL('../cli.js', import.meta.url).pathname;
+  const cliPath = path.resolve(__dirname, '../cli.js');
   if (fs.existsSync(cliPath) && !cliPath.includes('.npm/_npx')) {
     return cliPath;
   }
