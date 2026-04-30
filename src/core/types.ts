@@ -2709,6 +2709,10 @@ export interface SemanticMemoryConfig {
   lessonDecayHalfLifeDays: number;
   /** Minimum confidence before an entity is considered stale (default: 0.2) */
   staleThreshold: number;
+  /** Max JSONL file size (bytes) for synchronous auto-rebuild on corruption recovery.
+   *  Files larger than this are skipped with a warning — operator must rebuild manually.
+   *  Default: 50 MB (≈500k entities). Set 0 to disable auto-rebuild entirely. */
+  autoRebuildMaxBytes?: number;
 }
 
 /**

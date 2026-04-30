@@ -21,6 +21,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
+import { SafeFsExecutor } from '../core/SafeFsExecutor.js';
 import type {
   MemoryEntity,
   MemoryEdge,
@@ -62,6 +63,8 @@ export class SemanticMemory {
   private vectorSearch: VectorSearch | null = null;
   private _vectorAvailable = false;
   private jsonlPath: string;
+  /** Set after corruption auto-recovery — caller should reimport from JSONL */
+  private _needsRebuild = false;
 
   constructor(config: SemanticMemoryConfig) {
     this.config = config;
@@ -142,6 +145,42 @@ export class SemanticMemory {
     }
 
     this.db = constructor(this.config.dbPath) as Database;
+
+    // Integrity check — auto-recover from corruption (JSONL is source of truth).
+    // Corrupt DBs are quarantined (renamed) not deleted, and a marker file is written
+    // so operators can notice the recovery after the fact.
+    if (fs.existsSync(this.config.dbPath) && fs.statSync(this.config.dbPath).size > 0) {
+      try {
+        const result = this.db!.pragma('integrity_check') as Array<{ integrity_check: string }>;
+        if (result[0]?.integrity_check !== 'ok') {
+          this.quarantineCorruptDb(`integrity_check=${result[0]?.integrity_check}`);
+          this.db = constructor(this.config.dbPath) as Database;
+          this._needsRebuild = true;
+        }
+      } catch (err) {
+        this.quarantineCorruptDb(`pragma threw: ${(err as Error).message}`);
+        this.db = constructor(this.config.dbPath) as Database;
+        this._needsRebuild = true;
+      }
+
+      // Secondary probe: integrity_check can miss torn interior pages that aren't
+      // reachable from the B-tree schema walk. A probe read on existing tables catches these.
+      if (!this._needsRebuild) {
+        try {
+          const tables = this.db!.prepare(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'fts%' AND name NOT LIKE 'sqlite%'"
+          ).all() as Array<{ name: string }>;
+          for (const t of tables) {
+            this.db!.prepare(`SELECT * FROM "${t.name}" LIMIT 100`).all();
+          }
+        } catch (err) {
+          this.quarantineCorruptDb(`probe read failed: ${(err as Error).message}`);
+          this.db = constructor(this.config.dbPath) as Database;
+          this._needsRebuild = true;
+        }
+      }
+    }
+
     this.db!.pragma('journal_mode = WAL');
     this.db!.pragma('busy_timeout = 5000');
     this.db!.pragma('foreign_keys = ON');
@@ -151,6 +190,28 @@ export class SemanticMemory {
 
     // Initialize vector search if embedding provider is attached
     this.initVectorSearch();
+
+    // Auto-rebuild from JSONL after corruption recovery
+    if (this._needsRebuild) {
+      const maxBytes = this.config.autoRebuildMaxBytes ?? 50 * 1024 * 1024;
+      if (fs.existsSync(this.jsonlPath)) {
+        const jsonlSize = fs.statSync(this.jsonlPath).size;
+        if (maxBytes > 0 && jsonlSize > maxBytes) {
+          console.warn(
+            `[SemanticMemory] JSONL too large for synchronous rebuild ` +
+            `(${(jsonlSize / 1024 / 1024).toFixed(1)} MB, limit ${(maxBytes / 1024 / 1024).toFixed(0)} MB). ` +
+            `Starting with empty DB — rebuild manually via importFromJsonl().`
+          );
+          this.writeSkippedRebuildMarker(jsonlSize, maxBytes);
+        } else {
+          const result = this.importFromJsonl(this.jsonlPath);
+          console.log(`[SemanticMemory] Auto-rebuilt from JSONL: ${result.entities} entities, ${result.edges} edges reimported`);
+        }
+      } else {
+        console.warn('[SemanticMemory] No JSONL log found for rebuild — starting fresh');
+      }
+      this._needsRebuild = false;
+    }
   }
 
   close(): void {
@@ -173,6 +234,75 @@ export class SemanticMemory {
   private ensureOpen(): Database {
     if (!this.db) throw new Error('Database not open. Call open() first.');
     return this.db;
+  }
+
+  /**
+   * Move a corrupt DB aside (rename, not delete) and drop a marker file so
+   * operators can notice the auto-recovery. JSONL is source of truth, but
+   * keeping the corrupt file enables forensic analysis (did WAL tear? disk full?).
+   */
+  private quarantineCorruptDb(reason: string): void {
+    const ts = Date.now();
+    const dir = path.dirname(this.config.dbPath);
+    const base = path.basename(this.config.dbPath);
+    const corruptPath = `${this.config.dbPath}.corrupt.${ts}`;
+    const markerPath = path.join(dir, `${base}.corrupt-recovery.${ts}.marker.json`);
+
+    console.warn(`[SemanticMemory] Database corrupt (${reason}) — quarantining to ${corruptPath} and rebuilding`);
+
+    try { this.db?.close(); } catch { /* ignore */ }
+    this.db = null;
+
+    try {
+      if (fs.existsSync(this.config.dbPath)) {
+        fs.renameSync(this.config.dbPath, corruptPath);
+      }
+    } catch (err) {
+      // If rename fails (cross-device, permissions), fall back to delete so the rebuild can proceed.
+      console.warn(`[SemanticMemory] Could not quarantine corrupt DB (${(err as Error).message}) — falling back to delete`);
+      try { SafeFsExecutor.safeUnlinkSync(this.config.dbPath, { operation: 'SemanticMemory.quarantineCorruptDb' }); } catch { /* already gone */ }
+    }
+
+    // WAL/SHM are always removed — they're tied to the now-quarantined main file
+    // and keeping them around would confuse a fresh DB opened at the same path.
+    for (const ext of ['-wal', '-shm']) {
+      try { SafeFsExecutor.safeUnlinkSync(this.config.dbPath + ext, { operation: 'SemanticMemory.quarantineCorruptDb:sidecar' }); } catch { /* may not exist */ }
+    }
+
+    // Drop a marker file so operators / monitoring can detect the auto-recovery
+    // without tailing server logs. Safe to overwrite; safe to ignore if disk full.
+    try {
+      const marker = {
+        event: 'semantic_memory.auto_recovery',
+        timestamp: new Date(ts).toISOString(),
+        dbPath: this.config.dbPath,
+        quarantinedTo: fs.existsSync(corruptPath) ? corruptPath : null,
+        reason,
+      };
+      fs.writeFileSync(markerPath, JSON.stringify(marker, null, 2));
+    } catch {
+      // @silent-fallback-ok: marker is a hint for operators; recovery itself already succeeded
+    }
+  }
+
+  private writeSkippedRebuildMarker(jsonlSize: number, maxBytes: number): void {
+    const ts = Date.now();
+    const dir = path.dirname(this.config.dbPath);
+    const base = path.basename(this.config.dbPath);
+    const markerPath = path.join(dir, `${base}.skipped-rebuild.${ts}.marker.json`);
+    try {
+      fs.writeFileSync(markerPath, JSON.stringify({
+        event: 'semantic_memory.skipped_rebuild',
+        timestamp: new Date(ts).toISOString(),
+        dbPath: this.config.dbPath,
+        jsonlPath: this.jsonlPath,
+        jsonlSizeBytes: jsonlSize,
+        maxAllowedBytes: maxBytes,
+        action: 'Started with empty DB — operator should run importFromJsonl() manually',
+      }, null, 2));
+    } catch {
+      // @silent-fallback-ok: marker is advisory
+    }
   }
 
   // ─── JSONL Append Log ─────────────────────────────────────────
