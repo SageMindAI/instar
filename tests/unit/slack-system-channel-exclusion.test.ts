@@ -6,6 +6,9 @@
  * causing the SessionMonitor to send "session has stopped" messages hourly.
  */
 
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import { describe, it, expect } from 'vitest';
 import { SlackAdapter } from '../../src/messaging/slack/SlackAdapter.js';
 
@@ -15,6 +18,7 @@ const NORMAL_CHANNEL = 'C_NORMAL';
 
 function createTestAdapter() {
   const messages: Array<{ content: string; channel: string }> = [];
+  const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), 'slack-test-'));
 
   const adapter = new SlackAdapter({
     botToken: 'xoxb-test',
@@ -23,7 +27,7 @@ function createTestAdapter() {
     workspaceMode: 'dedicated',
     dashboardChannelId: DASHBOARD_CHANNEL,
     lifelineChannelId: LIFELINE_CHANNEL,
-  } as any, '/tmp/slack-test-state');
+  } as any, stateDir);
 
   adapter.onMessage(async (msg) => {
     messages.push({ content: msg.content, channel: msg.channel.identifier });
