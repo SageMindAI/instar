@@ -5027,12 +5027,28 @@ export async function startServer(options: StartOptions): Promise<void> {
         }, 2000);
       }
 
+      // Reap stuck job runs — sessions that were running when the host slept
+      // can't complete normally because their tmux process was suspended.
+      // Without this, runs leak as `pending` until the next claim TTL fires
+      // (or indefinitely, if the supervising scheduler tick is also missed).
+      let reapResult: { reaped: string[]; skipped: number } = { reaped: [], skipped: 0 };
+      try {
+        if (scheduler) {
+          reapResult = scheduler.reapStuckRuns(event);
+        }
+      } catch (err) {
+        console.error('[SleepWake][reaper] unexpected error:', err);
+      }
+
       // Notify via batcher — wake events are informational, not urgent
       // Only notify for long sleeps (>5 min) — short sleeps are routine and not worth mentioning
-      if (event.sleepDurationSeconds > 300) {
+      if (event.sleepDurationSeconds > 300 || reapResult.reaped.length > 0) {
         const mins = Math.round(event.sleepDurationSeconds / 60);
+        const reapNote = reapResult.reaped.length > 0
+          ? ` Reaped ${reapResult.reaped.length} stuck job(s): ${reapResult.reaped.join(', ')}.`
+          : '';
         notify('DIGEST', 'system',
-          `Machine woke up after ${mins > 60 ? `${Math.round(mins / 60)}h` : `${mins}m`} of sleep. Everything's reconnected and running.`
+          `Machine woke up after ${mins > 60 ? `${Math.round(mins / 60)}h` : `${mins}m`} of sleep.${reapNote} Everything's reconnected and running.`
         );
       }
     });
