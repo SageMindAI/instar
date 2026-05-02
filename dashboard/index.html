@@ -52,6 +52,12 @@
       padding: 12px 20px;
       border-bottom: 1px solid var(--border);
       background: var(--bg-panel);
+      position: relative;
+    }
+
+    /* Hamburger toggle — visible only on mobile, sits in the header row */
+    .nav-toggle {
+      display: none;
     }
 
     .header-left {
@@ -2206,9 +2212,26 @@
         font-size: 14px;
       }
 
+      /* Compact terminal action row — only essential keys inline,
+         rest collapse into an overflow scroll strip */
       .terminal-actions {
         gap: 4px;
-        flex-wrap: wrap;
+        flex-wrap: nowrap;
+        overflow-x: auto;
+        -webkit-overflow-scrolling: touch;
+        scrollbar-width: none;
+      }
+      .terminal-actions::-webkit-scrollbar { display: none; }
+
+      .terminal-actions .action-btn {
+        flex-shrink: 0;
+        min-height: 36px;  /* slightly smaller than 44 since these are arrow keys */
+      }
+
+      /* The arrow-key cluster compresses tighter to leave room */
+      .terminal-actions .action-btn.action-arrow {
+        padding: 6px 10px;
+        min-width: 36px;
       }
 
       .terminal-header {
@@ -2285,14 +2308,62 @@
         padding: 12px 14px;
       }
 
-      /* Tab bar compact */
-      .tab-bar {
+      /* Hamburger toggle — visible in header row on mobile */
+      .nav-toggle {
+        display: flex;
+        align-items: center;
+        gap: 8px;
         margin-left: 12px;
+        padding: 8px 12px;
+        min-height: 40px;
+        background: var(--bg);
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        color: var(--text);
+        font-size: 14px;
+        font-weight: 500;
+        cursor: pointer;
+      }
+      .nav-toggle:hover { background: var(--bg-hover); }
+      .nav-toggle[aria-expanded="true"] { background: var(--bg-active); border-color: var(--accent); }
+
+      /* On mobile the tab-bar becomes a vertical dropdown panel,
+         hidden by default and toggled via the .nav-open class on .app */
+      .tab-bar {
+        position: absolute;
+        top: 100%;  /* below the header row */
+        left: 0;
+        right: 0;
+        flex-direction: column;
+        margin-left: 0;
+        padding: 8px;
+        gap: 4px;
+        background: var(--bg-panel);
+        border-bottom: 1px solid var(--border);
+        box-shadow: 0 4px 12px rgba(0,0,0,0.4);
+        z-index: 100;
+        overflow-x: visible;
+        max-height: calc(100vh - 60px);
+        overflow-y: auto;
+        display: none;
+      }
+      .app.nav-open .tab-bar {
+        display: flex;
       }
 
       .tab-bar .tab {
-        padding: 5px 12px;
-        font-size: 12px;
+        width: 100%;
+        text-align: left;
+        border-radius: 6px;
+        padding: 12px 14px;
+        font-size: 15px;
+        min-height: 44px;
+        border-bottom: 1px solid var(--border);
+        margin-bottom: 0;
+      }
+      .tab-bar .tab.active {
+        background: var(--bg-active);
+        border-color: var(--accent);
       }
 
       /* File viewer mobile */
@@ -2385,6 +2456,41 @@
       .jobs-detail-content {
         padding: 14px;
       }
+
+      /* Filter chips and sort select were below 32px — bump to comfortable tap size */
+      .jobs-filter-chip {
+        padding: 8px 12px;
+        font-size: 12px;
+        min-height: 36px;
+      }
+      .jobs-sort {
+        font-size: 13px;
+        padding: 6px 8px;
+        min-height: 36px;
+      }
+
+      /* Modal — explicit mobile rule instead of relying on max-width: 90vw fallback */
+      .modal-dialog, .modal-content {
+        width: calc(100vw - 24px);
+        max-width: 100%;
+        margin: 12px;
+      }
+    }
+
+    @media (max-width: 480px) {
+      /* Even tighter — phone-only refinements */
+      .header h1 { font-size: 14px; }
+      .nav-toggle { padding: 6px 10px; font-size: 13px; }
+
+      /* Terminal action row — drop arrow keys to icon-only at very narrow widths */
+      .terminal-actions .action-btn.action-arrow {
+        padding: 6px 8px;
+        min-width: 30px;
+      }
+
+      /* Jobs summary cards stack tighter */
+      .jobs-summary-card { padding: 4px 2px; min-width: 40px; }
+      .jobs-summary-val { font-size: 14px; }
     }
   </style>
 </head>
@@ -2406,7 +2512,8 @@
       <div class="header-left">
         <img class="logo" src="/dashboard/logo.png" alt="Instar">
         <h1>Instar Dashboard</h1>
-        <nav class="tab-bar">
+        <button class="nav-toggle" id="navToggle" aria-label="Open navigation menu" aria-expanded="false" onclick="toggleNavMenu()">&#9776; <span id="navToggleLabel">Sessions</span></button>
+        <nav class="tab-bar" id="tabBar">
           <button class="tab active" data-tab="sessions" onclick="switchTab('sessions')">Sessions <span class="tab-count" id="tabSessionCount">0</span></button>
           <button class="tab" data-tab="files" onclick="switchTab('files')">Files</button>
           <button class="tab" data-tab="dropzone" onclick="switchTab('dropzone')">Send Content</button>
@@ -3470,7 +3577,7 @@
           brightCyan: '#99f6e4',
           brightWhite: '#eee',
         },
-        fontSize: window.innerWidth <= 768 ? 11 : 13,
+        fontSize: window.innerWidth <= 480 ? 10 : window.innerWidth <= 768 ? 11 : 13,
         fontFamily: "'SF Mono', 'Fira Code', 'JetBrains Mono', 'Cascadia Code', monospace",
         cursorBlink: false,
         cursorStyle: 'underline',
@@ -3487,6 +3594,12 @@
         try { fitAddon.fit(); } catch {}
       });
       resizeObserver.observe(container);
+
+      // Refit on window resize / orientation change — phone rotation may not
+      // trigger ResizeObserver if the parent grid keeps its size.
+      window.addEventListener('resize', () => {
+        try { fitAddon.fit(); } catch {}
+      });
 
       // Initial fit after a tick (container needs to be visible)
       requestAnimationFrame(() => {
@@ -4052,6 +4165,51 @@
       },
     ];
 
+    function toggleNavMenu() {
+      const app = document.querySelector('.app');
+      const toggle = document.getElementById('navToggle');
+      const open = app.classList.toggle('nav-open');
+      toggle.setAttribute('aria-expanded', open ? 'true' : 'false');
+    }
+
+    function updateNavToggleLabel(tabName) {
+      // Read the tab name from the actual button so we don't drift when
+      // tabs get renamed in the registry. Strip the trailing count badge
+      // ("Jobs 3" → "Jobs") by ignoring child element text.
+      const labelEl = document.getElementById('navToggleLabel');
+      if (!labelEl) return;
+      const tabBtn = document.querySelector(`.tab-bar .tab[data-tab="${tabName}"]`);
+      let text = tabName;
+      if (tabBtn) {
+        // Clone the button, strip count badges, then read trimmed text.
+        const clone = tabBtn.cloneNode(true);
+        clone.querySelectorAll('.tab-count').forEach(el => el.remove());
+        text = clone.textContent.trim() || tabName;
+      }
+      labelEl.textContent = text;
+    }
+
+    function closeNavMenu() {
+      const app = document.querySelector('.app');
+      if (!app || !app.classList.contains('nav-open')) return;
+      app.classList.remove('nav-open');
+      const toggle = document.getElementById('navToggle');
+      if (toggle) toggle.setAttribute('aria-expanded', 'false');
+    }
+
+    // Close the mobile menu on Escape or on tap outside the tab bar.
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') closeNavMenu();
+    });
+    document.addEventListener('click', (e) => {
+      const app = document.querySelector('.app');
+      if (!app || !app.classList.contains('nav-open')) return;
+      const tabBar = document.querySelector('.tab-bar');
+      const toggle = document.getElementById('navToggle');
+      if (tabBar?.contains(e.target) || toggle?.contains(e.target)) return;
+      closeNavMenu();
+    });
+
     function switchTab(tabName) {
       if (tabName === currentTab) return;
 
@@ -4065,6 +4223,11 @@
       document.querySelectorAll('.tab-bar .tab').forEach(btn => {
         btn.classList.toggle('active', btn.dataset.tab === tabName);
       });
+
+      updateNavToggleLabel(tabName);
+      document.querySelector('.app').classList.remove('nav-open');
+      const navToggle = document.getElementById('navToggle');
+      if (navToggle) navToggle.setAttribute('aria-expanded', 'false');
 
       // Hide all panels
       for (const tab of TAB_REGISTRY) {
