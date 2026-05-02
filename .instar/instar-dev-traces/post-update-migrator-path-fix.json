@@ -1,0 +1,11 @@
+{
+  "phase": "complete",
+  "slug": "post-update-migrator-path-fix",
+  "coveredFiles": [
+    "src/core/PostUpdateMigrator.ts"
+  ],
+  "artifactPath": "upgrades/side-effects/post-update-migrator-path-fix.md",
+  "artifactSha256": "5a8b9f7d8f0acd2019eba93b9b97e31861a1325a3fedf559d5b6a35749533636",
+  "specPath": "docs/specs/POST-UPDATE-MIGRATOR-PATH-FIX-SPEC.md",
+  "createdAt": "2026-04-28T08:00:00Z"
+}

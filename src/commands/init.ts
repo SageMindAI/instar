@@ -30,6 +30,9 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 import pc from 'picocolors';
 import { randomUUID } from 'node:crypto';
 import { execFileSync, execSync } from 'node:child_process';
@@ -2644,7 +2647,7 @@ function installBuildSkill(skillsDir: string): void {
   if (fs.existsSync(skillFile) || fs.existsSync(path.join(buildDir, 'skill.md'))) return;
 
   // Try to copy from bundled .claude/skills/build/ first
-  const modDir = path.dirname(new URL(import.meta.url).pathname);
+  const modDir = __dirname;
   const bundledSkill = path.join(modDir, '..', '..', '.claude', 'skills', 'build', 'SKILL.md');
   if (fs.existsSync(bundledSkill)) {
     fs.mkdirSync(buildDir, { recursive: true });
@@ -2686,7 +2689,7 @@ function installAutonomousSkill(skillsDir: string): void {
   const scriptsDir = path.join(autonomousDir, 'scripts');
 
   // Copy from instar's bundled skill files if they exist
-  const modDir = path.dirname(new URL(import.meta.url).pathname);
+  const modDir = __dirname;
   const bundledDir = path.join(path.dirname(path.dirname(modDir)), '.claude', 'skills', 'autonomous');
 
   if (fs.existsSync(bundledDir)) {
@@ -3432,7 +3435,7 @@ function refreshScripts(projectDir: string, stateDir: string): void {
  * PostUpdateMigrator.getTelegramReplyScript() uses the same loading pattern.
  */
 function loadRelayTemplate(filename: string, port: number): string {
-  const modDir = path.dirname(new URL(import.meta.url).pathname);
+  const modDir = __dirname;
   const candidates = [
     // dev: src/commands → ../templates/scripts
     path.resolve(modDir, '..', 'templates', 'scripts', filename),
@@ -4181,7 +4184,7 @@ function installSerendipityCapture(projectDir: string): void {
   // Resolve template from package directory
   // In dev: src/commands/ → ../../src/templates/scripts/serendipity-capture.sh
   // In dist: dist/commands/ → ../templates/scripts/serendipity-capture.sh
-  const modDir = path.dirname(new URL(import.meta.url).pathname);
+  const modDir = __dirname;
   const candidates = [
     path.resolve(modDir, '..', 'templates', 'scripts', 'serendipity-capture.sh'),
     path.resolve(modDir, '..', '..', 'src', 'templates', 'scripts', 'serendipity-capture.sh'),

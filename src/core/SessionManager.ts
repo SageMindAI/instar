@@ -13,6 +13,9 @@ import { randomUUID } from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 /** Diagnostics for a single running session */
 export interface SessionDiagnostic {
@@ -226,7 +229,7 @@ rm()  { "${shimRunner}" rm  "$@"; }
 
   private resolveShimRunner(): string {
     // Walk from this file up to project root, then look for scripts/destructive-command-shim.js
-    let dir = path.dirname(new URL(import.meta.url).pathname);
+    let dir = __dirname;
     for (let i = 0; i < 6; i++) {
       const candidate = path.join(dir, 'scripts', 'destructive-command-shim.js');
       if (fs.existsSync(candidate)) return candidate;

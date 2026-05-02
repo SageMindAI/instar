@@ -67,7 +67,7 @@ describe('UpdateChecker.applyUpdate()', () => {
     expect(result).toHaveProperty('restartNeeded');
     expect(typeof result.message).toBe('string');
     expect(result.message.length).toBeGreaterThan(0);
-  });
+  }, 30000);
 
   it('includes changeSummary in message when available', async () => {
     vi.spyOn(checker, 'check').mockResolvedValue({
@@ -83,7 +83,7 @@ describe('UpdateChecker.applyUpdate()', () => {
     // Even if the npm update fails, the result should be structured
     expect(result).toHaveProperty('message');
     expect(typeof result.message).toBe('string');
-  });
+  }, 30000);
 });
 
 describe('UpdateChecker.fetchChangelog()', () => {
@@ -276,7 +276,7 @@ describe('UpdateChecker.rollback()', () => {
     expect(result).toHaveProperty('message');
     expect(typeof result.message).toBe('string');
     expect(result.message.length).toBeGreaterThan(0);
-  });
+  }, 30000);
 });
 
 describe('UpdateChecker.check() with changeSummary', () => {

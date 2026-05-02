@@ -355,8 +355,8 @@ describe('ListenerSessionManager', () => {
   // ── State ─────────────────────────────────────────────────────────
 
   describe('state management', () => {
-    it('starts in dead state', () => {
-      expect(manager.getState().state).toBe('dead');
+    it('starts in listening state (ready to accept messages after construction)', () => {
+      expect(manager.getState().state).toBe('listening');
     });
 
     it('reports active when listening', () => {

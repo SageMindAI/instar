@@ -29,6 +29,7 @@
 import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import pc from 'picocolors';
 import { loadConfig } from '../core/Config.js';
 
@@ -217,7 +218,7 @@ function resolveScript(stateDir: string, scriptName: string): string {
 
 function getPackageDir(): string {
   // Walk up from this file to find the package root
-  let dir = path.dirname(new URL(import.meta.url).pathname);
+  let dir = path.dirname(fileURLToPath(import.meta.url));
   for (let i = 0; i < 5; i++) {
     const pkgPath = path.join(dir, 'package.json');
     if (fs.existsSync(pkgPath)) {

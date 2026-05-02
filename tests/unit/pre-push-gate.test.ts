@@ -27,7 +27,7 @@ describe('Pre-push gate script', () => {
   it('passes when NEXT.md is well-formed and version is incremented', () => {
     // The current repo state should pass the gate
     // (NEXT.md has content, version is current)
-    const result = execSync(`node ${gatePath}`, {
+    const result = execSync(`node "${gatePath}"`, {
       cwd: ROOT,
       encoding: 'utf-8',
       stdio: ['pipe', 'pipe', 'pipe'],

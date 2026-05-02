@@ -15,7 +15,10 @@ import { execFile, execFileSync } from 'node:child_process';
 import os from 'node:os';
 import fs from 'node:fs';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import type { UpdateInfo, UpdateResult } from './types.js';
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 import { PostUpdateMigrator } from './PostUpdateMigrator.js';
 import type { MigratorConfig } from './PostUpdateMigrator.js';
 import { DegradationReporter } from '../monitoring/DegradationReporter.js';
@@ -557,8 +560,8 @@ export class UpdateChecker {
     try {
       // Try to find instar's package.json relative to this module
       const pkgPath = path.resolve(
-        new URL(import.meta.url).pathname,
-        '..', '..', '..', 'package.json'
+        __dirname,
+        '..', '..', 'package.json'
       );
       if (fs.existsSync(pkgPath)) {
         const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf-8'));

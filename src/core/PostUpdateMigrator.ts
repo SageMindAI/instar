@@ -3910,7 +3910,7 @@ process.stdin.on('end', async () => {
    * a healthy install). The caller is responsible for handling the null case.
    */
   private loadRelayTemplate(filename: string): string | null {
-    const modDir = path.dirname(new URL(import.meta.url).pathname);
+    const modDir = __dirname;
     const candidates = [
       path.resolve(modDir, '..', 'templates', 'scripts', filename),
       path.resolve(modDir, '..', '..', 'src', 'templates', 'scripts', filename),
@@ -3990,12 +3990,11 @@ echo "[\$(date -Iseconds)] Server restart initiated"
   private getConvergenceCheck(): string {
     // Read the convergence check template from the templates directory.
     // This file is the heuristic quality gate that runs before external messaging.
-    const modDir = path.dirname(new URL(import.meta.url).pathname);
     // In dev: src/core/ → ../../src/templates/scripts/convergence-check.sh
     // In dist: dist/core/ → ../templates/scripts/convergence-check.sh
     const candidates = [
-      path.resolve(modDir, '..', 'templates', 'scripts', 'convergence-check.sh'),
-      path.resolve(modDir, '..', '..', 'src', 'templates', 'scripts', 'convergence-check.sh'),
+      path.resolve(__dirname, '..', 'templates', 'scripts', 'convergence-check.sh'),
+      path.resolve(__dirname, '..', '..', 'src', 'templates', 'scripts', 'convergence-check.sh'),
     ];
     for (const candidate of candidates) {
       if (fs.existsSync(candidate)) {
@@ -4274,7 +4273,7 @@ process.stdin.on('end', async () => {
   private getFreeTextGuardHook(): string {
     // Read the hook from the templates directory instead of inline generation.
     // This avoids multi-layer escaping issues (TypeScript -> bash -> Python -> regex).
-    const hookPath = path.join(path.dirname(new URL(import.meta.url).pathname), '..', 'templates', 'hooks', 'free-text-guard.sh');
+    const hookPath = path.join(__dirname, '..', 'templates', 'hooks', 'free-text-guard.sh');
     return fs.readFileSync(hookPath, 'utf-8');
   }
 

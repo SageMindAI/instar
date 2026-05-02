@@ -32,7 +32,10 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { SafeFsExecutor } from './SafeFsExecutor.js';
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 export interface UpgradeGuideResult {
   /** Guides that were found and are pending processing by the agent */
@@ -209,8 +212,8 @@ export class UpgradeGuideProcessor {
       // This file is at dist/core/UpgradeGuideProcessor.js
       // The upgrades/ dir is at the package root
       const moduleDir = path.resolve(
-        new URL(import.meta.url).pathname,
-        '..', '..', '..'
+        __dirname,
+        '..', '..'
       );
       const upgradesDir = path.join(moduleDir, 'upgrades');
       if (fs.existsSync(upgradesDir) && fs.statSync(upgradesDir).isDirectory()) {

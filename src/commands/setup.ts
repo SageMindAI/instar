@@ -20,7 +20,10 @@ import { execFileSync, execSync, spawn } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import pc from 'picocolors';
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 import { detectClaudePath, detectGhPath } from '../core/Config.js';
 import { ensurePrerequisites } from '../core/Prerequisites.js';
 import { allocatePort } from '../core/AgentRegistry.js';
@@ -531,7 +534,7 @@ function ensurePlaywrightMcp(dir: string): void {
  */
 function findInstarRoot(): string {
   // Walk up from this file to find package.json with name "instar"
-  let dir = path.dirname(new URL(import.meta.url).pathname);
+  let dir = __dirname;
   while (dir !== path.dirname(dir)) {
     const pkgPath = path.join(dir, 'package.json');
     if (fs.existsSync(pkgPath)) {
@@ -543,7 +546,7 @@ function findInstarRoot(): string {
     dir = path.dirname(dir);
   }
   // Fallback: assume we're in dist/commands/ — go up to root
-  return path.resolve(path.dirname(new URL(import.meta.url).pathname), '..', '..');
+  return path.resolve(__dirname, '..', '..');
 }
 
 // ── Auto-Start on Login ─────────────────────────────────────────
@@ -770,7 +773,7 @@ function findInstarCli(): string {
   } catch { /* npm prefix failed */ }
 
   // Fallback: use the dist/cli.js from the npm package — but ONLY if not in npx cache
-  const cliPath = new URL('../cli.js', import.meta.url).pathname;
+  const cliPath = path.resolve(__dirname, '../cli.js');
   if (fs.existsSync(cliPath) && !cliPath.includes('.npm/_npx')) {
     return cliPath;
   }

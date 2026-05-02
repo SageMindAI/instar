@@ -12,7 +12,10 @@ import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import pc from 'picocolors';
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 import { loadConfig, ensureStateDir, detectTmuxPath } from '../core/Config.js';
 import { SessionManager } from '../core/SessionManager.js';
 import { StateManager } from '../core/StateManager.js';
@@ -1536,7 +1539,7 @@ async function ensureSqliteBindings(): Promise<boolean> {
     try {
       // Use the bundled fix script which downloads correct prebuilds from GitHub.
       // This is more reliable than `npm rebuild` which fails with pnpm/asdf installs.
-      const fixScript = new URL('../../../scripts/fix-better-sqlite3.cjs', import.meta.url).pathname;
+      const fixScript = path.resolve(__dirname, '../../../scripts/fix-better-sqlite3.cjs');
       if (fs.existsSync(fixScript)) {
         execFileSync(process.execPath, [fixScript], { encoding: 'utf-8', timeout: 60000, stdio: 'pipe' });
       } else {
@@ -1545,7 +1548,7 @@ async function ensureSqliteBindings(): Promise<boolean> {
         // IMPORTANT: Use execFileSync (no shell) instead of execSync to avoid
         // "/bin/sh ENOENT" failures in minimal/containerized environments.
         const npmCli = findNpmCli();
-        const instarDir = new URL('../../..', import.meta.url).pathname;
+        const instarDir = path.resolve(__dirname, '../../..');
         const shadowBs3 = path.join(instarDir, 'node_modules', 'better-sqlite3');
         if (fs.existsSync(shadowBs3)) {
           execFileSync(process.execPath, [npmCli, 'rebuild', 'better-sqlite3'], {
@@ -1630,7 +1633,7 @@ function getInstalledVersion(): string {
  */
 function resolvePackageJsonPath(): string | null {
   try {
-    const pkgPath = path.resolve(new URL(import.meta.url).pathname, '../../../package.json');
+    const pkgPath = path.resolve(__dirname, '../../package.json');
     if (fs.existsSync(pkgPath)) return pkgPath;
   } catch {
     // @silent-fallback-ok — best-effort path resolution for package.json; null return is the documented default
@@ -2750,7 +2753,7 @@ export async function startServer(options: StartOptions): Promise<void> {
           if (!isBindingError) throw openErr;
 
           console.log(pc.yellow('  TopicMemory: native binding mismatch — auto-rebuilding better-sqlite3...'));
-          const fixScript = new URL('../../../scripts/fix-better-sqlite3.cjs', import.meta.url).pathname;
+          const fixScript = path.resolve(__dirname, '../../../scripts/fix-better-sqlite3.cjs');
           if (fs.existsSync(fixScript)) {
             execFileSync(process.execPath, [fixScript], { encoding: 'utf-8', timeout: 60000, stdio: 'pipe' });
           } else {
@@ -6516,7 +6519,7 @@ export async function startServer(options: StartOptions): Promise<void> {
     }
 
     // Get the path to the CLI entry point
-    const cliPath = new URL('../cli.js', import.meta.url).pathname;
+    const cliPath = path.resolve(__dirname, '../cli.js');
 
     // Use shell-safe command construction: pass node + args as separate tokens
     // tmux new-session runs the remainder as a shell command, so we quote each arg
