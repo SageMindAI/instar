@@ -2946,9 +2946,34 @@
         <div id="tlBridgeError" style="color:var(--err, #c44);font-size:12px;display:none"></div>
       </div>
 
-      <!-- Future home of the conversation observability view (deliverable 4) -->
-      <div style="border:1px dashed var(--border);border-radius:8px;padding:16px;font-size:12px;color:var(--text-dim);line-height:1.5">
-        The conversation observability view — threads list, color-coded message stream, latency metrics, FTS search — lands here in a follow-up. The settings above ship now so the bridge stays quiet by default once it goes live.
+      <!-- Conversation observability — threads list + message stream + search -->
+      <div style="border:1px solid var(--border);border-radius:8px;padding:0;display:flex;flex-direction:column;min-height:480px">
+        <!-- Toolbar -->
+        <div style="display:flex;gap:8px;align-items:center;padding:12px 16px;border-bottom:1px solid var(--border)">
+          <div style="font-weight:600">Conversations</div>
+          <div style="flex:1"></div>
+          <input type="search" id="tlObsSearchInput" placeholder="search messages…" style="padding:6px 8px;font-size:12px;width:220px" oninput="tlObsSearchDebounced(this.value)" />
+          <select id="tlObsHasTopicFilter" onchange="tlObsLoadThreads()" style="padding:6px 8px;font-size:12px">
+            <option value="">all threads</option>
+            <option value="yes">with Telegram topic</option>
+            <option value="no">without Telegram topic</option>
+          </select>
+          <input type="text" id="tlObsRemoteFilter" placeholder="agent filter" style="padding:6px 8px;font-size:12px;width:140px" oninput="tlObsLoadThreadsDebounced()" />
+          <button onclick="tlObsLoadThreads()" style="padding:6px 10px;font-size:12px">Refresh</button>
+        </div>
+
+        <!-- Two-pane: threads list + active thread -->
+        <div style="display:grid;grid-template-columns:280px 1fr;flex:1;min-height:420px">
+          <ul id="tlObsThreadsList" style="list-style:none;padding:0;margin:0;border-right:1px solid var(--border);overflow-y:auto;max-height:520px">
+            <li style="padding:16px;color:var(--text-dim);font-size:12px">Loading…</li>
+          </ul>
+          <div id="tlObsConversation" style="padding:16px;overflow-y:auto;max-height:520px;display:flex;flex-direction:column;gap:10px">
+            <div style="color:var(--text-dim);font-size:12px;font-style:italic">Select a thread on the left to view the conversation.</div>
+          </div>
+        </div>
+
+        <!-- Search results -->
+        <div id="tlObsSearchResults" style="display:none;border-top:1px solid var(--border);padding:12px 16px;max-height:280px;overflow-y:auto"></div>
       </div>
     </div>
 
@@ -4008,7 +4033,10 @@
         id: 'threadline',
         panels: ['threadlineTab'],
         display: ['flex'],
-        onActivate: () => { if (typeof loadThreadlineBridgeConfig === 'function') loadThreadlineBridgeConfig(); },
+        onActivate: () => {
+          if (typeof loadThreadlineBridgeConfig === 'function') loadThreadlineBridgeConfig();
+          if (typeof tlObsLoadThreads === 'function') tlObsLoadThreads();
+        },
       },
       {
         id: 'secrets',
@@ -4302,6 +4330,158 @@
       wire('tlBridgeAutoCreate', 'autoCreateTopics');
       wire('tlBridgeMirrorExisting', 'mirrorExisting');
     });
+
+    // ── Threadline observability — threads list + conversation view ──
+    let tlObsActiveThreadId = null;
+    let tlObsLoadThreadsTimer = null;
+    let tlObsSearchTimer = null;
+
+    function tlObsLoadThreadsDebounced() {
+      if (tlObsLoadThreadsTimer) clearTimeout(tlObsLoadThreadsTimer);
+      tlObsLoadThreadsTimer = setTimeout(tlObsLoadThreads, 300);
+    }
+
+    function tlObsSearchDebounced(value) {
+      if (tlObsSearchTimer) clearTimeout(tlObsSearchTimer);
+      tlObsSearchTimer = setTimeout(() => tlObsRunSearch(value), 300);
+    }
+
+    async function tlObsLoadThreads() {
+      const list = document.getElementById('tlObsThreadsList');
+      if (!list) return;
+      const remoteAgent = document.getElementById('tlObsRemoteFilter')?.value?.trim() || '';
+      const hasTopic = document.getElementById('tlObsHasTopicFilter')?.value || '';
+      const params = new URLSearchParams();
+      if (remoteAgent) params.set('remoteAgent', remoteAgent);
+      if (hasTopic) params.set('hasTopic', hasTopic);
+      try {
+        const resp = await apiFetch('/threadline/observability/threads?' + params.toString());
+        const threads = resp.threads || [];
+        if (threads.length === 0) {
+          list.innerHTML = '<li style="padding:16px;color:var(--text-dim);font-size:12px;font-style:italic">No threads yet.</li>';
+          return;
+        }
+        list.innerHTML = threads.map(t => tlObsRenderThreadRow(t)).join('');
+      } catch (err) {
+        list.innerHTML = `<li style="padding:16px;color:var(--red)">Error: ${escapeHtml(err.message || String(err))}</li>`;
+      }
+    }
+
+    function tlObsRenderThreadRow(t) {
+      const lastSeen = t.lastSeen ? fmtRelTime(t.lastSeen) : '—';
+      const bridgeBadge = t.bridge
+        ? '<span style="display:inline-block;padding:1px 6px;border-radius:8px;background:#3b82f6;color:#fff;font-size:10px;margin-left:6px">TG</span>'
+        : '';
+      const spawnBadge = t.hasSpawnedSession
+        ? '<span style="display:inline-block;padding:1px 6px;border-radius:8px;background:#16a34a;color:#fff;font-size:10px;margin-left:4px">S</span>'
+        : '';
+      const isActive = tlObsActiveThreadId === t.threadId ? 'background:rgba(59,130,246,0.08);' : '';
+      return `
+        <li onclick="tlObsLoadThread('${t.threadId.replace(/'/g, "\\'")}')"
+            style="padding:10px 12px;border-bottom:1px solid var(--border);cursor:pointer;${isActive}">
+          <div style="display:flex;justify-content:space-between;align-items:center">
+            <div style="font-weight:600;font-size:13px">${escapeHtml(t.remoteAgentName)}${bridgeBadge}${spawnBadge}</div>
+            <div style="font-size:11px;color:var(--text-dim)">${escapeHtml(lastSeen)}</div>
+          </div>
+          <div style="font-size:11px;color:var(--text-dim);margin-top:2px;font-family:monospace">
+            ${escapeHtml(t.threadId.slice(0, 16))}…
+          </div>
+          <div style="font-size:11px;color:var(--text-dim);margin-top:2px">
+            ${t.messageCount} msgs · ${t.inboundCount} in / ${t.outboundCount} out
+            ${typeof t.avgResponseLatencyMs === 'number' ? ' · ~' + Math.round(t.avgResponseLatencyMs / 1000) + 's reply' : ''}
+          </div>
+        </li>
+      `;
+    }
+
+    async function tlObsLoadThread(threadId) {
+      tlObsActiveThreadId = threadId;
+      tlObsLoadThreads(); // Re-render threads list to highlight active row
+      const conv = document.getElementById('tlObsConversation');
+      if (!conv) return;
+      conv.innerHTML = '<div style="color:var(--text-dim);font-size:12px">Loading…</div>';
+      try {
+        const detail = await apiFetch(`/threadline/observability/threads/${encodeURIComponent(threadId)}`);
+        conv.innerHTML = tlObsRenderConversation(detail);
+      } catch (err) {
+        conv.innerHTML = `<div style="color:var(--red);font-size:12px">Error: ${escapeHtml(err.message || String(err))}</div>`;
+      }
+    }
+
+    function tlObsRenderConversation(detail) {
+      const header = `
+        <div style="border-bottom:1px solid var(--border);padding-bottom:10px;margin-bottom:10px">
+          <div style="font-weight:600;font-size:14px">${escapeHtml(detail.remoteAgentName)}</div>
+          <div style="font-family:monospace;font-size:11px;color:var(--text-dim)">${escapeHtml(detail.threadId)}</div>
+          <div style="display:flex;gap:14px;font-size:11px;color:var(--text-dim);margin-top:6px;flex-wrap:wrap">
+            <span>${detail.messageCount} messages</span>
+            <span>${detail.inboundCount} in / ${detail.outboundCount} out</span>
+            <span>first: ${escapeHtml(fmtRelTime(detail.firstSeen))}</span>
+            <span>last: ${escapeHtml(fmtRelTime(detail.lastSeen))}</span>
+            ${typeof detail.avgResponseLatencyMs === 'number' ? '<span>avg reply: ' + Math.round(detail.avgResponseLatencyMs/1000) + 's</span>' : ''}
+            ${detail.bridge ? '<span>📨 topic ' + detail.bridge.topicId + '</span>' : '<span style="color:var(--text-dim);font-style:italic">no Telegram topic</span>'}
+            ${detail.hasSpawnedSession ? '<span>🧵 spawn-session</span>' : ''}
+          </div>
+        </div>
+      `;
+      const messages = (detail.messages || []).map(m => tlObsRenderMessage(m)).join('');
+      return header + messages;
+    }
+
+    function tlObsRenderMessage(m) {
+      const isIn = m.direction === 'in';
+      const bg = isIn ? 'rgba(99,102,241,0.10)' : 'rgba(34,197,94,0.10)';
+      const border = isIn ? '#6366f1' : '#22c55e';
+      const arrow = isIn ? '←' : '→';
+      const meta = `${escapeHtml(m.timestamp)} · ${escapeHtml(m.id.slice(0, 8))}${m.outcome ? ' · ' + escapeHtml(m.outcome) : ''} · trust:${escapeHtml(m.trustLevel)}`;
+      return `
+        <div style="border-left:3px solid ${border};background:${bg};padding:8px 10px;border-radius:4px">
+          <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:4px">
+            <div style="font-weight:600;font-size:12px">
+              ${arrow} ${escapeHtml(m.remoteAgentName)}
+            </div>
+            <div style="font-size:11px;color:var(--text-dim)">${escapeHtml(fmtRelTime(m.timestamp))}</div>
+          </div>
+          <div style="font-size:13px;white-space:pre-wrap;word-break:break-word;line-height:1.4">${escapeHtml(m.text)}</div>
+          <div style="font-family:monospace;font-size:10px;color:var(--text-dim);margin-top:4px">${meta}</div>
+        </div>
+      `;
+    }
+
+    async function tlObsRunSearch(query) {
+      const panel = document.getElementById('tlObsSearchResults');
+      if (!panel) return;
+      const q = (query || '').trim();
+      if (!q) { panel.style.display = 'none'; return; }
+      panel.style.display = 'block';
+      panel.innerHTML = '<div style="color:var(--text-dim);font-size:12px">Searching…</div>';
+      try {
+        const resp = await apiFetch('/threadline/observability/search?q=' + encodeURIComponent(q) + '&limit=30');
+        const hits = resp.hits || [];
+        if (hits.length === 0) {
+          panel.innerHTML = '<div style="color:var(--text-dim);font-size:12px">No matches.</div>';
+          return;
+        }
+        panel.innerHTML = `<div style="font-size:12px;color:var(--text-dim);margin-bottom:8px">${hits.length} match${hits.length === 1 ? '' : 'es'} (click to open thread)</div>` +
+          hits.map(h => `
+            <div onclick="tlObsLoadThread('${h.message.threadId.replace(/'/g, "\\'")}')"
+                 style="padding:6px 8px;border-bottom:1px solid var(--border);cursor:pointer;font-size:12px">
+              <div style="display:flex;justify-content:space-between">
+                <span style="font-weight:600">${h.message.direction === 'in' ? '←' : '→'} ${escapeHtml(h.message.remoteAgentName)}</span>
+                <span style="font-size:11px;color:var(--text-dim)">${escapeHtml(fmtRelTime(h.message.timestamp))}</span>
+              </div>
+              <div style="margin-top:2px;line-height:1.4">${tlObsRenderSnippet(h.snippet)}</div>
+            </div>
+          `).join('');
+      } catch (err) {
+        panel.innerHTML = `<div style="color:var(--red);font-size:12px">Error: ${escapeHtml(err.message || String(err))}</div>`;
+      }
+    }
+
+    function tlObsRenderSnippet(s) {
+      // Server returns matches wrapped in «...» — render as <mark>
+      return escapeHtml(s).replace(/«/g, '<mark style="background:#fef08a;color:#000">').replace(/»/g, '</mark>');
+    }
 
     async function loadFileTree() {
       fileTreeLoaded = true;
