@@ -9,6 +9,7 @@ import { execFileSync } from 'node:child_process';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { mergeConfigWithSecrets } from './SecretMigrator.js';
 import os from 'node:os';
 import type { InstarConfig, SessionManagerConfig, JobSchedulerConfig, FeedbackConfig, AgentType } from './types.js';
@@ -20,7 +21,7 @@ const DEFAULT_MAX_PARALLEL_JOBS = 2;
 export function getInstarVersion(): string {
   try {
     // Walk up from this file to find package.json
-    let dir = path.dirname(new URL(import.meta.url).pathname);
+    let dir = path.dirname(fileURLToPath(import.meta.url));
     for (let i = 0; i < 5; i++) {
       const pkgPath = path.join(dir, 'package.json');
       if (fs.existsSync(pkgPath)) {

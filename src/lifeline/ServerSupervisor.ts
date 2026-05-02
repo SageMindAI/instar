@@ -20,6 +20,9 @@ import { execFileSync, spawnSync } from 'node:child_process';
 import { EventEmitter } from 'node:events';
 import fs from 'node:fs';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 import { detectTmuxPath } from '../core/Config.js';
 import { SleepWakeDetector } from '../core/SleepWakeDetector.js';
 import { SafeFsExecutor } from '../core/SafeFsExecutor.js';
@@ -585,7 +588,7 @@ export class ServerSupervisor extends EventEmitter {
       // Shadow install is the agent's private copy at {stateDir}/shadow-install/.
       // The AutoUpdater installs updates there instead of globally, so each agent
       // manages its own version independently.
-      let cliPath = new URL('../cli.js', import.meta.url).pathname;
+      let cliPath = path.resolve(__dirname, '../cli.js');
 
       // Check for shadow install first — this is the agent's own managed version
       if (this.stateDir) {

@@ -17,7 +17,10 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { HandshakeManager } from './HandshakeManager.js';
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 import { AgentDiscovery } from './AgentDiscovery.js';
 import { generateIdentityKeyPair } from './ThreadlineCrypto.js';
 import type { KeyPair } from './ThreadlineCrypto.js';
@@ -383,8 +386,7 @@ function registerThreadlineMcp(projectDir: string, agentName: string, stateDir: 
   if (!fs.existsSync(mcpEntryPath)) {
     // Fall back to the running instar installation's dist directory.
     // This handles npm-linked installs where node_modules/instar doesn't exist.
-    const thisFile = new URL(import.meta.url).pathname;
-    mcpEntryPath = path.join(path.dirname(thisFile), 'mcp-stdio-entry.js');
+    mcpEntryPath = path.join(__dirname, 'mcp-stdio-entry.js');
   }
 
   const mcpEntry = {

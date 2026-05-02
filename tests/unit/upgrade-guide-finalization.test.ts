@@ -93,7 +93,7 @@ automatically created and maintained alongside existing vector indexes.
 
   function runScript(): { stdout: string; exitCode: number } {
     try {
-      const stdout = execSync(`node ${scriptPath}`, {
+      const stdout = execSync(`node "${scriptPath}"`, {
         cwd: tmpDir,
         encoding: 'utf-8',
         env: { ...process.env, NODE_PATH: '' },
@@ -133,7 +133,7 @@ automatically created and maintained alongside existing vector indexes.
   function runLocalScript(): { stdout: string; exitCode: number } {
     const localScript = path.join(tmpDir, 'scripts', 'check-upgrade-guide.js');
     try {
-      const stdout = execSync(`node ${localScript}`, {
+      const stdout = execSync(`node "${localScript}"`, {
         cwd: tmpDir,
         encoding: 'utf-8',
         env: { ...process.env, NODE_PATH: '' },

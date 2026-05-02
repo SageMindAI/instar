@@ -265,41 +265,43 @@ describe('AgentRegistry', () => {
   });
 
   describe('port allocation', () => {
+    // Use high port range (15000+) to avoid conflicts with macOS services
+    // (e.g. ControlCenter binds port 5000, AirPlay binds 7000)
     it('allocates from range', async () => {
       const { allocatePort } = await getRegistry();
-      const port = allocatePort('/tmp/new-project', 5000, 5010);
-      expect(port).toBe(5000);
+      const port = allocatePort('/tmp/new-project', 15000, 15010);
+      expect(port).toBe(15000);
     });
 
     it('skips ports used by running agents', async () => {
       const { registerAgent, allocatePort } = await getRegistry();
-      registerAgent('/tmp/project-a', 'a', 5000, 'project-bound', process.pid);
-      registerAgent('/tmp/project-b', 'b', 5001, 'project-bound', process.pid);
-      const port = allocatePort('/tmp/project-c', 5000, 5010);
-      expect(port).toBe(5002);
+      registerAgent('/tmp/project-a', 'a', 15000, 'project-bound', process.pid);
+      registerAgent('/tmp/project-b', 'b', 15001, 'project-bound', process.pid);
+      const port = allocatePort('/tmp/project-c', 15000, 15010);
+      expect(port).toBe(15002);
     });
 
     it('reclaims ports from stale agents', async () => {
       const { registerAgent, allocatePort } = await getRegistry();
       // Dead PID — will be marked stale, port should be reclaimable
-      registerAgent('/tmp/project-a', 'a', 5000, 'project-bound', 999999);
-      const port = allocatePort('/tmp/project-c', 5000, 5010);
-      expect(port).toBe(5000); // Reclaimed from stale entry
+      registerAgent('/tmp/project-a', 'a', 15000, 'project-bound', 999999);
+      const port = allocatePort('/tmp/project-c', 15000, 15010);
+      expect(port).toBe(15000); // Reclaimed from stale entry
     });
 
     it('returns existing port for same agent', async () => {
       const { registerAgent, allocatePort } = await getRegistry();
-      registerAgent('/tmp/my-project', 'my-project', 5005, 'project-bound', process.pid);
-      const port = allocatePort('/tmp/my-project', 5000, 5010);
-      expect(port).toBe(5005);
+      registerAgent('/tmp/my-project', 'my-project', 15005, 'project-bound', process.pid);
+      const port = allocatePort('/tmp/my-project', 15000, 15010);
+      expect(port).toBe(15005);
     });
 
     it('throws when range exhausted by running agents', async () => {
       const { registerAgent, allocatePort } = await getRegistry();
-      registerAgent('/tmp/p0', 'p0', 5000, 'project-bound', process.pid);
-      registerAgent('/tmp/p1', 'p1', 5001, 'project-bound', process.pid);
-      registerAgent('/tmp/p2', 'p2', 5002, 'project-bound', process.pid);
-      expect(() => allocatePort('/tmp/new', 5000, 5002)).toThrow(/No free ports available/);
+      registerAgent('/tmp/p0', 'p0', 15000, 'project-bound', process.pid);
+      registerAgent('/tmp/p1', 'p1', 15001, 'project-bound', process.pid);
+      registerAgent('/tmp/p2', 'p2', 15002, 'project-bound', process.pid);
+      expect(() => allocatePort('/tmp/new', 15000, 15002)).toThrow(/No free ports available/);
     });
   });
 

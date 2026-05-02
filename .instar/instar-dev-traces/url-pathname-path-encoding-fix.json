@@ -1,0 +1,21 @@
+{
+  "phase": "complete",
+  "slug": "url-pathname-path-encoding-fix",
+  "coveredFiles": [
+    "src/commands/init.ts",
+    "src/commands/playbook.ts",
+    "src/commands/server.ts",
+    "src/commands/setup.ts",
+    "src/core/Config.ts",
+    "src/core/PostUpdateMigrator.ts",
+    "src/core/SessionManager.ts",
+    "src/core/UpdateChecker.ts",
+    "src/core/UpgradeGuideProcessor.ts",
+    "src/data/builtin-manifest.json",
+    "src/threadline/ThreadlineBootstrap.ts"
+  ],
+  "artifactPath": "upgrades/side-effects/url-pathname-path-encoding-fix.md",
+  "artifactSha256": "376026f342a8af6ef94f7c9a3d514cab75223dee78e7675ff85ba0a683577eee",
+  "specPath": "docs/specs/URL-PATHNAME-PATH-ENCODING-FIX-SPEC.md",
+  "createdAt": "2026-04-28T08:30:00Z"
+}

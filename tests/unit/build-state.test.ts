@@ -9,7 +9,7 @@ const SCRIPT = path.resolve(__dirname, '../../playbook-scripts/build-state.py');
 
 function run(args: string[], cwd: string): { stdout: string; exitCode: number } {
   try {
-    const stdout = execSync(`python3 ${SCRIPT} ${args.join(' ')}`, {
+    const stdout = execSync(`python3 "${SCRIPT}" ${args.join(' ')}`, {
       cwd,
       encoding: 'utf8',
       timeout: 10000,

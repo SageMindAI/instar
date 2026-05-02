@@ -62,7 +62,7 @@ for m in msgs:
 print(json.dumps([m['text'] for m in pending_user]))
 `);
       fs.writeFileSync(dataPath, JSON.stringify(msgs));
-      const result = execSync(`python3 ${scriptPath} ${dataPath}`, { encoding: 'utf-8' }).trim();
+      const result = execSync(`python3 "${scriptPath}" "${dataPath}"`, { encoding: 'utf-8' }).trim();
       return JSON.parse(result);
     }
 
