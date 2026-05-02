@@ -576,6 +576,11 @@ export interface RouteContext {
   ledgerSessionRegistry: import('../core/LedgerSessionRegistry.js').LedgerSessionRegistry | null;
   /** Initiative tracker — persisted record of multi-phase long-running work. */
   initiativeTracker: import('../core/InitiativeTracker.js').InitiativeTracker | null;
+  /** Threadline → Telegram bridge config — toggles + allow/deny list. Read by
+   *  /threadline/telegram-bridge/config endpoints and by the bridge module
+   *  (deliverable b) to decide whether to mirror an inbound message into
+   *  a Telegram topic. Null when LiveConfig is not wired. */
+  telegramBridgeConfig: import('../threadline/TelegramBridgeConfig.js').TelegramBridgeConfig | null;
   /** Pending reply waiters for threadline relay-send waitForReply support.
    *  Key: threadId (UUID — unique per conversation, unlike agent names which
    *  can collide when multiple agents share a name). Value: resolve callback
@@ -4876,6 +4881,46 @@ export function createRoutes(ctx: RouteContext): Router {
     }
 
     res.json(ctx.telegram.getLogStats());
+  });
+
+  // ── Threadline → Telegram Bridge: settings surface ─────────────
+  //
+  // Read/write toggles + allow-list/deny-list that gate the bridge module
+  // (deliverable b). Default-OFF auto-create is a hard requirement — these
+  // endpoints are how the user opts in. Bearer-auth enforced globally.
+
+  router.get('/threadline/telegram-bridge/config', (_req, res) => {
+    if (!ctx.telegramBridgeConfig) {
+      res.status(503).json({ error: 'Telegram bridge config not initialized' });
+      return;
+    }
+    res.json(ctx.telegramBridgeConfig.getSettings());
+  });
+
+  router.patch('/threadline/telegram-bridge/config', (req, res) => {
+    if (!ctx.telegramBridgeConfig) {
+      res.status(503).json({ error: 'Telegram bridge config not initialized' });
+      return;
+    }
+    try {
+      const body = req.body as {
+        enabled?: unknown;
+        autoCreateTopics?: unknown;
+        mirrorExisting?: unknown;
+        allowList?: unknown;
+        denyList?: unknown;
+      };
+      const patch: Record<string, unknown> = {};
+      if ('enabled' in body) patch.enabled = body.enabled;
+      if ('autoCreateTopics' in body) patch.autoCreateTopics = body.autoCreateTopics;
+      if ('mirrorExisting' in body) patch.mirrorExisting = body.mirrorExisting;
+      if ('allowList' in body) patch.allowList = body.allowList;
+      if ('denyList' in body) patch.denyList = body.denyList;
+      const settings = ctx.telegramBridgeConfig.update(patch);
+      res.json(settings);
+    } catch (err) {
+      res.status(400).json({ error: err instanceof Error ? err.message : String(err) });
+    }
   });
 
   // ── Slack ──────────────────────────────────────────────────────

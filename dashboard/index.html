@@ -2419,6 +2419,7 @@
           <button class="tab" data-tab="initiatives" onclick="switchTab('initiatives')">Initiatives <span class="tab-count" id="tabInitiativeCount">0</span></button>
           <button class="tab" data-tab="commitments" onclick="switchTab('commitments')">Commitments <span class="tab-count" id="tabCommitmentCount">0</span></button>
           <button class="tab" data-tab="tokens" onclick="switchTab('tokens')">Tokens</button>
+          <button class="tab" data-tab="threadline" onclick="switchTab('threadline')">Threadline</button>
         </nav>
       </div>
       <div class="vital-signs" id="vitalSigns">
@@ -2879,6 +2880,75 @@
         <div id="tokensOrphansBody" style="font-size:13px">
           <div style="color:var(--text-dim)">Loading...</div>
         </div>
+      </div>
+    </div>
+
+    <!-- Threadline Tab — agent-to-agent conversations + Telegram bridge settings -->
+    <div id="threadlineTab" style="display:none;flex-direction:column;padding:20px;gap:16px;overflow-y:auto">
+      <div style="display:flex;justify-content:space-between;align-items:center">
+        <h2 style="margin:0">Threadline</h2>
+        <button onclick="loadThreadlineBridgeConfig()" style="padding:6px 12px">Refresh</button>
+      </div>
+      <div style="font-size:12px;color:var(--text-dim);line-height:1.4">
+        Threadline is your agent's secure channel to other AI agents. The Telegram bridge mirrors those conversations into per-thread Telegram topics so you can watch every exchange. Quiet by default — flip the master switch below to opt in.
+      </div>
+
+      <!-- Bridge settings card -->
+      <div id="tlBridgeCard" style="border:1px solid var(--border);border-radius:8px;padding:16px;display:flex;flex-direction:column;gap:14px">
+        <div style="font-weight:600">Telegram bridge settings</div>
+        <div id="tlBridgeStatus" style="font-size:12px;color:var(--text-dim)">Loading…</div>
+
+        <label style="display:flex;align-items:flex-start;gap:10px;font-size:13px">
+          <input type="checkbox" id="tlBridgeEnabled" style="margin-top:3px" />
+          <span>
+            <strong>Bridge enabled (master switch)</strong>
+            <div style="color:var(--text-dim);font-size:12px;margin-top:2px">When off, no threadline traffic reaches Telegram, regardless of the toggles below.</div>
+          </span>
+        </label>
+
+        <label style="display:flex;align-items:flex-start;gap:10px;font-size:13px">
+          <input type="checkbox" id="tlBridgeAutoCreate" style="margin-top:3px" />
+          <span>
+            <strong>Auto-create Telegram topics for new threads</strong>
+            <div style="color:var(--text-dim);font-size:12px;margin-top:2px">Default off. When off, a brand-new agent reaching out won't spawn a Telegram topic unless you've allow-listed them below.</div>
+          </span>
+        </label>
+
+        <label style="display:flex;align-items:flex-start;gap:10px;font-size:13px">
+          <input type="checkbox" id="tlBridgeMirrorExisting" style="margin-top:3px" />
+          <span>
+            <strong>Mirror messages into existing topics</strong>
+            <div style="color:var(--text-dim);font-size:12px;margin-top:2px">Default on. Once a Telegram topic exists for a thread, both inbound and outbound messages on that thread show up there.</div>
+          </span>
+        </label>
+
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px">
+          <div>
+            <div style="font-weight:600;font-size:13px;margin-bottom:6px">Allow-list</div>
+            <div style="font-size:11px;color:var(--text-dim);margin-bottom:6px">Always auto-create topics for these remote agents (overrides "auto-create off").</div>
+            <ul id="tlBridgeAllowList" style="list-style:none;padding:0;margin:0;font-size:13px;display:flex;flex-direction:column;gap:4px"></ul>
+            <div style="display:flex;gap:6px;margin-top:8px">
+              <input type="text" id="tlBridgeAllowInput" placeholder="agent fingerprint or name" style="flex:1;padding:6px 8px;font-size:12px" />
+              <button onclick="tlBridgeAddListEntry('allowList', 'tlBridgeAllowInput')" style="padding:6px 10px;font-size:12px">Add</button>
+            </div>
+          </div>
+          <div>
+            <div style="font-weight:600;font-size:13px;margin-bottom:6px">Deny-list</div>
+            <div style="font-size:11px;color:var(--text-dim);margin-bottom:6px">Never auto-create topics for these remote agents (overrides "auto-create on").</div>
+            <ul id="tlBridgeDenyList" style="list-style:none;padding:0;margin:0;font-size:13px;display:flex;flex-direction:column;gap:4px"></ul>
+            <div style="display:flex;gap:6px;margin-top:8px">
+              <input type="text" id="tlBridgeDenyInput" placeholder="agent fingerprint or name" style="flex:1;padding:6px 8px;font-size:12px" />
+              <button onclick="tlBridgeAddListEntry('denyList', 'tlBridgeDenyInput')" style="padding:6px 10px;font-size:12px">Add</button>
+            </div>
+          </div>
+        </div>
+
+        <div id="tlBridgeError" style="color:var(--err, #c44);font-size:12px;display:none"></div>
+      </div>
+
+      <!-- Future home of the conversation observability view (deliverable 4) -->
+      <div style="border:1px dashed var(--border);border-radius:8px;padding:16px;font-size:12px;color:var(--text-dim);line-height:1.5">
+        The conversation observability view — threads list, color-coded message stream, latency metrics, FTS search — lands here in a follow-up. The settings above ship now so the bridge stays quiet by default once it goes live.
       </div>
     </div>
 
@@ -3935,6 +4005,12 @@
         onActivate: () => { if (typeof loadTokens === 'function') loadTokens(); },
       },
       {
+        id: 'threadline',
+        panels: ['threadlineTab'],
+        display: ['flex'],
+        onActivate: () => { if (typeof loadThreadlineBridgeConfig === 'function') loadThreadlineBridgeConfig(); },
+      },
+      {
         id: 'secrets',
         panels: ['secretsPanel'],
         display: ['flex'],
@@ -4128,6 +4204,104 @@
         orphansEl.innerHTML = '';
       }
     }
+
+    // ── Threadline → Telegram bridge settings ──────────────────
+    let tlBridgeSettings = null;
+    let tlBridgeWiring = false;
+
+    async function loadThreadlineBridgeConfig() {
+      const statusEl = document.getElementById('tlBridgeStatus');
+      const errEl = document.getElementById('tlBridgeError');
+      if (errEl) { errEl.style.display = 'none'; errEl.textContent = ''; }
+      try {
+        const resp = await apiFetch('/threadline/telegram-bridge/config');
+        tlBridgeSettings = resp;
+        renderThreadlineBridgeConfig();
+        if (statusEl) statusEl.textContent = `Bridge is ${resp.enabled ? 'ENABLED' : 'OFF'} · auto-create ${resp.autoCreateTopics ? 'on' : 'off'} · mirror existing ${resp.mirrorExisting ? 'on' : 'off'}.`;
+      } catch (err) {
+        if (statusEl) statusEl.textContent = '';
+        if (errEl) { errEl.style.display = 'block'; errEl.textContent = `Could not load bridge config: ${err.message || String(err)}`; }
+      }
+    }
+
+    function renderThreadlineBridgeConfig() {
+      if (!tlBridgeSettings) return;
+      tlBridgeWiring = true;
+      try {
+        document.getElementById('tlBridgeEnabled').checked = !!tlBridgeSettings.enabled;
+        document.getElementById('tlBridgeAutoCreate').checked = !!tlBridgeSettings.autoCreateTopics;
+        document.getElementById('tlBridgeMirrorExisting').checked = !!tlBridgeSettings.mirrorExisting;
+        renderTlBridgeListEntries('allowList', 'tlBridgeAllowList', tlBridgeSettings.allowList || []);
+        renderTlBridgeListEntries('denyList', 'tlBridgeDenyList', tlBridgeSettings.denyList || []);
+      } finally {
+        tlBridgeWiring = false;
+      }
+    }
+
+    function renderTlBridgeListEntries(field, listElId, entries) {
+      const ul = document.getElementById(listElId);
+      if (!ul) return;
+      if (entries.length === 0) {
+        ul.innerHTML = '<li style="color:var(--text-dim);font-size:12px;font-style:italic">(empty)</li>';
+        return;
+      }
+      ul.innerHTML = entries.map(e => `
+        <li style="display:flex;justify-content:space-between;align-items:center;padding:4px 8px;border:1px solid var(--border);border-radius:4px;font-family:monospace;font-size:12px">
+          <span>${escapeHtml(e)}</span>
+          <button onclick="tlBridgeRemoveListEntry('${field}', ${JSON.stringify(e).replace(/'/g, "\\'")})" style="padding:2px 8px;font-size:11px">remove</button>
+        </li>
+      `).join('');
+    }
+
+    async function tlBridgePatchConfig(patch) {
+      const errEl = document.getElementById('tlBridgeError');
+      if (errEl) { errEl.style.display = 'none'; errEl.textContent = ''; }
+      try {
+        const resp = await apiFetch('/threadline/telegram-bridge/config', {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(patch),
+        });
+        tlBridgeSettings = resp;
+        renderThreadlineBridgeConfig();
+        const statusEl = document.getElementById('tlBridgeStatus');
+        if (statusEl) statusEl.textContent = `Saved · bridge is ${resp.enabled ? 'ENABLED' : 'OFF'}.`;
+      } catch (err) {
+        if (errEl) { errEl.style.display = 'block'; errEl.textContent = `Update failed: ${err.message || String(err)}`; }
+        // Reload to roll back the optimistic UI
+        loadThreadlineBridgeConfig();
+      }
+    }
+
+    function tlBridgeAddListEntry(field, inputId) {
+      const input = document.getElementById(inputId);
+      const val = (input?.value || '').trim();
+      if (!val) return;
+      const current = (tlBridgeSettings?.[field] || []).slice();
+      if (!current.includes(val)) current.push(val);
+      tlBridgePatchConfig({ [field]: current });
+      if (input) input.value = '';
+    }
+
+    function tlBridgeRemoveListEntry(field, entry) {
+      const current = (tlBridgeSettings?.[field] || []).filter(x => x !== entry);
+      tlBridgePatchConfig({ [field]: current });
+    }
+
+    // Wire up toggle change-handlers once the panel exists
+    document.addEventListener('DOMContentLoaded', () => {
+      const wire = (id, field) => {
+        const el = document.getElementById(id);
+        if (!el) return;
+        el.addEventListener('change', () => {
+          if (tlBridgeWiring) return;
+          tlBridgePatchConfig({ [field]: el.checked });
+        });
+      };
+      wire('tlBridgeEnabled', 'enabled');
+      wire('tlBridgeAutoCreate', 'autoCreateTopics');
+      wire('tlBridgeMirrorExisting', 'mirrorExisting');
+    });
 
     async function loadFileTree() {
       fileTreeLoaded = true;
