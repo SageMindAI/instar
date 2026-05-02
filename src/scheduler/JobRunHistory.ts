@@ -128,6 +128,12 @@ export class JobRunHistory {
    * Record that a job run completed. Updates the existing pending entry
    * by appending a completion record (JSONL is append-only — queries
    * deduplicate by taking the last entry per runId).
+   *
+   * Idempotent: if the run already has a non-pending result, this is a
+   * no-op. This closes the wake-reaper race where a tmux session ends
+   * during sleep and its completion callback fires after the reaper has
+   * already written 'timeout' — first writer wins, late writers are
+   * silently dropped with a debug log.
    */
   recordCompletion(opts: {
     runId: string;
@@ -139,6 +145,11 @@ export class JobRunHistory {
     const pending = this.findRun(opts.runId);
     if (!pending) {
       console.warn(`[JobRunHistory] No pending run found for ${opts.runId}`);
+      return;
+    }
+    if (pending.result !== 'pending') {
+      // Already completed — first writer wins.
+      console.debug(`[JobRunHistory] recordCompletion no-op for ${opts.runId}: already ${pending.result}`);
       return;
     }
 

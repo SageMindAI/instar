@@ -33,6 +33,13 @@ import type { TelegramAdapter } from '../messaging/TelegramAdapter.js';
 import type { JobClaimManager } from './JobClaimManager.js';
 import type { TopicMemory } from '../memory/TopicMemory.js';
 
+/**
+ * Fallback expected duration (minutes) used when a run is encountered for a
+ * slug that's no longer present in `jobs` (e.g., job config was removed
+ * or reloaded mid-sleep). Reaper threshold = this × thresholdMultiplier.
+ */
+const DEFAULT_EXPECTED_MINUTES = 30;
+
 interface QueuedJob {
   slug: string;
   reason: string;
@@ -507,6 +514,91 @@ export class JobScheduler {
    */
   getRunHistory(): JobRunHistory {
     return this.runHistory;
+  }
+
+  /**
+   * Reap stuck job runs after a system sleep/wake transition.
+   *
+   * When the host machine sleeps mid-job, the job's tmux session is
+   * suspended along with everything else and timer-based supervision
+   * (claim TTL, completion callbacks) cannot fire. On wake, runs that
+   * were in-flight stay `pending` in the ledger until the next claim
+   * TTL multi-hour timeout kicks in — or, in some cases, indefinitely.
+   *
+   * This method is invoked from the SleepWakeDetector wake handler.
+   * It scans `activeRunIds` and reaps any run whose elapsed time
+   * exceeds twice its `expectedDurationMinutes` — the same threshold
+   * the scheduler already uses for claim TTL.
+   *
+   * Reaping is idempotent: a second invocation finds the run is no
+   * longer `pending` and skips it.
+   */
+  reapStuckRuns(sleepEvent: { sleepDurationSeconds: number }): { reaped: string[]; skipped: number } {
+    const result = { reaped: [] as string[], skipped: 0 };
+
+    const minSleepSec = this.config.wakeReaper?.minSleepSeconds ?? 60;
+    if (sleepEvent.sleepDurationSeconds < minSleepSec) {
+      return result;
+    }
+
+    const multiplier = this.config.wakeReaper?.thresholdMultiplier ?? 2;
+    const now = Date.now();
+    const entries = Array.from(this.activeRunIds.entries());
+    const jobMap = new Map(this.jobs.map(j => [j.slug, j]));
+
+    for (const [sessionName, runId] of entries) {
+      const run = this.runHistory.findRun(runId);
+      if (!run || run.result !== 'pending') {
+        result.skipped++;
+        continue;
+      }
+      const job = jobMap.get(run.slug);
+      const expMin = job?.expectedDurationMinutes ?? DEFAULT_EXPECTED_MINUTES;
+      const thresholdMs = expMin * multiplier * 60_000;
+      const elapsedMs = now - new Date(run.startedAt).getTime();
+      if (elapsedMs <= thresholdMs) {
+        result.skipped++;
+        continue;
+      }
+
+      try {
+        this.sessionManager.killSession?.(sessionName);
+      } catch {
+        // Best-effort — session may already be dead.
+      }
+
+      try {
+        this.runHistory.recordCompletion({
+          runId,
+          result: 'timeout',
+          error: `Reaped on wake — sleep gap of ${sleepEvent.sleepDurationSeconds}s exceeded ${expMin}min × ${multiplier} threshold`,
+        });
+      } catch (err) {
+        // Leave activeRunIds entry intact: run is still 'pending' in the ledger,
+        // so the next reaper invocation will retry. Log slug+runId so a structural
+        // failure (disk full, file locked) is greppable in operator output.
+        console.error(`[scheduler][reaper] recordCompletion failed for ${run.slug} (runId=${runId}):`, err);
+        continue;
+      }
+
+      try {
+        // Note: claim is finalized as 'failure' (slug is unblocked for the next tick)
+        // while run history records 'timeout' (preserves the cause for diagnostics).
+        // The asymmetry is intentional — don't "fix" it.
+        this.claimManager?.completeClaim(run.slug, 'failure');
+      } catch {
+        // Best-effort — claim may have already cleared.
+      }
+
+      this.activeRunIds.delete(sessionName);
+      result.reaped.push(run.slug);
+    }
+
+    if (result.reaped.length > 0) {
+      console.log(`[scheduler][reaper] Reaped ${result.reaped.length} stuck job(s) after ${sleepEvent.sleepDurationSeconds}s sleep: ${result.reaped.join(', ')}`);
+    }
+
+    return result;
   }
 
   private enqueue(slug: string, reason: string): void {

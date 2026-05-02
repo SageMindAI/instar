@@ -162,6 +162,35 @@ describe('JobRunHistory unit tests', () => {
       const run = history.findRun(runId);
       expect(run!.result).toBe('timeout');
     });
+
+    it('is idempotent — late completion writes are dropped (wake-reaper race)', () => {
+      // Phantom-completion race: reaper writes 'timeout' after wake, then the
+      // session manager's late callback fires 'success' for the same runId.
+      // First writer wins; the late call is a no-op.
+      const history = new JobRunHistory(stateDir);
+
+      const runId = history.recordStart({
+        slug: 'racy-job',
+        sessionId: 'job-racy-job-1',
+        trigger: 'scheduled',
+      });
+
+      // Reaper writes first.
+      history.recordCompletion({
+        runId,
+        result: 'timeout',
+        error: 'Reaped on wake',
+      });
+
+      // Late completion arrives — must be ignored.
+      history.recordCompletion({ runId, result: 'success', outputSummary: 'done' });
+
+      const run = history.findRun(runId);
+      expect(run!.result).toBe('timeout');
+      expect(run!.error).toBe('Reaped on wake');
+      // No 'success' or 'done' bled into the surviving record.
+      expect(run!.outputSummary).toBeUndefined();
+    });
   });
 
   // ── Scenario 2: Spawn error lifecycle ──────────────────────────────

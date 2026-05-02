@@ -229,6 +229,13 @@ export interface JobSchedulerConfig {
   gateRetryDelayMs?: number;
   /** Auth token exposed to gate shell commands as $INSTAR_AUTH_TOKEN so gates can call authenticated localhost endpoints. */
   authToken?: string;
+  /** Wake-time job reaper — closes runs left pending after the host wakes from sleep. */
+  wakeReaper?: {
+    /** Minimum sleep duration (seconds) to trigger a reap pass. Defaults to 60. */
+    minSleepSeconds?: number;
+    /** Multiple of `expectedDurationMinutes` past which a pending run is considered stuck. Defaults to 2 — same threshold the scheduler already uses for claim TTL. */
+    thresholdMultiplier?: number;
+  };
 }
 
 // ── User Management ─────────────────────────────────────────────────
