@@ -1686,10 +1686,17 @@ export async function startServer(options: StartOptions): Promise<void> {
   liveConfig.start();
 
   // Threadline → Telegram bridge config — settings surface for the bridge
-  // module (deliverable b). Default-OFF auto-create ships from day one;
+  // module. Default-OFF auto-create ships from day one;
   // see TelegramBridgeConfig for the policy.
   const { TelegramBridgeConfig } = await import('../threadline/TelegramBridgeConfig.js');
   const telegramBridgeConfig = new TelegramBridgeConfig(liveConfig);
+
+  // The actual bridge module is instantiated AFTER the Telegram adapter is
+  // wired (further down in this file). Held as a let so closures formed
+  // here can reference whatever instance ends up assigned. Bridge is
+  // RELAY-ONLY (signal-vs-authority compliant): emits no routing decisions,
+  // blocks nothing. Authority lives in TelegramBridgeConfig.
+  let telegramBridge: import('../threadline/TelegramBridge.js').TelegramBridge | null = null;
 
   // NotificationBatcher: consolidate all Telegram notifications into tiered delivery.
   // IMMEDIATE = user needs to act NOW (quota exhausted, critical stall)
@@ -2480,6 +2487,23 @@ export async function startServer(options: StartOptions): Promise<void> {
       telegram.intelligence = sharedIntelligence ?? null;
       await telegram.start();
       console.log(pc.green(`  Telegram connected (stall alerts: ${sharedIntelligence ? 'LLM-gated' : 'timer-only'})`));
+
+      // Threadline → Telegram bridge — mirrors inbound/outbound threadline
+      // messages into per-thread Telegram topics. Default-OFF; the relay
+      // handler below and the threadline_send tool consult bridge.mirror*
+      // unconditionally — TelegramBridgeConfig owns the gate.
+      try {
+        const { TelegramBridge } = await import('../threadline/TelegramBridge.js');
+        telegramBridge = new TelegramBridge({
+          stateDir: config.stateDir,
+          localAgentName: config.projectName,
+          config: telegramBridgeConfig,
+          telegram,
+        });
+        console.log(pc.dim(`  Threadline → Telegram bridge: armed (default ${telegramBridgeConfig.getSettings().enabled ? 'ENABLED' : 'OFF'})`));
+      } catch (err) {
+        console.warn(pc.yellow(`  Threadline → Telegram bridge init failed (non-fatal): ${err instanceof Error ? err.message : err}`));
+      }
 
       // Wire Prompt Gate callbacks — connect Telegram relay responses to sessions
       if (promptGateConfig?.enabled) {
@@ -5756,6 +5780,23 @@ export async function startServer(options: StartOptions): Promise<void> {
             }
           }
 
+          // Threadline → Telegram bridge: mirror inbound message into a per-thread
+          // Telegram topic so the user has visibility into agent-to-agent
+          // conversations. Relay-only — TelegramBridgeConfig owns the gate
+          // (default-OFF; allow/deny list determines auto-create). Async,
+          // non-awaited, and never blocks routing or throws to this handler.
+          if (telegramBridge) {
+            telegramBridge
+              .mirrorInbound({
+                threadId: msg.threadId ?? getSyntheticThreadId(senderFingerprint),
+                remoteAgent: senderFingerprint,
+                remoteAgentName: senderName,
+                text: textContent,
+                messageId: msg.messageId,
+              })
+              .catch(err => console.warn(`[tg-bridge] mirrorInbound: ${err instanceof Error ? err.message : err}`));
+          }
+
           // Phase 2a: Pipe-mode session for simple queries (lightweight, auto-exit)
           // Rapid-fire same-thread guard: if an active pipe session already exists for this
           // thread, fall through to the listener/cold-spawn path so messages queue serially
@@ -6069,7 +6110,7 @@ export async function startServer(options: StartOptions): Promise<void> {
     const { InitiativeTracker } = await import('../core/InitiativeTracker.js');
     const initiativeTracker = new InitiativeTracker(config.stateDir);
 
-    const server = new AgentServer({ config, sessionManager, state, scheduler, telegram, relationships, feedback, feedbackAnomalyDetector, dispatches, updateChecker, autoUpdater, autoDispatcher, quotaTracker, quotaManager, publisher, viewer, tunnel, evolution, watchdog, topicMemory, triageNurse, projectMapper, coherenceGate: scopeVerifier, contextHierarchy, canonicalState, operationGate, sentinel, adaptiveTrust, memoryMonitor, orphanReaper, coherenceMonitor, commitmentTracker, semanticMemory, activitySentinel, messageRouter, summarySentinel, spawnManager, systemReviewer, capabilityMapper, selfKnowledgeTree, coverageAuditor, topicResumeMap: _topicResumeMap ?? undefined, autonomyManager, trustElevationTracker, autonomousEvolution, coordinator: coordinator.enabled ? coordinator : undefined, localSigningKeyPem, whatsapp: whatsappAdapter, slack: slackAdapter, imessage: imessageAdapter, whatsappBusinessBackend, messageBridge, hookEventReceiver, worktreeMonitor, subagentTracker, instructionsVerifier, handshakeManager: threadlineHandshake, threadlineRouter, threadlineRelayClient, threadlineReplyWaiters, listenerManager: listenerManager ?? undefined, responseReviewGate, messagingToneGate, outboundDedupGate, telemetryHeartbeat, pasteManager, featureRegistry, discoveryEvaluator, unifiedTrust, liveConfig, sharedStateLedger, ledgerSessionRegistry, worktreeManager, oidcEnrolledRepos: parallelDevConfig?.oidcEnrolledRepos, initiativeTracker, proxyCoordinator, telegramBridgeConfig });
+    const server = new AgentServer({ config, sessionManager, state, scheduler, telegram, relationships, feedback, feedbackAnomalyDetector, dispatches, updateChecker, autoUpdater, autoDispatcher, quotaTracker, quotaManager, publisher, viewer, tunnel, evolution, watchdog, topicMemory, triageNurse, projectMapper, coherenceGate: scopeVerifier, contextHierarchy, canonicalState, operationGate, sentinel, adaptiveTrust, memoryMonitor, orphanReaper, coherenceMonitor, commitmentTracker, semanticMemory, activitySentinel, messageRouter, summarySentinel, spawnManager, systemReviewer, capabilityMapper, selfKnowledgeTree, coverageAuditor, topicResumeMap: _topicResumeMap ?? undefined, autonomyManager, trustElevationTracker, autonomousEvolution, coordinator: coordinator.enabled ? coordinator : undefined, localSigningKeyPem, whatsapp: whatsappAdapter, slack: slackAdapter, imessage: imessageAdapter, whatsappBusinessBackend, messageBridge, hookEventReceiver, worktreeMonitor, subagentTracker, instructionsVerifier, handshakeManager: threadlineHandshake, threadlineRouter, threadlineRelayClient, threadlineReplyWaiters, listenerManager: listenerManager ?? undefined, responseReviewGate, messagingToneGate, outboundDedupGate, telemetryHeartbeat, pasteManager, featureRegistry, discoveryEvaluator, unifiedTrust, liveConfig, sharedStateLedger, ledgerSessionRegistry, worktreeManager, oidcEnrolledRepos: parallelDevConfig?.oidcEnrolledRepos, initiativeTracker, proxyCoordinator, telegramBridgeConfig, telegramBridge: telegramBridge ?? undefined });
     await server.start();
 
     // Connect DegradationReporter downstream systems now that everything is initialized.

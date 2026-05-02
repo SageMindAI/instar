@@ -160,6 +160,8 @@ export class AgentServer {
     initiativeTracker?: import('../core/InitiativeTracker.js').InitiativeTracker;
     /** Threadline → Telegram bridge config — toggles + allow/deny list. */
     telegramBridgeConfig?: import('../threadline/TelegramBridgeConfig.js').TelegramBridgeConfig;
+    /** Threadline → Telegram bridge — relay-only mirror of threadline messages. */
+    telegramBridge?: import('../threadline/TelegramBridge.js').TelegramBridge;
   }) {
     this.config = options.config;
     this.startTime = new Date();
@@ -411,6 +413,7 @@ export class AgentServer {
       initiativeTracker: options.initiativeTracker ?? null,
       tokenLedger: this.tokenLedger,
       telegramBridgeConfig: options.telegramBridgeConfig ?? null,
+      telegramBridge: options.telegramBridge ?? null,
       startTime: this.startTime,
     };
     this.routeContext = routeCtx;

@@ -578,9 +578,13 @@ export interface RouteContext {
   initiativeTracker: import('../core/InitiativeTracker.js').InitiativeTracker | null;
   /** Threadline → Telegram bridge config — toggles + allow/deny list. Read by
    *  /threadline/telegram-bridge/config endpoints and by the bridge module
-   *  (deliverable b) to decide whether to mirror an inbound message into
+   *  to decide whether to mirror an inbound message into
    *  a Telegram topic. Null when LiveConfig is not wired. */
   telegramBridgeConfig: import('../threadline/TelegramBridgeConfig.js').TelegramBridgeConfig | null;
+  /** Threadline → Telegram bridge — mirrors threadline messages into per-thread
+   *  Telegram topics. RELAY-ONLY: never blocks routing, swallows its own
+   *  errors. Null when no Telegram adapter is wired. */
+  telegramBridge: import('../threadline/TelegramBridge.js').TelegramBridge | null;
   /** Pending reply waiters for threadline relay-send waitForReply support.
    *  Key: threadId (UUID — unique per conversation, unlike agent names which
    *  can collide when multiple agents share a name). Value: resolve callback
@@ -10753,6 +10757,17 @@ export function createRoutes(ctx: RouteContext): Router {
                     : 'accepted';
                   console.log(`[relay-send] Local delivery to ${localTarget.name}:${localTarget.port} (thread: ${effectiveThreadId}) — ${outcome}`);
 
+                  // Mirror outbound into Telegram bridge (relay-only — best effort).
+                  if (ctx.telegramBridge) {
+                    ctx.telegramBridge.mirrorOutbound({
+                      threadId: effectiveThreadId,
+                      remoteAgent: localTarget.name,
+                      remoteAgentName: localTarget.name,
+                      text: message,
+                      messageId: msgId,
+                      outcome,
+                    }).catch(() => { /* swallow — bridge is relay-only */ });
+                  }
                   if (waitForReply) {
                     const reply = await waitForThreadlineReply(ctx, localTarget.name, effectiveThreadId, timeoutSeconds);
                     res.json({
@@ -10810,6 +10825,18 @@ export function createRoutes(ctx: RouteContext): Router {
 
       const relayMsgId = relayClient.sendAuto(resolvedId, message, threadId);
       const effectiveRelayThreadId = threadId ?? relayMsgId;
+
+      // Mirror outbound into Telegram bridge (relay-only — best effort).
+      if (ctx.telegramBridge) {
+        ctx.telegramBridge.mirrorOutbound({
+          threadId: effectiveRelayThreadId,
+          remoteAgent: resolvedId,
+          remoteAgentName: targetAgent,
+          text: message,
+          messageId: relayMsgId,
+          outcome: 'relay-sent',
+        }).catch(() => { /* swallow — bridge is relay-only */ });
+      }
 
       if (waitForReply) {
         const reply = await waitForThreadlineReply(ctx, resolvedId, effectiveRelayThreadId, timeoutSeconds);

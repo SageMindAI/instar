@@ -421,6 +421,12 @@ export class ThreadlineMCPServer {
             return errorResult(result.error || 'Message delivery failed');
           }
 
+          // Outbound mirroring into the Telegram bridge happens server-side
+          // in the /threadline/relay-send route handler — the MCP server runs
+          // in a subprocess and the bridge instance lives in the main agent
+          // process. Single hook for both local-delivery and relay-delivery
+          // outbound paths. (See server/routes.ts /threadline/relay-send.)
+
           const response: Record<string, unknown> = {
             // `delivered` reflects whether the recipient actually accepted
             // the message. It's true unless the recipient reported an
