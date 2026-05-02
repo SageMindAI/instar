@@ -162,6 +162,8 @@ export class AgentServer {
     telegramBridgeConfig?: import('../threadline/TelegramBridgeConfig.js').TelegramBridgeConfig;
     /** Threadline → Telegram bridge — relay-only mirror of threadline messages. */
     telegramBridge?: import('../threadline/TelegramBridge.js').TelegramBridge;
+    /** Threadline observability — read-only views over inbox/outbox/bindings. */
+    threadlineObservability?: import('../threadline/ThreadlineObservability.js').ThreadlineObservability;
   }) {
     this.config = options.config;
     this.startTime = new Date();
@@ -414,6 +416,7 @@ export class AgentServer {
       tokenLedger: this.tokenLedger,
       telegramBridgeConfig: options.telegramBridgeConfig ?? null,
       telegramBridge: options.telegramBridge ?? null,
+      threadlineObservability: options.threadlineObservability ?? null,
       startTime: this.startTime,
     };
     this.routeContext = routeCtx;

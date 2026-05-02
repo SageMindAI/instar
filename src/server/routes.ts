@@ -585,6 +585,9 @@ export interface RouteContext {
    *  Telegram topics. RELAY-ONLY: never blocks routing, swallows its own
    *  errors. Null when no Telegram adapter is wired. */
   telegramBridge: import('../threadline/TelegramBridge.js').TelegramBridge | null;
+  /** Threadline observability — read-only view layer over inbox/outbox/bindings.
+   *  Powers the dashboard Threadline tab via /threadline/observability/*. */
+  threadlineObservability: import('../threadline/ThreadlineObservability.js').ThreadlineObservability | null;
   /** Pending reply waiters for threadline relay-send waitForReply support.
    *  Key: threadId (UUID — unique per conversation, unlike agent names which
    *  can collide when multiple agents share a name). Value: resolve callback
@@ -4899,6 +4902,44 @@ export function createRoutes(ctx: RouteContext): Router {
       return;
     }
     res.json(ctx.telegramBridgeConfig.getSettings());
+  });
+
+  // ── Threadline observability — read-only views over inbox/outbox/bindings ──
+
+  router.get('/threadline/observability/threads', (req, res) => {
+    if (!ctx.threadlineObservability) {
+      res.status(503).json({ error: 'Threadline observability not initialized' });
+      return;
+    }
+    const remoteAgent = typeof req.query.remoteAgent === 'string' ? req.query.remoteAgent : undefined;
+    const sinceIso = typeof req.query.since === 'string' ? req.query.since : undefined;
+    const untilIso = typeof req.query.until === 'string' ? req.query.until : undefined;
+    const hasTopicRaw = typeof req.query.hasTopic === 'string' ? req.query.hasTopic : undefined;
+    const hasTopic = hasTopicRaw === 'yes' || hasTopicRaw === 'no' ? hasTopicRaw : undefined;
+    const threads = ctx.threadlineObservability.listThreads({ remoteAgent, sinceIso, untilIso, hasTopic });
+    res.json({ threads, count: threads.length });
+  });
+
+  router.get('/threadline/observability/threads/:threadId', (req, res) => {
+    if (!ctx.threadlineObservability) {
+      res.status(503).json({ error: 'Threadline observability not initialized' });
+      return;
+    }
+    const detail = ctx.threadlineObservability.getThread(req.params.threadId);
+    if (!detail) { res.status(404).json({ error: 'Thread not found' }); return; }
+    res.json(detail);
+  });
+
+  router.get('/threadline/observability/search', (req, res) => {
+    if (!ctx.threadlineObservability) {
+      res.status(503).json({ error: 'Threadline observability not initialized' });
+      return;
+    }
+    const q = typeof req.query.q === 'string' ? req.query.q : '';
+    const limitRaw = typeof req.query.limit === 'string' ? parseInt(req.query.limit, 10) : 50;
+    const limit = Number.isFinite(limitRaw) && limitRaw > 0 ? Math.min(limitRaw, 200) : 50;
+    const hits = ctx.threadlineObservability.searchMessages(q, limit);
+    res.json({ hits, count: hits.length });
   });
 
   router.patch('/threadline/telegram-bridge/config', (req, res) => {
@@ -10757,6 +10798,25 @@ export function createRoutes(ctx: RouteContext): Router {
                     : 'accepted';
                   console.log(`[relay-send] Local delivery to ${localTarget.name}:${localTarget.port} (thread: ${effectiveThreadId}) — ${outcome}`);
 
+                  // Canonical outbox write — single source of truth for outbound messages
+                  // across BOTH delivery paths (local + relay). Powers the dashboard
+                  // observability tab. Mirrors the inbound canonical write from PR #113.
+                  if (ctx.listenerManager) {
+                    try {
+                      ctx.listenerManager.appendCanonicalOutboxEntry({
+                        from: ctx.config.projectName ?? 'self',
+                        senderName: ctx.config.projectName ?? 'self',
+                        to: localTarget.name,
+                        recipientName: localTarget.name,
+                        threadId: effectiveThreadId,
+                        text: message,
+                        messageId: msgId,
+                        outcome,
+                      });
+                    } catch (err) {
+                      console.warn(`[relay-send] Canonical outbox append failed (non-fatal): ${err instanceof Error ? err.message : err}`);
+                    }
+                  }
                   // Mirror outbound into Telegram bridge (relay-only — best effort).
                   if (ctx.telegramBridge) {
                     ctx.telegramBridge.mirrorOutbound({
@@ -10825,6 +10885,25 @@ export function createRoutes(ctx: RouteContext): Router {
 
       const relayMsgId = relayClient.sendAuto(resolvedId, message, threadId);
       const effectiveRelayThreadId = threadId ?? relayMsgId;
+
+      // Canonical outbox write for the relay-delivery path — same shape as the
+      // local-delivery path above, so the observability tab sees both paths.
+      if (ctx.listenerManager) {
+        try {
+          ctx.listenerManager.appendCanonicalOutboxEntry({
+            from: ctx.config.projectName ?? 'self',
+            senderName: ctx.config.projectName ?? 'self',
+            to: resolvedId,
+            recipientName: targetAgent,
+            threadId: effectiveRelayThreadId,
+            text: message,
+            messageId: relayMsgId,
+            outcome: 'relay-sent',
+          });
+        } catch (err) {
+          console.warn(`[relay-send] Canonical outbox append failed (non-fatal): ${err instanceof Error ? err.message : err}`);
+        }
+      }
 
       // Mirror outbound into Telegram bridge (relay-only — best effort).
       if (ctx.telegramBridge) {
