@@ -329,7 +329,18 @@ export class AgentServer {
         fs.mkdirSync(serverDataDir, { recursive: true });
         const dbPath = path.join(serverDataDir, 'token-ledger.db');
         const claudeProjectsDir = path.join(os.homedir(), '.claude', 'projects');
-        this.tokenLedger = new TokenLedger({ dbPath, claudeProjectsDir });
+        // Bound the first-boot scan: with deep history (eg one local agent
+        // had 119k JSONLs / 12GB of transcripts), an unbounded synchronous
+        // scan blocks the event loop for minutes. We cap per-tick work and
+        // skip files older than the backfill window — the source JSONLs
+        // remain authoritative if the operator wants to widen the window.
+        this.tokenLedger = new TokenLedger({
+          dbPath,
+          claudeProjectsDir,
+          maxFileAgeMs: 30 * 24 * 60 * 60 * 1000, // 30 days
+          maxFilesPerScan: 500,
+          yieldEveryNFiles: 25,
+        });
       }
     } catch (err) {
       console.warn('[instar] token-ledger init failed (non-fatal):', err);

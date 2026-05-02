@@ -258,3 +258,103 @@ describe('TokenLedger.ingestFile / scanAll', () => {
     expect(ledger.summary().eventCount).toBe(3);
   });
 });
+
+describe('TokenLedger.scanAll bounded behavior', () => {
+  let tmpDir: string;
+  let projectsDir: string;
+
+  beforeEach(() => {
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'token-ledger-bounded-'));
+    projectsDir = path.join(tmpDir, 'projects');
+    fs.mkdirSync(projectsDir, { recursive: true });
+  });
+
+  afterEach(() => {
+    SafeFsExecutor.safeRmSync(tmpDir, { recursive: true, force: true, operation: 'tests/unit/token-ledger.test.ts:bounded-afterEach' });
+  });
+
+  it('respects maxFilesPerScan and resumes via cursor on next call', () => {
+    const projDir = path.join(projectsDir, '-many-files');
+    fs.mkdirSync(projDir, { recursive: true });
+    // 12 sessions, one event each
+    for (let i = 0; i < 12; i++) {
+      fs.writeFileSync(
+        path.join(projDir, `s${String(i).padStart(2, '0')}.jsonl`),
+        assistantLine({ requestId: `r${i}`, sessionId: `s${i}` }) + '\n',
+      );
+    }
+    const ledger = new TokenLedger({
+      dbPath: ':memory:',
+      claudeProjectsDir: projectsDir,
+      maxFilesPerScan: 5,
+    });
+
+    const r1 = ledger.scanAll();
+    expect(r1.filesScanned).toBe(5);
+    expect(r1.inserted).toBe(5);
+
+    const r2 = ledger.scanAll();
+    expect(r2.filesScanned).toBe(5);
+    expect(r2.inserted).toBe(5);
+
+    const r3 = ledger.scanAll();
+    expect(r3.filesScanned).toBe(2);
+    expect(r3.inserted).toBe(2);
+
+    expect(ledger.summary().eventCount).toBe(12);
+    ledger.close();
+  });
+
+  it('skips files older than maxFileAgeMs', () => {
+    const projDir = path.join(projectsDir, '-age-test');
+    fs.mkdirSync(projDir, { recursive: true });
+    const old = path.join(projDir, 'old.jsonl');
+    const fresh = path.join(projDir, 'fresh.jsonl');
+    fs.writeFileSync(old, assistantLine({ requestId: 'old', sessionId: 'sold' }) + '\n');
+    fs.writeFileSync(fresh, assistantLine({ requestId: 'new', sessionId: 'snew' }) + '\n');
+
+    // Backdate the old file by 60 days
+    const sixtyDaysAgo = Date.now() - (60 * 24 * 60 * 60 * 1000);
+    fs.utimesSync(old, sixtyDaysAgo / 1000, sixtyDaysAgo / 1000);
+
+    const ledger = new TokenLedger({
+      dbPath: ':memory:',
+      claudeProjectsDir: projectsDir,
+      maxFileAgeMs: 30 * 24 * 60 * 60 * 1000,
+    });
+    const r = ledger.scanAll();
+    expect(r.filesScanned).toBe(1);
+    expect(r.inserted).toBe(1);
+    expect(ledger.summary().eventCount).toBe(1);
+    ledger.close();
+  });
+
+  it('scanAllAsync yields control between batches and completes', async () => {
+    const projDir = path.join(projectsDir, '-async-yield');
+    fs.mkdirSync(projDir, { recursive: true });
+    for (let i = 0; i < 8; i++) {
+      fs.writeFileSync(
+        path.join(projDir, `s${i}.jsonl`),
+        assistantLine({ requestId: `r${i}`, sessionId: `s${i}` }) + '\n',
+      );
+    }
+    const ledger = new TokenLedger({
+      dbPath: ':memory:',
+      claudeProjectsDir: projectsDir,
+      yieldEveryNFiles: 2,
+    });
+
+    let interleavedTicks = 0;
+    const interleaver = setInterval(() => { interleavedTicks++; }, 1);
+
+    const r = await ledger.scanAllAsync();
+    clearInterval(interleaver);
+
+    expect(r.filesScanned).toBe(8);
+    expect(r.inserted).toBe(8);
+    // The async path must have yielded to the event loop at least once
+    // (otherwise the setInterval callback could not fire).
+    expect(interleavedTicks).toBeGreaterThan(0);
+    ledger.close();
+  });
+});

@@ -47,12 +47,14 @@ export class TokenLedgerPoller {
   private tick(): void {
     if (this.running) return;
     this.running = true;
-    try {
-      this.ledger.scanAll();
-    } catch (err) {
-      this.onError(err);
-    } finally {
-      this.running = false;
-    }
+    // Fire-and-forget the async scan; reentry guard above prevents stacking.
+    // We do NOT await — setInterval already drives cadence, and awaiting
+    // here would block other interval callbacks in this microtask queue.
+    this.ledger
+      .scanAllAsync()
+      .catch((err) => this.onError(err))
+      .finally(() => {
+        this.running = false;
+      });
   }
 }

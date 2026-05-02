@@ -128,6 +128,25 @@ export interface TokenLedgerOptions {
   dbPath: string;
   /** Root directory of Claude Code project transcripts (e.g. `~/.claude/projects`). */
   claudeProjectsDir: string;
+  /**
+   * Skip JSONL files whose mtime is older than this many ms when scanning.
+   * Bounds the work the ledger does on agents with deep history (Echo had
+   * 119k files / 12GB which blocked the event loop). Pass 0 / undefined to
+   * scan everything. Default: scan everything (caller decides).
+   */
+  maxFileAgeMs?: number;
+  /**
+   * Per-tick scan cap. After this many files have been processed in a single
+   * scanAll call, the scan returns and resumes on the next poll. Prevents a
+   * single tick from monopolising the event loop. Default 500.
+   */
+  maxFilesPerScan?: number;
+  /**
+   * Yield to the event loop every N files within a scan. Default 25.
+   * Even with maxFilesPerScan, a 500-file batch on slow disks can block for
+   * seconds without yielding.
+   */
+  yieldEveryNFiles?: number;
 }
 
 interface AssistantLine {
@@ -155,6 +174,12 @@ interface AssistantLine {
 export class TokenLedger {
   private db: BetterSqliteDatabase;
   private claudeProjectsDir: string;
+  private maxFileAgeMs: number;
+  private maxFilesPerScan: number;
+  private yieldEveryNFiles: number;
+  // Cursor between scan calls — when a tick stops at the per-scan cap,
+  // the next tick resumes from here instead of restarting the whole tree.
+  private scanCursor: { dirIdx: number; fileIdx: number } = { dirIdx: 0, fileIdx: 0 };
   private stmts!: {
     insertEvent: ReturnType<BetterSqliteDatabase['prepare']>;
     getOffset: ReturnType<BetterSqliteDatabase['prepare']>;
@@ -163,6 +188,9 @@ export class TokenLedger {
 
   constructor(opts: TokenLedgerOptions) {
     this.claudeProjectsDir = opts.claudeProjectsDir;
+    this.maxFileAgeMs = opts.maxFileAgeMs && opts.maxFileAgeMs > 0 ? opts.maxFileAgeMs : 0;
+    this.maxFilesPerScan = opts.maxFilesPerScan && opts.maxFilesPerScan > 0 ? opts.maxFilesPerScan : 500;
+    this.yieldEveryNFiles = opts.yieldEveryNFiles && opts.yieldEveryNFiles > 0 ? opts.yieldEveryNFiles : 25;
     if (opts.dbPath !== ':memory:') {
       fs.mkdirSync(path.dirname(opts.dbPath), { recursive: true });
     }
@@ -359,34 +387,134 @@ export class TokenLedger {
   /**
    * Walk every `*.jsonl` under `claudeProjectsDir/<encoded-dir>/` and
    * incrementally ingest each one.
+   *
+   * Sync version retained for callers (and tests) that don't care about
+   * event-loop yielding. Honors per-scan and age caps but does NOT yield.
+   * Production callers should use {@link scanAllAsync} to keep the server
+   * responsive on agents with large JSONL histories.
    */
   scanAll(): ScanAllResult {
-    let filesScanned = 0;
-    let inserted = 0;
+    return this.scanInternal({ yieldFn: null });
+  }
+
+  /**
+   * Async variant that yields to the event loop every N files. Use this
+   * from the poller so a multi-thousand-file backfill cannot monopolise
+   * the event loop and stall HTTP / health-check traffic.
+   */
+  async scanAllAsync(): Promise<ScanAllResult> {
+    return this.scanInternal({
+      yieldFn: () => new Promise<void>(resolve => setImmediate(resolve)),
+    });
+  }
+
+  private scanInternal(opts: { yieldFn: (() => Promise<void>) | null }): ScanAllResult;
+  private scanInternal(opts: { yieldFn: () => Promise<void> }): Promise<ScanAllResult>;
+  private scanInternal(opts: { yieldFn: (() => Promise<void>) | null }): ScanAllResult | Promise<ScanAllResult> {
     let projectDirs: string[];
     try {
       projectDirs = fs.readdirSync(this.claudeProjectsDir, { withFileTypes: true })
         .filter(e => e.isDirectory())
-        .map(e => path.join(this.claudeProjectsDir, e.name));
+        .map(e => path.join(this.claudeProjectsDir, e.name))
+        .sort();
     } catch {
-      return { filesScanned: 0, inserted: 0 };
+      this.scanCursor = { dirIdx: 0, fileIdx: 0 };
+      return opts.yieldFn ? Promise.resolve({ filesScanned: 0, inserted: 0 }) : { filesScanned: 0, inserted: 0 };
     }
-    for (const dir of projectDirs) {
-      let entries: fs.Dirent[];
-      try {
-        entries = fs.readdirSync(dir, { withFileTypes: true });
-      } catch {
-        continue;
-      }
-      for (const e of entries) {
-        if (!e.isFile() || !e.name.endsWith('.jsonl')) continue;
-        const fp = path.join(dir, e.name);
+
+    if (this.scanCursor.dirIdx >= projectDirs.length) {
+      // The dir tree shrank or we previously finished a full pass; reset.
+      this.scanCursor = { dirIdx: 0, fileIdx: 0 };
+    }
+
+    const ageCutoff = this.maxFileAgeMs > 0 ? Date.now() - this.maxFileAgeMs : 0;
+
+    if (opts.yieldFn) {
+      return this.scanLoopAsync(projectDirs, ageCutoff, opts.yieldFn);
+    }
+    return this.scanLoopSync(projectDirs, ageCutoff);
+  }
+
+  private scanLoopSync(projectDirs: string[], ageCutoff: number): ScanAllResult {
+    let filesScanned = 0;
+    let inserted = 0;
+    while (this.scanCursor.dirIdx < projectDirs.length && filesScanned < this.maxFilesPerScan) {
+      const dir = projectDirs[this.scanCursor.dirIdx];
+      const files = this.listJsonlFiles(dir);
+      while (this.scanCursor.fileIdx < files.length && filesScanned < this.maxFilesPerScan) {
+        const fp = files[this.scanCursor.fileIdx];
+        this.scanCursor.fileIdx++;
+        if (!this.shouldScanFile(fp, ageCutoff)) continue;
         const r = this.ingestFile(fp);
         filesScanned++;
         inserted += r.inserted;
       }
+      if (this.scanCursor.fileIdx >= files.length) {
+        this.scanCursor.dirIdx++;
+        this.scanCursor.fileIdx = 0;
+      }
+    }
+    if (this.scanCursor.dirIdx >= projectDirs.length) {
+      // Reached end of tree — restart on next call so new files get picked up.
+      this.scanCursor = { dirIdx: 0, fileIdx: 0 };
     }
     return { filesScanned, inserted };
+  }
+
+  private async scanLoopAsync(
+    projectDirs: string[],
+    ageCutoff: number,
+    yieldFn: () => Promise<void>,
+  ): Promise<ScanAllResult> {
+    let filesScanned = 0;
+    let inserted = 0;
+    while (this.scanCursor.dirIdx < projectDirs.length && filesScanned < this.maxFilesPerScan) {
+      const dir = projectDirs[this.scanCursor.dirIdx];
+      const files = this.listJsonlFiles(dir);
+      while (this.scanCursor.fileIdx < files.length && filesScanned < this.maxFilesPerScan) {
+        const fp = files[this.scanCursor.fileIdx];
+        this.scanCursor.fileIdx++;
+        if (!this.shouldScanFile(fp, ageCutoff)) continue;
+        const r = this.ingestFile(fp);
+        filesScanned++;
+        inserted += r.inserted;
+        if (filesScanned % this.yieldEveryNFiles === 0) {
+          await yieldFn();
+        }
+      }
+      if (this.scanCursor.fileIdx >= files.length) {
+        this.scanCursor.dirIdx++;
+        this.scanCursor.fileIdx = 0;
+        await yieldFn();
+      }
+    }
+    if (this.scanCursor.dirIdx >= projectDirs.length) {
+      this.scanCursor = { dirIdx: 0, fileIdx: 0 };
+    }
+    return { filesScanned, inserted };
+  }
+
+  private listJsonlFiles(dir: string): string[] {
+    let entries: fs.Dirent[];
+    try {
+      entries = fs.readdirSync(dir, { withFileTypes: true });
+    } catch {
+      return [];
+    }
+    return entries
+      .filter(e => e.isFile() && e.name.endsWith('.jsonl'))
+      .map(e => path.join(dir, e.name))
+      .sort();
+  }
+
+  private shouldScanFile(fp: string, ageCutoff: number): boolean {
+    if (ageCutoff <= 0) return true;
+    try {
+      const st = fs.statSync(fp);
+      return st.mtimeMs >= ageCutoff;
+    } catch {
+      return false;
+    }
   }
 
   /** Aggregate totals (optionally restricted to events ≥ sinceMs). */
