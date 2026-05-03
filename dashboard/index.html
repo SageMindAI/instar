@@ -789,6 +789,20 @@
     ::-webkit-scrollbar-thumb { background: #333; border-radius: 3px; }
     ::-webkit-scrollbar-thumb:hover { background: #444; }
 
+    /* ── Tab panels: span both grid columns ────────────────── */
+    /* These panels are absolute siblings of the sidebar in the .app
+       grid; without grid-column they auto-place into the 280px sidebar
+       column and look squished. */
+    #integratedBeingPanel,
+    #prPipelinePanel,
+    #initiativesPanel,
+    #commitmentsPanel,
+    #tokensPanel,
+    #secretsPanel,
+    #threadlineTab {
+      grid-column: 1 / -1;
+    }
+
     /* ── Tab bar (secondary sub-nav for active group) ─────── */
     .tab-bar.sub-nav {
       display: flex;
