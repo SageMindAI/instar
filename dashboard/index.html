@@ -47,12 +47,20 @@
     .header {
       grid-column: 1 / -1;
       display: flex;
-      align-items: center;
-      justify-content: space-between;
-      padding: 12px 20px;
+      flex-direction: column;
+      align-items: stretch;
+      padding: 0;
       border-bottom: 1px solid var(--border);
       background: var(--bg-panel);
       position: relative;
+    }
+
+    .header-row-top {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 12px 20px 10px 20px;
     }
 
     /* Hamburger toggle — visible only on mobile, sits in the header row */
@@ -66,6 +74,65 @@
       gap: 12px;
       min-width: 0;
       flex: 1;
+    }
+
+    /* ── Primary nav (5 group pills) ──────────────────────── */
+    .primary-nav {
+      display: flex;
+      gap: 6px;
+      margin-left: 16px;
+      flex-wrap: wrap;
+    }
+
+    .primary-nav .group-btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 8px 14px;
+      border: 1px solid var(--border);
+      border-radius: 999px;
+      background: var(--bg);
+      color: var(--text);
+      font-size: 13px;
+      font-weight: 500;
+      cursor: pointer;
+      white-space: nowrap;
+      transition: background 0.15s, border-color 0.15s, color 0.15s;
+    }
+
+    .primary-nav .group-btn:hover {
+      background: var(--bg-hover);
+      color: var(--text-bright);
+    }
+
+    .primary-nav .group-btn.active {
+      background: var(--bg-active);
+      border-color: var(--accent);
+      color: var(--accent);
+    }
+
+    .primary-nav .group-icon {
+      font-size: 14px;
+      opacity: 0.75;
+    }
+
+    .primary-nav .group-btn.active .group-icon {
+      opacity: 1;
+    }
+
+    .primary-nav .group-count {
+      font-size: 11px;
+      padding: 1px 7px;
+      border-radius: 999px;
+      background: var(--border);
+      color: var(--text-dim);
+      min-width: 18px;
+      text-align: center;
+    }
+
+    .primary-nav .group-btn.active .group-count {
+      background: rgba(74, 222, 128, 0.15);
+      color: var(--accent);
     }
 
     .header h1 {
@@ -722,31 +789,41 @@
     ::-webkit-scrollbar-thumb { background: #333; border-radius: 3px; }
     ::-webkit-scrollbar-thumb:hover { background: #444; }
 
-    /* ── Tab bar ──────────────────────────────────────────── */
-    .tab-bar {
+    /* ── Tab bar (secondary sub-nav for active group) ─────── */
+    .tab-bar.sub-nav {
       display: flex;
-      gap: 0;
-      margin-left: 24px;
+      gap: 4px;
+      padding: 4px 20px 8px 20px;
       overflow-x: auto;
       -webkit-overflow-scrolling: touch;
-      scrollbar-width: none; /* hide scrollbar on Firefox */
+      scrollbar-width: none;
+      background: var(--bg);
+      border-top: 1px solid var(--border);
     }
-    .tab-bar::-webkit-scrollbar { display: none; }
+    .tab-bar.sub-nav::-webkit-scrollbar { display: none; }
+
+    /* Hide the sub-nav row entirely when the active group has only one tab */
+    .tab-bar.sub-nav.empty {
+      display: none;
+    }
 
     .tab-bar .tab {
-      padding: 6px 16px;
-      border: 1px solid var(--border);
-      border-radius: 6px 6px 0 0;
-      background: var(--bg);
+      padding: 6px 12px;
+      border: 1px solid transparent;
+      border-radius: 6px;
+      background: transparent;
       color: var(--text-dim);
-      font-size: 13px;
+      font-size: 12px;
       font-weight: 500;
       cursor: pointer;
-      border-bottom: none;
-      margin-bottom: -1px;
-      transition: color 0.15s, background 0.15s;
+      transition: color 0.15s, background 0.15s, border-color 0.15s;
       white-space: nowrap;
       flex-shrink: 0;
+    }
+
+    /* Sub-nav only shows tabs in the active group; others are hidden */
+    .tab-bar .tab.hidden-by-group {
+      display: none;
     }
 
     .tab-bar .tab:hover {
@@ -2291,8 +2368,9 @@
       }
 
       /* Header compact */
-      .header {
-        padding: 10px 14px;
+      .header-row-top {
+        padding: 8px 12px;
+        gap: 8px;
       }
 
       .header h1 {
@@ -2313,7 +2391,7 @@
         display: flex;
         align-items: center;
         gap: 8px;
-        margin-left: 12px;
+        margin-left: 4px;
         padding: 8px 12px;
         min-height: 40px;
         background: var(--bg);
@@ -2327,27 +2405,53 @@
       .nav-toggle:hover { background: var(--bg-hover); }
       .nav-toggle[aria-expanded="true"] { background: var(--bg-active); border-color: var(--accent); }
 
-      /* On mobile the tab-bar becomes a vertical dropdown panel,
-         hidden by default and toggled via the .nav-open class on .app */
-      .tab-bar {
+      /* Hide title text on mobile to save room for the toggle */
+      .header h1 { display: none; }
+
+      /* On mobile, primary nav becomes a horizontal scroller of group pills */
+      .primary-nav {
+        display: none;  /* hidden by default — accessible via hamburger menu */
+      }
+      .app.nav-open .primary-nav {
+        display: flex;
         position: absolute;
-        top: 100%;  /* below the header row */
+        top: 56px;
+        left: 0;
+        right: 0;
+        margin-left: 0;
+        padding: 12px 12px 8px 12px;
+        gap: 6px;
+        background: var(--bg-panel);
+        border-top: 1px solid var(--border);
+        z-index: 101;
+        flex-wrap: wrap;
+      }
+
+      /* On mobile, sub-nav (tab-bar) becomes part of the dropdown panel */
+      .tab-bar.sub-nav {
+        position: absolute;
+        top: calc(56px + 56px);  /* below header row + primary-nav row */
         left: 0;
         right: 0;
         flex-direction: column;
-        margin-left: 0;
         padding: 8px;
         gap: 4px;
         background: var(--bg-panel);
+        border-top: 1px solid var(--border);
         border-bottom: 1px solid var(--border);
         box-shadow: 0 4px 12px rgba(0,0,0,0.4);
         z-index: 100;
         overflow-x: visible;
-        max-height: calc(100vh - 60px);
+        max-height: calc(100vh - 120px);
         overflow-y: auto;
         display: none;
       }
-      .app.nav-open .tab-bar {
+      .app.nav-open .tab-bar.sub-nav {
+        display: flex;
+      }
+      /* Sub-nav stays hidden when current group has 0/1 children, but on
+         mobile we still want the dropdown open to show context — keep visible */
+      .app.nav-open .tab-bar.sub-nav.empty {
         display: flex;
       }
 
@@ -2509,27 +2613,14 @@
   <!-- Main app -->
   <div class="app" id="app" style="display:none">
     <header class="header">
-      <div class="header-left">
-        <img class="logo" src="/dashboard/logo.png" alt="Instar">
-        <h1>Instar Dashboard</h1>
-        <button class="nav-toggle" id="navToggle" aria-label="Open navigation menu" aria-expanded="false" onclick="toggleNavMenu()">&#9776; <span id="navToggleLabel">Sessions</span></button>
-        <nav class="tab-bar" id="tabBar">
-          <button class="tab active" data-tab="sessions" onclick="switchTab('sessions')">Sessions <span class="tab-count" id="tabSessionCount">0</span></button>
-          <button class="tab" data-tab="files" onclick="switchTab('files')">Files</button>
-          <button class="tab" data-tab="dropzone" onclick="switchTab('dropzone')">Send Content</button>
-          <button class="tab" data-tab="secrets" onclick="switchTab('secrets')">Secrets <span class="tab-count" id="tabSecretCount">0</span></button>
-          <button class="tab" data-tab="jobs" onclick="switchTab('jobs')">Jobs <span class="tab-count" id="tabJobCount">0</span></button>
-          <button class="tab" data-tab="features" onclick="switchTab('features')">Features</button>
-          <button class="tab" data-tab="systems" onclick="switchTab('systems')">Health</button>
-          <button class="tab" data-tab="integrated-being" onclick="switchTab('integrated-being')">Integrated-Being</button>
-          <button class="tab" data-tab="pr-pipeline" onclick="switchTab('pr-pipeline')">PR Pipeline</button>
-          <button class="tab" data-tab="initiatives" onclick="switchTab('initiatives')">Initiatives <span class="tab-count" id="tabInitiativeCount">0</span></button>
-          <button class="tab" data-tab="commitments" onclick="switchTab('commitments')">Commitments <span class="tab-count" id="tabCommitmentCount">0</span></button>
-          <button class="tab" data-tab="tokens" onclick="switchTab('tokens')">Tokens</button>
-          <button class="tab" data-tab="threadline" onclick="switchTab('threadline')">Threadline</button>
-        </nav>
-      </div>
-      <div class="vital-signs" id="vitalSigns">
+      <div class="header-row header-row-top">
+        <div class="header-left">
+          <img class="logo" src="/dashboard/logo.png" alt="Instar">
+          <h1>Instar Dashboard</h1>
+          <button class="nav-toggle" id="navToggle" aria-label="Open navigation menu" aria-expanded="false" onclick="toggleNavMenu()">&#9776; <span id="navToggleLabel">Sessions</span></button>
+          <nav class="primary-nav" id="primaryNav" aria-label="Primary sections"></nav>
+        </div>
+        <div class="vital-signs" id="vitalSigns">
         <div class="vital" id="vitalServer" onclick="switchTab('jobs')" title="Server status">
           <span class="vital-dot" id="vitalServerDot" style="background:var(--accent)"></span>
           <span id="vitalServerText">Healthy</span>
@@ -2550,11 +2641,27 @@
           <span id="vitalJobsText" style="color:var(--red)">0 failing</span>
         </div>
       </div>
-      <button class="wa-status-btn" id="waStatusBtn" onclick="toggleQrPanel()">WhatsApp</button>
-      <div class="status-badge" id="connStatus">
-        <span class="dot"></span>
-        <span id="connText">Connected</span>
-      </div>
+        <button class="wa-status-btn" id="waStatusBtn" onclick="toggleQrPanel()">WhatsApp</button>
+        <div class="status-badge" id="connStatus">
+          <span class="dot"></span>
+          <span id="connText">Connected</span>
+        </div>
+      </div><!-- /.header-row-top -->
+      <nav class="tab-bar sub-nav" id="tabBar" aria-label="Section tabs">
+        <button class="tab active" data-tab="sessions" onclick="switchTab('sessions')">Sessions <span class="tab-count" id="tabSessionCount">0</span></button>
+        <button class="tab" data-tab="files" onclick="switchTab('files')">Files</button>
+        <button class="tab" data-tab="dropzone" onclick="switchTab('dropzone')">Send Content</button>
+        <button class="tab" data-tab="secrets" onclick="switchTab('secrets')">Secrets <span class="tab-count" id="tabSecretCount">0</span></button>
+        <button class="tab" data-tab="jobs" onclick="switchTab('jobs')">Jobs <span class="tab-count" id="tabJobCount">0</span></button>
+        <button class="tab" data-tab="features" onclick="switchTab('features')">Features</button>
+        <button class="tab" data-tab="systems" onclick="switchTab('systems')">Health</button>
+        <button class="tab" data-tab="integrated-being" onclick="switchTab('integrated-being')">Integrated-Being</button>
+        <button class="tab" data-tab="pr-pipeline" onclick="switchTab('pr-pipeline')">PR Pipeline</button>
+        <button class="tab" data-tab="initiatives" onclick="switchTab('initiatives')">Initiatives <span class="tab-count" id="tabInitiativeCount">0</span></button>
+        <button class="tab" data-tab="commitments" onclick="switchTab('commitments')">Commitments <span class="tab-count" id="tabCommitmentCount">0</span></button>
+        <button class="tab" data-tab="tokens" onclick="switchTab('tokens')">Tokens</button>
+        <button class="tab" data-tab="threadline" onclick="switchTab('threadline')">Threadline</button>
+      </nav>
     </header>
 
     <!-- Sessions tab -->
@@ -4065,6 +4172,26 @@
 
     // ── Tab System (Data-Driven Registry) ──────────────────────
     let currentTab = 'sessions';
+    let currentGroup = 'activity';
+    const lastTabPerGroup = {};  // groupId -> last active tabId
+
+    // Primary navigation groups. Each tab belongs to exactly one group.
+    // Groups are ordered for display. Tabs within a group are ordered
+    // for sub-nav rendering.
+    const TAB_GROUPS = [
+      { id: 'activity', label: 'Activity', icon: '◉', tabs: ['sessions', 'jobs', 'threadline'] },
+      { id: 'work',     label: 'Work',     icon: '✓', tabs: ['initiatives', 'commitments', 'pr-pipeline', 'files'] },
+      { id: 'insight',  label: 'Insight',  icon: '◇', tabs: ['systems', 'integrated-being', 'tokens'] },
+      { id: 'inbox',    label: 'Inbox',    icon: '↴', tabs: ['dropzone', 'secrets'] },
+      { id: 'setup',    label: 'Setup',    icon: '⚙', tabs: ['features'] },
+    ];
+
+    function getGroupForTab(tabId) {
+      for (const g of TAB_GROUPS) {
+        if (g.tabs.includes(tabId)) return g.id;
+      }
+      return TAB_GROUPS[0].id;
+    }
 
     const TAB_REGISTRY = [
       {
@@ -4172,6 +4299,78 @@
       toggle.setAttribute('aria-expanded', open ? 'true' : 'false');
     }
 
+    // Build the primary group buttons. Each button counts the sub-tabs
+    // and shows the count if > 0 (excluding the always-1 itself counter).
+    function renderPrimaryNav() {
+      const navEl = document.getElementById('primaryNav');
+      if (!navEl) return;
+      navEl.innerHTML = '';
+      for (const group of TAB_GROUPS) {
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'group-btn' + (group.id === currentGroup ? ' active' : '');
+        btn.dataset.group = group.id;
+        btn.setAttribute('aria-label', group.label);
+        btn.innerHTML = `<span class="group-icon">${group.icon}</span><span class="group-label">${group.label}</span>` +
+          (group.tabs.length > 1 ? `<span class="group-count" data-group-count="${group.id}">${group.tabs.length}</span>` : '');
+        btn.addEventListener('click', () => switchGroup(group.id));
+        navEl.appendChild(btn);
+      }
+    }
+
+    // Mark which sub-tabs are visible in the current group, and toggle
+    // the empty class so the sub-nav row hides when the group has only
+    // one tab (the primary button alone is enough).
+    function updateSubNavVisibility() {
+      const group = TAB_GROUPS.find(g => g.id === currentGroup);
+      const tabBar = document.querySelector('.tab-bar.sub-nav');
+      if (!tabBar || !group) return;
+      const groupTabSet = new Set(group.tabs);
+      tabBar.querySelectorAll('.tab').forEach(btn => {
+        btn.classList.toggle('hidden-by-group', !groupTabSet.has(btn.dataset.tab));
+      });
+      tabBar.classList.toggle('empty', group.tabs.length <= 1);
+    }
+
+    // Update the active group highlight on the primary nav.
+    function updatePrimaryNavActive() {
+      document.querySelectorAll('.primary-nav .group-btn').forEach(btn => {
+        btn.classList.toggle('active', btn.dataset.group === currentGroup);
+      });
+    }
+
+    // Initialize primary nav once on first paint. Tabs are server-rendered,
+    // so this just builds the group buttons and applies the initial visibility.
+    function initPrimaryNav() {
+      // Derive the starting group from the initially-active tab.
+      currentGroup = getGroupForTab(currentTab);
+      lastTabPerGroup[currentGroup] = currentTab;
+      renderPrimaryNav();
+      updateSubNavVisibility();
+    }
+
+    if (document.readyState === 'loading') {
+      document.addEventListener('DOMContentLoaded', initPrimaryNav);
+    } else {
+      initPrimaryNav();
+    }
+
+    // Switch primary group. Activates the group's last-used tab (or first).
+    function switchGroup(groupId) {
+      const group = TAB_GROUPS.find(g => g.id === groupId);
+      if (!group) return;
+      currentGroup = groupId;
+      updatePrimaryNavActive();
+      updateSubNavVisibility();
+      // Pick the last-used tab in this group, or fall back to the first.
+      const targetTab = lastTabPerGroup[groupId] && group.tabs.includes(lastTabPerGroup[groupId])
+        ? lastTabPerGroup[groupId]
+        : group.tabs[0];
+      if (targetTab && targetTab !== currentTab) {
+        switchTab(targetTab);
+      }
+    }
+
     function updateNavToggleLabel(tabName) {
       // Read the tab name from the actual button so we don't drift when
       // tabs get renamed in the registry. Strip the trailing count badge
@@ -4205,8 +4404,9 @@
       const app = document.querySelector('.app');
       if (!app || !app.classList.contains('nav-open')) return;
       const tabBar = document.querySelector('.tab-bar');
+      const primaryNav = document.getElementById('primaryNav');
       const toggle = document.getElementById('navToggle');
-      if (tabBar?.contains(e.target) || toggle?.contains(e.target)) return;
+      if (tabBar?.contains(e.target) || primaryNav?.contains(e.target) || toggle?.contains(e.target)) return;
       closeNavMenu();
     });
 
@@ -4218,6 +4418,16 @@
       if (prevTab?.onDeactivate) prevTab.onDeactivate();
 
       currentTab = tabName;
+
+      // Keep group state in sync — if this tab belongs to a different group,
+      // switch the primary nav highlight along with it.
+      const groupId = getGroupForTab(tabName);
+      if (groupId !== currentGroup) {
+        currentGroup = groupId;
+        updatePrimaryNavActive();
+        updateSubNavVisibility();
+      }
+      lastTabPerGroup[groupId] = tabName;
 
       // Update tab buttons
       document.querySelectorAll('.tab-bar .tab').forEach(btn => {
