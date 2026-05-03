@@ -169,7 +169,7 @@ export class ConnectionManager {
         message:
           `Invalid public key — expected raw 32-byte Ed25519, got ${publicKey.length} bytes after base64 decode.` +
           hint +
-          ' See https://instar.sh/docs/reference/threadline-protocol/ for the identity format, or use the threadline-starter-kit npm package.',
+          ' See https://instar.sh/reference/threadline-protocol/ for the identity format, or use the threadline-starter-kit npm package.',
       });
       return false;
     }
@@ -182,7 +182,7 @@ export class ConnectionManager {
         code: RELAY_ERROR_CODES.AUTH_FAILED,
         message:
           `Agent ID does not match public key. Got agentId="${frame.agentId}" but the first 16 bytes of your public key (hex) are "${expectedFingerprint}". ` +
-          'Compute agentId from your publicKey rather than choosing it. See https://instar.sh/docs/reference/threadline-protocol/.',
+          'Compute agentId from your publicKey rather than choosing it. See https://instar.sh/reference/threadline-protocol/.',
       });
       return false;
     }
@@ -219,7 +219,7 @@ export class ConnectionManager {
         message:
           'Signature verification failed. Common causes: (1) signing the wrong nonce — sign the raw UTF-8 bytes of the challenge nonce, not the hex/base64 string; ' +
           '(2) signing with the wrong key — verify your privateKey matches your publicKey; ' +
-          '(3) using a hash before signing — Ed25519 signs the message directly. See https://instar.sh/docs/reference/threadline-protocol/.',
+          '(3) using a hash before signing — Ed25519 signs the message directly. See https://instar.sh/reference/threadline-protocol/.',
       });
       return false;
     }
