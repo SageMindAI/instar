@@ -5773,27 +5773,27 @@ export function createRoutes(ctx: RouteContext): Router {
     const validTypes = ['bug', 'feature', 'improvement', 'question', 'hallucination', 'other'];
     const feedbackType = validTypes.includes(type) ? type : 'other';
 
-    // Semantic quality validation
-    const quality = ctx.feedback.validateFeedbackQuality(title, description);
-    if (!quality.valid) {
-      res.status(422).json({ error: quality.reason });
-      return;
-    }
-
-    // Anomaly detection — check submission patterns before storing
-    if (ctx.feedbackAnomalyDetector) {
-      const agentPseudonym = ctx.feedback.generatePseudonym(ctx.config.projectName);
-      const anomalyCheck = ctx.feedbackAnomalyDetector.check(agentPseudonym);
-      if (!anomalyCheck.allowed) {
-        res.status(429).json({
-          error: anomalyCheck.reason,
-          anomalyType: anomalyCheck.anomalyType,
-        });
+    try {
+      // Semantic quality validation
+      const quality = ctx.feedback.validateFeedbackQuality(title, description);
+      if (!quality.valid) {
+        res.status(422).json({ error: quality.reason });
         return;
       }
-    }
 
-    try {
+      // Anomaly detection — check submission patterns before storing
+      if (ctx.feedbackAnomalyDetector) {
+        const agentPseudonym = ctx.feedback.generatePseudonym(ctx.config.projectName);
+        const anomalyCheck = ctx.feedbackAnomalyDetector.check(agentPseudonym);
+        if (!anomalyCheck.allowed) {
+          res.status(429).json({
+            error: anomalyCheck.reason,
+            anomalyType: anomalyCheck.anomalyType,
+          });
+          return;
+        }
+      }
+
       const item = await ctx.feedback.submit({
         type: feedbackType,
         title,

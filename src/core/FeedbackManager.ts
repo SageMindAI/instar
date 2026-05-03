@@ -275,7 +275,8 @@ export class FeedbackManager {
   private loadFeedback(): FeedbackItem[] {
     if (!fs.existsSync(this.feedbackFile)) return [];
     try {
-      return JSON.parse(fs.readFileSync(this.feedbackFile, 'utf-8'));
+      const data = JSON.parse(fs.readFileSync(this.feedbackFile, 'utf-8'));
+      return Array.isArray(data) ? data : [];
     } catch {
       return [];
     }
