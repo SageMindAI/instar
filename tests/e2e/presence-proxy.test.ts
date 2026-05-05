@@ -361,7 +361,16 @@ describe('PresenceProxy E2E', () => {
 
       // Agent responds after 500ms (before the 2s Tier 1)
       await new Promise(r => setTimeout(r, 500));
-      proxy.onMessageLogged(makeAgentMessage(100, 'Got it, working on it.'));
+      // Substantive reply — must be long enough that isBriefAck returns false,
+      // since brief acks ("Got it, looking into this") now intentionally do
+      // NOT cancel timers (see presence-proxy-ack-and-baseline.test.ts).
+      proxy.onMessageLogged(makeAgentMessage(
+        100,
+        'Here is the answer to your question: I checked the configuration ' +
+          'and the relevant flag is set to true. The unit test exercises this ' +
+          'path and the production deploy applied the fix at 14:02 UTC. ' +
+          'No further action is needed from your side.',
+      ));
 
       // Wait to make sure Tier 1 doesn't fire
       await new Promise(r => setTimeout(r, 3000));
@@ -591,8 +600,15 @@ describe('PresenceProxy E2E', () => {
       const stateFile = path.join(tmpDir, '.instar', 'state', 'presence-proxy', '100.json');
       expect(fs.existsSync(stateFile)).toBe(true);
 
-      // Agent responds
-      proxy.onMessageLogged(makeAgentMessage(100, 'Done!'));
+      // Agent responds with a substantive reply (very short messages are
+      // now treated as brief acks per presence-proxy-ack-and-baseline; this
+      // test specifically validates the cancellation path on a real reply).
+      proxy.onMessageLogged(makeAgentMessage(
+        100,
+        'Done — I refactored the call site to pass the new flag through, ' +
+          'reran the failing test (now green), and pushed the patch. ' +
+          'No regressions in the adjacent test files.',
+      ));
 
       expect(fs.existsSync(stateFile)).toBe(false);
     });
