@@ -33,18 +33,16 @@ that quickly saved a new UUID won't have it wiped.
 - **No more "session appears stopped" after a pause**: When you message your
   agent after stepping away for a while, you'll go straight to a live
   response instead of waiting through a 5-minute presence-proxy warning and
-  having to reply "unstick" or copy-paste your message. The agent's tmux
-  session stays alive while it's bound to your conversation, so your next
-  message reaches it directly without a respawn detour.
+  having to reply "unstick" or copy-paste your message. The agent stays
+  alive while it's bound to your conversation, so your next message reaches
+  it directly without a respawn detour.
 - **Multi-topic agents will hold more memory between conversations**: Each
-  bound session now stays resident for up to 4 hours of pure idle (was 15
-  minutes). On a memory-constrained host with 8+ active conversations, that
-  can mean 2-4 GB of additional resident Claude TUI processes during a
-  long-tail idle window. If that's a problem, override
-  `idlePromptKillMinutesBoundToTopic` in your `.instar/config.json`:
-  ```json
-  { "sessions": { "idlePromptKillMinutesBoundToTopic": 60 } }
-  ```
+  bound agent now stays resident for up to 4 hours of pure idle (was 15
+  minutes). On a memory-constrained host with 8 or more active
+  conversations, that can mean a few extra gigabytes of resident memory
+  during long idle windows. If that's a problem on your machine, ask your
+  agent to lower the bound-session idle threshold for you — it'll handle
+  the change conversationally, no config editing needed.
 
 ## Summary of New Capabilities
 
