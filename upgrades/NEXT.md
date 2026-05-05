@@ -1,4 +1,4 @@
-# Upgrade Guide — vNEXT
+# Upgrade Guide — v0.28.81
 
 <!-- bump: patch -->
 
@@ -12,9 +12,9 @@ Two server-internal callsites (the attention-queue creator and the prompt-gate r
 
 ## What to Tell Your User
 
-**Telegram messages from your agent now render correctly.** Things like `GITHUB_TOKEN`, `auto_triage_runs`, and `snake_case_function` will appear exactly as written instead of rendering with random italic styling. Bold text (`**important**`) and code blocks (`` `func()` ``) work as expected. No action needed on your side — the fix lands automatically when your agent auto-updates.
+Your Telegram messages from your agent now render correctly. Words with underscores in them — variable names, environment names, identifiers — will appear exactly as written instead of getting random italic styling halfway through. Bold and code blocks still work the way you'd expect. No action needed on your side; the fix lands automatically when your agent auto-updates.
 
-If the rendering ever looks worse than before for some reason, the rollback is one line in `.instar/config.json`: `"telegramFormatMode": "legacy-passthrough"`. Tell your agent and it will set this for you.
+If the rendering ever looks worse than before, your agent can flip a config switch back to the old behavior — just say "use the legacy Telegram rendering" and your agent will handle it.
 
 ## Summary of New Capabilities
 
