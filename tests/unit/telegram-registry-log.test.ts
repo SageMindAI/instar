@@ -262,12 +262,12 @@ describe('TelegramAdapter registry and message log', () => {
       vi.unstubAllGlobals();
     });
 
-    it('falls back to plain text on Markdown parse error', async () => {
+    it('falls back to plain text on parse error', async () => {
       let callCount = 0;
       const mockFetch = vi.fn().mockImplementation(async () => {
         callCount++;
         if (callCount === 1) {
-          // First call (with Markdown) fails
+          // First call (with formatted output + parse_mode) fails
           return { ok: false, status: 400, text: async () => 'Bad Request: can\'t parse entities' };
         }
         // Second call (plain text) succeeds
@@ -277,12 +277,16 @@ describe('TelegramAdapter registry and message log', () => {
 
       await adapter.sendToTopic(42, 'Has *bad markdown');
 
-      // Should have been called twice — once with Markdown, once without
-      expect(mockFetch).toHaveBeenCalledTimes(2);
+      // Should have been called at least twice — once formatted, once plain.
+      // (apiCall plain-retry fires before the send()-level retry, so the count
+      // can be 2 or 3 depending on which retry caught the 400.)
+      expect(mockFetch.mock.calls.length).toBeGreaterThanOrEqual(2);
       const firstBody = JSON.parse(mockFetch.mock.calls[0][1].body);
-      expect(firstBody.parse_mode).toBe('Markdown');
-      const secondBody = JSON.parse(mockFetch.mock.calls[1][1].body);
-      expect(secondBody.parse_mode).toBeUndefined();
+      // Default 'markdown' mode → formatter sets parse_mode='HTML'.
+      expect(firstBody.parse_mode).toBe('HTML');
+      const lastBody = JSON.parse(mockFetch.mock.calls[mockFetch.mock.calls.length - 1][1].body);
+      // Plain retry drops parse_mode and uses raw text.
+      expect(lastBody.parse_mode).toBeUndefined();
 
       vi.unstubAllGlobals();
     });

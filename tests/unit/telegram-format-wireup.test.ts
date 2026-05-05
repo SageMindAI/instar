@@ -30,12 +30,12 @@ describe('applyTelegramFormatter (pure wire-up helper)', () => {
     expect(r.outgoingParams.parse_mode).toBe('Markdown');
   });
 
-  it('bypasses formatter when mode is undefined (config not set)', () => {
+  it('formats with markdown default when mode is undefined (post-cutover default)', () => {
     const params = { text: '**bold**', chat_id: '1', parse_mode: 'Markdown' };
     const r = applyTelegramFormatter('sendMessage', params, undefined);
-    expect(r.didFormat).toBe(false);
-    expect(r.outgoingParams.text).toBe('**bold**');
-    expect(r.outgoingParams.parse_mode).toBe('Markdown');
+    expect(r.didFormat).toBe(true);
+    expect(r.outgoingParams.text).toBe('<b>bold</b>');
+    expect(r.outgoingParams.parse_mode).toBe('HTML');
   });
 
   it('runs formatter for sendMessage in markdown mode and overrides parse_mode', () => {
@@ -92,6 +92,44 @@ describe('applyTelegramFormatter (pure wire-up helper)', () => {
     // The formatter's lintTelegramMarkdown emits canonical prose for bold.
     const keys = Object.keys(snap.formatLintIssuesTotal);
     expect(keys.some(k => k.includes('bold'))).toBe(true);
+  });
+
+  it('_formatMode per-call override beats configMode (html-passthrough)', () => {
+    const params = {
+      text: '<b>already html</b>',
+      chat_id: '1',
+      parse_mode: 'HTML',
+      _formatMode: 'html' as const,
+    };
+    const r = applyTelegramFormatter('sendMessage', params, 'markdown');
+    expect(r.didFormat).toBe(true);
+    expect(r.outgoingParams.text).toBe('<b>already html</b>');
+    expect(r.outgoingParams.parse_mode).toBe('HTML');
+    expect((r.outgoingParams as Record<string, unknown>)._formatMode).toBeUndefined();
+  });
+
+  it('_formatMode per-call override applies even when configMode is undefined', () => {
+    const params = {
+      text: '**bold**',
+      chat_id: '1',
+      _formatMode: 'plain' as const,
+    };
+    const r = applyTelegramFormatter('sendMessage', params, undefined);
+    expect(r.didFormat).toBe(true);
+    expect(r.outgoingParams.text).not.toContain('**');
+    expect(r.outgoingParams.parse_mode).toBe('HTML');
+  });
+
+  it('strips _formatMode flag before sending to Bot API', () => {
+    const params = {
+      text: 'x',
+      _formatMode: 'legacy-passthrough' as const,
+    };
+    const r = applyTelegramFormatter('sendMessage', params, 'markdown');
+    expect((r.outgoingParams as Record<string, unknown>)._formatMode).toBeUndefined();
+    // legacy-passthrough opt-out short-circuits before formatting
+    expect(r.outgoingParams.text).toBe('x');
+    expect(r.didFormat).toBe(false);
   });
 });
 

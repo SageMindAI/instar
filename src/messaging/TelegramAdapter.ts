@@ -2898,11 +2898,14 @@ export class TelegramAdapter implements MessagingAdapter {
         `Commands: /ack, /done, /wontdo, /reopen`,
       ].filter(Boolean).join('\n');
 
-      // Send as HTML by calling API directly
+      // Send as HTML by calling API directly. `_formatMode: 'html'` tells the
+      // formatter wireup that this text is already Telegram HTML (escaped via
+      // this.escapeHtml above) so the markdown converter must not re-process it.
       const sendParams: Record<string, unknown> = {
         chat_id: this.config.chatId,
         text: detail,
         parse_mode: 'HTML',
+        _formatMode: 'html',
       };
       if (!isGeneralTopic(topicId)) sendParams.message_thread_id = topicId;
       await this.apiCall('sendMessage', sendParams);
@@ -3636,8 +3639,12 @@ export class TelegramAdapter implements MessagingAdapter {
     let result: { message_id: number };
 
     if (prompt.options && prompt.options.length > 0) {
-      // Add numbered options to the message body so full text is visible
-      const optionLines = prompt.options.map((opt, i) => `${i + 1}. ${opt.label}`).join('\n');
+      // Add numbered options to the message body so full text is visible.
+      // Labels are user content — HTML-escape since this whole message goes
+      // through `_formatMode: 'html'` (formatPromptMessage emits HTML).
+      const optionLines = prompt.options
+        .map((opt, i) => `${i + 1}. ${this.escapeHtml(opt.label)}`)
+        .join('\n');
       const fullText = `${text}\n\n${optionLines}`;
 
       // Build inline keyboard buttons with just the number/key (compact)
@@ -3659,7 +3666,8 @@ export class TelegramAdapter implements MessagingAdapter {
         message_thread_id: isGeneralTopic(topicId) ? undefined : topicId,
         text: fullText,
         reply_markup: { inline_keyboard: [keyboard] },
-        parse_mode: 'Markdown',
+        parse_mode: 'HTML',
+        _formatMode: 'html',
       }) as { message_id: number };
     } else {
       // No options — text reply expected (clarifying question)
@@ -3667,7 +3675,8 @@ export class TelegramAdapter implements MessagingAdapter {
         chat_id: this.config.chatId,
         message_thread_id: isGeneralTopic(topicId) ? undefined : topicId,
         text,
-        parse_mode: 'Markdown',
+        parse_mode: 'HTML',
+        _formatMode: 'html',
       }) as { message_id: number };
     }
 
@@ -3688,38 +3697,28 @@ export class TelegramAdapter implements MessagingAdapter {
   }
 
   /**
-   * Format a detected prompt into Telegram-friendly text.
-   * Differentiates by prompt type and escapes Markdown special chars.
+   * Format a detected prompt into a Telegram HTML message body.
    */
   private formatPromptMessage(prompt: DetectedPrompt): string {
-    const escapedSummary = this.escapeMarkdown(prompt.summary);
+    // HTML output — caller sets `_formatMode: 'html'` so the markdown converter
+    // does not re-process this. Summary is HTML-escaped to neutralize any user-
+    // supplied `<`, `&`, etc.; markdown tokens in the summary stay literal.
+    const escapedSummary = this.escapeHtml(prompt.summary);
 
     switch (prompt.type) {
       case 'permission':
-        return `\u{23F3} *Your agent is waiting — approve or decline:*\n\n"${escapedSummary}"`;
+        return `\u{23F3} <b>Your agent is waiting — approve or decline:</b>\n\n"${escapedSummary}"`;
       case 'plan':
-        return `\u{23F3} *Agent plan ready — do you want to proceed?*\n\n"${escapedSummary}"`;
+        return `\u{23F3} <b>Agent plan ready — do you want to proceed?</b>\n\n"${escapedSummary}"`;
       case 'question':
-        return `\u{23F3} *Your agent has a question:*\n\n"${escapedSummary}"\n\nReply to this message with your answer.`;
+        return `\u{23F3} <b>Your agent has a question:</b>\n\n"${escapedSummary}"\n\nReply to this message with your answer.`;
       case 'confirmation':
-        return `\u{23F3} *Your agent needs confirmation:*\n\n"${escapedSummary}"`;
+        return `\u{23F3} <b>Your agent needs confirmation:</b>\n\n"${escapedSummary}"`;
       case 'selection':
-        return `\u{23F3} *Your agent needs you to choose:*\n\n"${escapedSummary}"`;
+        return `\u{23F3} <b>Your agent needs you to choose:</b>\n\n"${escapedSummary}"`;
       default:
-        return `\u{23F3} *Session needs your input:*\n\n"${escapedSummary}"`;
+        return `\u{23F3} <b>Session needs your input:</b>\n\n"${escapedSummary}"`;
     }
-  }
-
-  /**
-   * Escape Markdown special characters for Telegram.
-   */
-  private escapeMarkdown(text: string): string {
-    return text
-      .replace(/\\/g, '\\\\')
-      .replace(/\*/g, '\\*')
-      .replace(/_/g, '\\_')
-      .replace(/`/g, '\\`')
-      .replace(/\[/g, '\\[');
   }
 
   /**
@@ -4113,13 +4112,22 @@ export function applyTelegramFormatter(
   isPlainRetry: boolean;
 } {
   const isPlainRetry = (params as { _isPlainRetry?: boolean })._isPlainRetry === true;
+  // Per-call mode override — internal callers that already produce Telegram
+  // HTML (e.g. the attention-queue creator) tag their send with
+  // `_formatMode: 'html'` so the formatter's markdown converter does not
+  // re-process their bytes. Spec: trusted-internal-callers list.
+  const callerMode = (params as { _formatMode?: FormatMode })._formatMode;
   // Strip internal flags before sending to Bot API.
   const stripped: Record<string, unknown> = { ...params };
   delete (stripped as { _isPlainRetry?: boolean })._isPlainRetry;
   delete (stripped as { _idempotencyKey?: unknown })._idempotencyKey;
+  delete (stripped as { _formatMode?: FormatMode })._formatMode;
 
   const isSendMethod = method === 'sendMessage' || method === 'editMessageText';
-  const mode: FormatMode = configMode ?? 'legacy-passthrough';
+  // Default 'markdown' (post-cutover): unformatted GitHub-flavored markdown
+  // → Telegram HTML on every outbound send. Agents that need to roll back
+  // set `telegramFormatMode: 'legacy-passthrough'` in `.instar/config.json`.
+  const mode: FormatMode = callerMode ?? configMode ?? 'markdown';
 
   if (
     !isSendMethod ||

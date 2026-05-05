@@ -64,8 +64,10 @@ src/
                   # tracks byte offsets per file so re-scans are idempotent)
   messaging/      # TelegramAdapter (long-polling, JSONL history),
                   # WhatsAppAdapter, SlackAdapter, iMessage (platform adapters);
-                  # TelegramMarkdownFormatter (GFM→HTML for Telegram; disabled by
-                  # default via telegramFormatMode: 'legacy-passthrough'),
+                  # TelegramMarkdownFormatter (GFM→HTML for Telegram; default
+                  # 'markdown' — flip to 'legacy-passthrough' in .instar/config.json
+                  # for byte-for-byte rollback; per-call `_formatMode: 'html'` opt-out
+                  # for callers already producing Telegram HTML),
                   # MessageRouter (topic → adapter routing),
                   # DeliveryRetryManager (retry on failed delivery),
                   # PendingRelayStore (durable SQLite queue for Telegram relay;

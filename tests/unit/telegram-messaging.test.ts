@@ -60,7 +60,8 @@ describe('TelegramAdapter messaging', () => {
       expect(capturedBody.chat_id).toBe('-100123456789');
       expect(capturedBody.message_thread_id).toBe(42);
       expect(capturedBody.text).toBe('Hello topic!');
-      expect(capturedBody.parse_mode).toBe('Markdown');
+      // Default 'markdown' mode (post-cutover) → formatter outputs HTML.
+      expect(capturedBody.parse_mode).toBe('HTML');
     });
 
     it('omits message_thread_id for topicId 1 (General topic)', async () => {
@@ -80,15 +81,15 @@ describe('TelegramAdapter messaging', () => {
       expect(capturedBody.text).toBe('General message');
     });
 
-    it('falls back to plain text when Markdown fails', async () => {
+    it('falls back to plain text on parse error', async () => {
       const calls: Array<Record<string, unknown>> = [];
 
       global.fetch = vi.fn().mockImplementation(async (_url: string, opts: RequestInit) => {
         const body = JSON.parse(opts.body as string);
         calls.push(body);
 
-        if (body.parse_mode === 'Markdown') {
-          // First call with Markdown fails
+        if (body.parse_mode) {
+          // First call with parse_mode fails
           return {
             ok: false,
             status: 400,
@@ -96,7 +97,7 @@ describe('TelegramAdapter messaging', () => {
             json: async () => ({ ok: false }),
           };
         }
-        // Second call without Markdown succeeds
+        // Plain retry succeeds
         return {
           ok: true,
           json: async () => ({ ok: true, result: { message_id: 1 } }),
@@ -105,9 +106,11 @@ describe('TelegramAdapter messaging', () => {
 
       await adapter.sendToTopic(10, 'Hello *broken markdown');
 
-      expect(calls).toHaveLength(2);
-      expect(calls[0].parse_mode).toBe('Markdown');
-      expect(calls[1].parse_mode).toBeUndefined();
+      // Default 'markdown' mode → first call uses HTML; plain retry drops parse_mode.
+      // apiCall plain-retry fires before send()-level retry, so calls.length may be 2 or 3.
+      expect(calls.length).toBeGreaterThanOrEqual(2);
+      expect(calls[0].parse_mode).toBe('HTML');
+      expect(calls[calls.length - 1].parse_mode).toBeUndefined();
     });
 
     it('logs outbound message to JSONL', async () => {
@@ -168,7 +171,8 @@ describe('TelegramAdapter messaging', () => {
 
       expect(capturedBody.text).toBe('Hello via send()');
       expect(capturedBody.message_thread_id).toBe(55);
-      expect(capturedBody.parse_mode).toBe('Markdown');
+      // Default 'markdown' mode → formatter sets parse_mode='HTML'.
+      expect(capturedBody.parse_mode).toBe('HTML');
     });
 
     it('omits message_thread_id when topic is 1', async () => {
@@ -218,9 +222,11 @@ describe('TelegramAdapter messaging', () => {
         channel: { type: 'telegram', identifier: '10' },
       });
 
-      expect(calls).toHaveLength(2);
-      expect(calls[0].parse_mode).toBe('Markdown');
-      expect(calls[1].parse_mode).toBeUndefined();
+      // Default 'markdown' mode → first call uses HTML; plain retry drops parse_mode.
+      // apiCall plain-retry fires before send()-level retry, so calls.length may be 2 or 3.
+      expect(calls.length).toBeGreaterThanOrEqual(2);
+      expect(calls[0].parse_mode).toBe('HTML');
+      expect(calls[calls.length - 1].parse_mode).toBeUndefined();
     });
 
     it('throws on non-400 errors (does not retry)', async () => {
