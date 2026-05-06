@@ -53,6 +53,10 @@ export interface ThreadSummary {
   bridge: { topicId: number; topicName: string; createdAt: string; lastMessageAt: string } | null;
   /** Whether a spawn-session record exists for this thread (heuristic). */
   hasSpawnedSession: boolean;
+  /** Direction of the most recent message ("in" or "out"). */
+  lastMessageDirection?: 'in' | 'out';
+  /** Body of the most recent message — used for conversation list previews. May be the encrypted-envelope JSON wrapper for older messages. */
+  lastMessageText?: string;
 }
 
 export interface ThreadDetail extends ThreadSummary {
@@ -159,6 +163,16 @@ export class ThreadlineObservability {
 
       const avgLatency = this.computeAvgResponseLatencyMs(slot.in, slot.out);
 
+      // Find the most recent message (across in + out) for preview rendering
+      const allMessages: Array<{ ts: string; dir: 'in' | 'out'; text: string }> = [
+        ...slot.in.map(e => ({ ts: e.timestamp, dir: 'in' as const, text: e.text ?? '' })),
+        ...slot.out.map(e => ({ ts: e.timestamp, dir: 'out' as const, text: e.text ?? '' })),
+      ];
+      allMessages.sort((a, b) => a.ts.localeCompare(b.ts));
+      const last = allMessages[allMessages.length - 1];
+      const lastMessageDirection = last?.dir;
+      const lastMessageText = last ? truncateForPreview(last.text) : undefined;
+
       summaries.push({
         threadId,
         remoteAgent: counterpartyId,
@@ -173,6 +187,8 @@ export class ThreadlineObservability {
           ? { topicId: binding.topicId, topicName: binding.topicName, createdAt: binding.createdAt, lastMessageAt: binding.lastMessageAt }
           : null,
         hasSpawnedSession,
+        lastMessageDirection,
+        lastMessageText,
       });
     }
 
@@ -387,6 +403,16 @@ export class ThreadlineObservability {
     if (latencies.length === 0) return null;
     return Math.round(latencies.reduce((a, b) => a + b, 0) / latencies.length);
   }
+}
+
+/**
+ * Truncate a message body for use in conversation list previews.
+ * Trims long messages to ~200 chars and replaces newlines with spaces so previews stay one line.
+ */
+function truncateForPreview(text: string): string {
+  if (!text) return '';
+  const flat = text.replace(/\s+/g, ' ').trim();
+  return flat.length > 200 ? flat.slice(0, 197) + '…' : flat;
 }
 
 function makeSnippet(text: string, matchStart: number, matchLen: number): string {
