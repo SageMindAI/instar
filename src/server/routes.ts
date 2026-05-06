@@ -173,6 +173,7 @@ import type { InstructionsVerifier } from '../monitoring/InstructionsVerifier.js
 import type { CoherenceGate } from '../core/CoherenceGate.js';
 import type { MessagingToneGate } from '../core/MessagingToneGate.js';
 import { isJunkPayload } from '../core/junk-payload.js';
+import { detectJargon } from '../core/JargonDetector.js';
 import type { PasteManager } from '../paste/PasteManager.js';
 import type { WebSocketManager } from './WebSocketManager.js';
 import { TruncationDetector } from '../paste/TruncationDetector.js';
@@ -729,6 +730,8 @@ export function createRoutes(ctx: RouteContext): Router {
       topicId?: number;
       allowDebugText?: boolean;
       allowDuplicate?: boolean;
+      messageKind?: 'reply' | 'health-alert' | 'unknown';
+      jargon?: boolean;
     },
   ): Promise<boolean> {
     if (!ctx.messagingToneGate) return false; // No authority configured — pass through
@@ -743,6 +746,15 @@ export function createRoutes(ctx: RouteContext): Router {
           detected: junkResult.junk,
           reason: junkResult.reason,
         };
+      }
+
+      if (options.jargon) {
+        try {
+          const j = detectJargon(text);
+          signals.jargon = { detected: j.detected, terms: j.terms, score: j.score };
+        } catch {
+          // Detector errors never override the authority — skip the signal.
+        }
       }
 
       // Recent conversation — used by both the authority and the dedup detector.
@@ -782,6 +794,7 @@ export function createRoutes(ctx: RouteContext): Router {
         recentMessages,
         signals,
         targetStyle: ctx.config.messagingStyle,
+        messageKind: options.messageKind,
       });
 
       // Structured observability: log every decision the authority made. This is
@@ -5142,6 +5155,24 @@ export function createRoutes(ctx: RouteContext): Router {
     }
     if (priority !== undefined && !['URGENT', 'HIGH', 'NORMAL', 'LOW'].includes(priority)) {
       res.status(400).json({ error: '"priority" must be one of: URGENT, HIGH, NORMAL, LOW' });
+      return;
+    }
+
+    // Attention items reach the user as a new Telegram topic with the title,
+    // summary, and (optional) description as the body. Run that user-facing
+    // candidate through the outbound-message authority before creating the
+    // topic. For health-class categories ("degradation", "health"), invoke
+    // the health-alert ruleset (B12/B13/B14) so jargon-laden, no-CTA, and
+    // self-healed-event messages get suppressed instead of spawning topics.
+    const isHealthAlert = typeof category === 'string' && /^(degradation|health|health-alert|alert)$/i.test(category);
+    const candidate = [title, summary, description].filter((s): s is string => typeof s === 'string' && s.length > 0).join('\n\n');
+    const blocked = await checkOutboundMessage(candidate, 'telegram', res, {
+      messageKind: isHealthAlert ? 'health-alert' : 'reply',
+      jargon: isHealthAlert,
+      // No topicId — attention items create new topics; no prior thread context applies.
+    });
+    if (blocked) {
+      // checkOutboundMessage already wrote the 422 response.
       return;
     }
 

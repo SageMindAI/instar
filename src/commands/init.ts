@@ -2287,13 +2287,15 @@ Two parts: pipeline health AND active consumption.
 UNREPORTED=$(curl -s -H "Authorization: Bearer $AUTH" http://localhost:\${INSTAR_PORT:-${port}}/health/degradations | jq -c '.events[] | select(.reported == false)')
 \\\`\\\`\\\`
 
-For each unreported event, surface it to the attention queue using a stable id (so re-runs are idempotent):
+For each unreported event, surface it to the attention queue using a stable id (one feature = one topic, even across days):
 
 \\\`\\\`\\\`
 curl -X POST -H "Authorization: Bearer $AUTH" -H 'Content-Type: application/json' \\\\
   http://localhost:\${INSTAR_PORT:-${port}}/attention \\\\
-  -d "{\\"id\\": \\"degradation:\${FEATURE}:\${TIMESTAMP}\\", \\"title\\": \\"Degradation: \${FEATURE}\\", \\"summary\\": \\"\${NARRATIVE}\\", \\"category\\": \\"degradation\\", \\"priority\\": \\"NORMAL\\"}"
+  -d "{\\"id\\": \\"degradation:\${FEATURE}\\", \\"title\\": \\"Degradation: \${FEATURE}\\", \\"summary\\": \\"\${NARRATIVE}\\", \\"category\\": \\"degradation\\", \\"priority\\": \\"NORMAL\\"}"
 \\\`\\\`\\\`
+
+The id deliberately omits a timestamp so repeated detections of the same feature collapse onto the existing attention item rather than spawning a new Telegram topic each pulse. (The attention endpoint also runs the message through the outbound tone gate as a health-alert, so jargon-heavy or no-call-to-action candidates are rejected before any topic gets created.)
 
 Then close the loop so next pulse doesn't re-surface the same event:
 
