@@ -588,6 +588,10 @@ export interface RouteContext {
   /** Threadline observability — read-only view layer over inbox/outbox/bindings.
    *  Powers the dashboard Threadline tab via /threadline/observability/*. */
   threadlineObservability: import('../threadline/ThreadlineObservability.js').ThreadlineObservability | null;
+  /** Threadline nicknames — user/Haiku-assigned display names keyed by fingerprint. */
+  threadlineNicknames: import('../threadline/ThreadlineNicknames.js').ThreadlineNicknames | null;
+  /** Threadline nickname suggester — Haiku-backed naming for fingerprint-only agents. */
+  threadlineNicknameSuggester: import('../threadline/ThreadlineNicknameSuggester.js').ThreadlineNicknameSuggester | null;
   /** Pending reply waiters for threadline relay-send waitForReply support.
    *  Key: threadId (UUID — unique per conversation, unlike agent names which
    *  can collide when multiple agents share a name). Value: resolve callback
@@ -4942,6 +4946,65 @@ export function createRoutes(ctx: RouteContext): Router {
     const limit = Number.isFinite(limitRaw) && limitRaw > 0 ? Math.min(limitRaw, 200) : 50;
     const hits = ctx.threadlineObservability.searchMessages(q, limit);
     res.json({ hits, count: hits.length });
+  });
+
+  // ── Threadline nicknames — user/Haiku-set display names by fingerprint ──
+
+  router.get('/threadline/nicknames', (_req, res) => {
+    if (!ctx.threadlineNicknames) {
+      res.status(503).json({ error: 'Threadline nicknames not initialized' });
+      return;
+    }
+    res.json({ nicknames: ctx.threadlineNicknames.all() });
+  });
+
+  router.put('/threadline/nicknames/:fingerprint', (req, res) => {
+    if (!ctx.threadlineNicknames) {
+      res.status(503).json({ error: 'Threadline nicknames not initialized' });
+      return;
+    }
+    const fingerprint = req.params.fingerprint;
+    const body = (req.body ?? {}) as { nickname?: unknown; source?: unknown };
+    const nickname = typeof body.nickname === 'string' ? body.nickname : '';
+    const source = body.source === 'haiku' || body.source === 'import' ? body.source : 'user';
+    try {
+      const entry = ctx.threadlineNicknames.set(fingerprint, nickname, source);
+      res.json({ fingerprint, entry });
+    } catch (err) {
+      res.status(400).json({ error: err instanceof Error ? err.message : String(err) });
+    }
+  });
+
+  router.delete('/threadline/nicknames/:fingerprint', (req, res) => {
+    if (!ctx.threadlineNicknames) {
+      res.status(503).json({ error: 'Threadline nicknames not initialized' });
+      return;
+    }
+    const removed = ctx.threadlineNicknames.delete(req.params.fingerprint);
+    res.json({ removed });
+  });
+
+  // Run the Haiku-backed nickname suggester on demand. Useful for the
+  // dashboard's "✨ Suggest names" button. Honors ?dryRun=1 to preview.
+  router.post('/threadline/nicknames/suggest', async (req, res) => {
+    if (!ctx.threadlineNicknameSuggester) {
+      res.status(503).json({
+        error: 'Nickname suggester unavailable — no intelligence provider configured',
+      });
+      return;
+    }
+    const dryRun = req.query.dryRun === '1' || req.query.dryRun === 'true';
+    const maxRaw = Array.isArray(req.query.max) ? req.query.max[0] : req.query.max;
+    const max = typeof maxRaw === 'string' ? Number.parseInt(maxRaw, 10) : undefined;
+    try {
+      const result = await ctx.threadlineNicknameSuggester.run({
+        dryRun,
+        max: Number.isFinite(max) ? max : undefined,
+      });
+      res.json(result);
+    } catch (err) {
+      res.status(500).json({ error: err instanceof Error ? err.message : String(err) });
+    }
   });
 
   router.patch('/threadline/telegram-bridge/config', (req, res) => {

@@ -1026,8 +1026,23 @@
       flex-shrink: 0;
     }
     .tl-conv-detail-info { flex: 1; min-width: 0; }
-    .tl-conv-detail-name { font-size: 16px; font-weight: 600; }
+    .tl-conv-detail-name {
+      font-size: 16px; font-weight: 600;
+      display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+    }
     .tl-conv-detail-meta { font-size: 12px; color: var(--text-dim); margin-top: 2px; }
+    .tl-name-edit {
+      background: transparent; border: none; color: var(--text-dim);
+      cursor: pointer; padding: 2px 6px; border-radius: 4px;
+      font-size: 13px; line-height: 1;
+    }
+    .tl-name-edit:hover { color: var(--text); background: var(--bg-hover); }
+    .tl-name-suggest {
+      background: var(--bg-hover); border: 1px dashed var(--border);
+      color: var(--text-dim); cursor: pointer; padding: 3px 10px;
+      border-radius: 12px; font-size: 11px;
+    }
+    .tl-name-suggest:hover { color: var(--accent); border-color: var(--accent); }
 
     .tl-messages {
       flex: 1; min-height: 0;
@@ -1042,6 +1057,23 @@
     }
     .tl-msg.in { align-self: flex-start; align-items: flex-start; }
     .tl-msg.out { align-self: flex-end; align-items: flex-end; }
+    .tl-msg-row {
+      display: flex; gap: 8px; align-items: flex-start;
+    }
+    .tl-msg.out .tl-msg-row { flex-direction: row-reverse; }
+    .tl-msg-avatar {
+      width: 28px; height: 28px; border-radius: 50%;
+      display: inline-flex; align-items: center; justify-content: center;
+      font-size: 11px; font-weight: 600; color: #fff;
+      flex-shrink: 0;
+    }
+    .tl-msg-content { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+    .tl-msg.out .tl-msg-content { align-items: flex-end; }
+    .tl-msg-speaker {
+      font-size: 11px; font-weight: 600;
+      color: var(--text-dim);
+      padding: 0 4px;
+    }
     .tl-msg-bubble {
       padding: 10px 14px;
       border-radius: 16px;
@@ -1067,6 +1099,62 @@
       display: flex; gap: 6px; align-items: center;
     }
     .tl-verified { color: #22c55e; font-weight: 600; }
+
+    /* ── Nickname editor modal ──────────────────────────────────── */
+    .tl-modal-overlay {
+      position: fixed; inset: 0;
+      background: rgba(0,0,0,0.6);
+      display: flex; align-items: center; justify-content: center;
+      z-index: 9999;
+      padding: 20px;
+    }
+    .tl-modal {
+      background: var(--bg-panel);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 24px;
+      width: 100%;
+      max-width: 420px;
+      box-shadow: 0 12px 40px rgba(0,0,0,0.4);
+    }
+    .tl-modal h3 {
+      margin: 0 0 6px 0; font-size: 16px; color: var(--text-bright);
+    }
+    .tl-modal-sub {
+      font-size: 13px; color: var(--text-dim); margin: 0 0 16px 0;
+      line-height: 1.4;
+    }
+    .tl-modal input[type="text"] {
+      width: 100%; padding: 10px 12px;
+      background: var(--bg); border: 1px solid var(--border);
+      border-radius: 6px; color: var(--text);
+      font-size: 14px;
+    }
+    .tl-modal input[type="text"]:focus {
+      outline: none; border-color: var(--accent);
+    }
+    .tl-modal-fp {
+      font-size: 11px; color: var(--text-dim);
+      margin-top: 10px; word-break: break-all;
+    }
+    .tl-modal-fp code {
+      background: var(--bg); padding: 1px 5px; border-radius: 3px;
+      font-family: ui-monospace, monospace;
+    }
+    .tl-modal-actions {
+      display: flex; gap: 8px; justify-content: flex-end;
+      margin-top: 18px;
+    }
+    .tl-modal-cancel, .tl-modal-save {
+      padding: 8px 14px; border-radius: 6px;
+      font-size: 13px; cursor: pointer; border: 1px solid var(--border);
+    }
+    .tl-modal-cancel { background: transparent; color: var(--text); }
+    .tl-modal-cancel:hover { background: var(--bg-hover); }
+    .tl-modal-save {
+      background: var(--accent); color: #fff; border-color: var(--accent);
+    }
+    .tl-modal-save:hover { background: var(--accent-dim); }
 
     /* Mobile responsive — stack to single pane with back nav */
     @media (max-width: 768px) {
@@ -3396,6 +3484,7 @@
           <span id="tlHeaderSubtitle" class="tl-subtitle">Your agent's conversations with other AI agents</span>
         </div>
         <div class="tl-header-actions">
+          <button id="tlSuggestBtn" class="tl-icon-btn" onclick="tlSuggestNicknames()" title="Auto-name unnamed agents (uses Haiku)">✨</button>
           <button id="tlSearchBtn" class="tl-icon-btn" onclick="tlToggleSearch()" title="Search messages">🔍</button>
           <button id="tlSettingsBtn" class="tl-icon-btn" onclick="tlToggleSettings()" title="Settings">⚙</button>
           <button class="tl-icon-btn" onclick="tlObsLoadThreads(true)" title="Refresh">↻</button>
@@ -5175,6 +5264,9 @@
     function tlRenderConversation(detail) {
       const name = detail.remoteAgentName || detail.remoteAgent || '(unknown)';
       const seed = detail.remoteAgent || name;
+      const fp = detail.remoteAgent || '';
+      // Heuristic: 8-char hex fingerprint = no friendly name yet
+      const isFingerprintOnly = /^[a-f0-9]{8}$/i.test(name);
       const metaPieces = [
         `${detail.messageCount} message${detail.messageCount === 1 ? '' : 's'}`,
       ];
@@ -5184,21 +5276,33 @@
       if (detail.bridge) metaPieces.push(`Telegram topic ${detail.bridge.topicId}`);
       if (detail.hasSpawnedSession) metaPieces.push('Spawned session');
 
+      const escFp = (fp || '').replace(/'/g, "\\'");
+      const editBtn = fp
+        ? `<button class="tl-name-edit" onclick="tlOpenNicknameEditor('${escFp}', ${JSON.stringify(name).replace(/"/g, '&quot;')})" title="Edit name">✎</button>`
+        : '';
+      const setNameHint = isFingerprintOnly && fp
+        ? `<button class="tl-name-suggest" onclick="tlOpenNicknameEditor('${escFp}', '')">Set a name…</button>`
+        : '';
+
       const header = `
         <div class="tl-conv-detail-header">
           <button class="tl-conv-detail-back" onclick="tlBackToList()" title="Back">‹</button>
           <span class="tl-avatar" style="${tlAvatarStyle(seed)}">${escapeHtml(tlAvatarInitials(name))}</span>
           <div class="tl-conv-detail-info">
-            <div class="tl-conv-detail-name">${escapeHtml(name)}</div>
+            <div class="tl-conv-detail-name">
+              <span>${escapeHtml(name)}</span>
+              ${editBtn}
+              ${setNameHint}
+            </div>
             <div class="tl-conv-detail-meta">${escapeHtml(metaPieces.join(' · '))}</div>
           </div>
         </div>
       `;
-      const messages = (detail.messages || []).map(m => tlRenderMessage(m)).join('');
+      const messages = (detail.messages || []).map(m => tlRenderMessage(m, name, seed)).join('');
       return header + `<div class="tl-messages">${messages || '<div class="tl-conv-empty">No messages yet.</div>'}</div>`;
     }
 
-    function tlRenderMessage(m) {
+    function tlRenderMessage(m, threadName, threadSeed) {
       const dirClass = m.direction === 'in' ? 'in' : 'out';
       const time = fmtRelTime(m.timestamp);
       const text = tlExtractText(m.text);
@@ -5207,16 +5311,125 @@
         ? '<span class="tl-verified" title="Cryptographically verified">✓ verified</span>'
         : (m.trustLevel && m.trustLevel !== 'self' ? `<span title="Trust: ${escapeHtml(m.trustLevel)}">${escapeHtml(m.trustLevel)}</span>` : '');
       const outcome = m.outcome && m.outcome !== 'relay-sent' ? ` · ${escapeHtml(m.outcome)}` : '';
+      const speaker = m.direction === 'in'
+        ? (m.remoteAgentName || threadName || '(unknown)')
+        : 'You';
+      const seed = m.direction === 'in' ? (m.remoteAgent || threadSeed || speaker) : 'self:you';
       return `
         <div class="tl-msg ${dirClass}">
-          <div class="tl-msg-bubble">${escapeHtml(text)}</div>
-          <div class="tl-msg-meta">
-            <span>${escapeHtml(time)}</span>
-            ${verifiedBadge ? '<span>·</span>' + verifiedBadge : ''}
-            ${outcome ? '<span>·</span><span>' + outcome + '</span>' : ''}
+          <div class="tl-msg-row">
+            <span class="tl-msg-avatar" style="${tlAvatarStyle(seed)}">${escapeHtml(tlAvatarInitials(speaker))}</span>
+            <div class="tl-msg-content">
+              <div class="tl-msg-speaker">${escapeHtml(speaker)}</div>
+              <div class="tl-msg-bubble">${escapeHtml(text)}</div>
+              <div class="tl-msg-meta">
+                <span>${escapeHtml(time)}</span>
+                ${verifiedBadge ? '<span>·</span>' + verifiedBadge : ''}
+                ${outcome ? '<span>·</span><span>' + outcome + '</span>' : ''}
+              </div>
+            </div>
           </div>
         </div>
       `;
+    }
+
+    // ── Nickname editor ─────────────────────────────────────────────
+
+    function tlOpenNicknameEditor(fingerprint, currentName) {
+      // Inline modal — appended to body, dismissed on overlay click or Esc
+      const existing = document.getElementById('tlNickModal');
+      if (existing) existing.remove();
+      const modal = document.createElement('div');
+      modal.id = 'tlNickModal';
+      modal.className = 'tl-modal-overlay';
+      modal.innerHTML = `
+        <div class="tl-modal" role="dialog" aria-label="Edit nickname">
+          <h3>Edit nickname</h3>
+          <p class="tl-modal-sub">Pick a friendly name for this agent. Used everywhere on the dashboard. Leave blank to clear.</p>
+          <input type="text" id="tlNickInput" maxlength="64" placeholder="e.g. Dawn, Sage, ResearchBot" autocomplete="off" />
+          <div class="tl-modal-fp">Fingerprint: <code>${escapeHtml(fingerprint)}</code></div>
+          <div class="tl-modal-actions">
+            <button class="tl-modal-cancel" onclick="tlCloseNicknameEditor()">Cancel</button>
+            <button class="tl-modal-save" onclick="tlSaveNickname('${fingerprint.replace(/'/g, "\\'")}')">Save</button>
+          </div>
+        </div>
+      `;
+      document.body.appendChild(modal);
+      const input = document.getElementById('tlNickInput');
+      if (input) {
+        input.value = currentName && !/^[a-f0-9]{8}$/i.test(currentName) ? currentName : '';
+        input.focus();
+        input.select();
+        input.addEventListener('keydown', (e) => {
+          if (e.key === 'Enter') { tlSaveNickname(fingerprint); }
+          if (e.key === 'Escape') { tlCloseNicknameEditor(); }
+        });
+      }
+      modal.addEventListener('click', (e) => { if (e.target === modal) tlCloseNicknameEditor(); });
+    }
+
+    function tlCloseNicknameEditor() {
+      const m = document.getElementById('tlNickModal');
+      if (m) m.remove();
+    }
+
+    async function tlSuggestNicknames() {
+      const btn = document.getElementById('tlSuggestBtn');
+      if (!btn) return;
+      const originalLabel = btn.innerHTML;
+      btn.disabled = true;
+      btn.innerHTML = '⏳';
+      btn.title = 'Auto-naming…';
+      try {
+        const resp = await apiFetch('/threadline/nicknames/suggest', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: '{}',
+        });
+        const applied = resp?.applied?.length || 0;
+        const candidates = resp?.candidateAgents || 0;
+        const skipped = resp?.skipped?.length || 0;
+        if (applied > 0) {
+          showToast?.(`Named ${applied} agent${applied === 1 ? '' : 's'}`) || alert(`Named ${applied} agent${applied === 1 ? '' : 's'}.`);
+        } else if (candidates === 0) {
+          showToast?.('Every agent already has a name — nothing to do.') || alert('Every agent already has a name.');
+        } else {
+          const reasons = (resp?.skipped || []).slice(0, 1).map(s => s.reason).join(' / ');
+          showToast?.(`No names applied${reasons ? ' — ' + reasons : ''}`) || alert(`No names applied${reasons ? ': ' + reasons : ''}`);
+        }
+        await tlObsLoadThreads(true);
+        if (tlObsActiveThreadId) await tlObsLoadThread(tlObsActiveThreadId);
+      } catch (err) {
+        const msg = err?.message || String(err);
+        if (/503|unavailable/i.test(msg)) {
+          alert('Auto-naming needs an intelligence provider (Haiku). Set ANTHROPIC_API_KEY or use the Claude CLI.');
+        } else {
+          alert('Auto-naming failed: ' + msg);
+        }
+      } finally {
+        btn.disabled = false;
+        btn.innerHTML = originalLabel;
+        btn.title = 'Auto-name unnamed agents (uses Haiku)';
+      }
+    }
+
+    async function tlSaveNickname(fingerprint) {
+      const input = document.getElementById('tlNickInput');
+      if (!input) return;
+      const nickname = input.value.trim();
+      try {
+        await apiFetch(`/threadline/nicknames/${encodeURIComponent(fingerprint)}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ nickname }),
+        });
+        tlCloseNicknameEditor();
+        // Refresh the conversation list and the active thread
+        await tlObsLoadThreads(true);
+        if (tlObsActiveThreadId) await tlObsLoadThread(tlObsActiveThreadId);
+      } catch (err) {
+        alert('Could not save nickname: ' + (err.message || String(err)));
+      }
     }
 
     async function tlObsRunSearch(query) {

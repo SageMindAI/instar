@@ -1706,7 +1706,16 @@ export async function startServer(options: StartOptions): Promise<void> {
   // Stateless — reads files at every query. Powers the dashboard
   // Threadline tab via /threadline/observability/* endpoints.
   const { ThreadlineObservability } = await import('../threadline/ThreadlineObservability.js');
-  const threadlineObservability = new ThreadlineObservability({ stateDir: config.stateDir });
+  const { ThreadlineNicknames } = await import('../threadline/ThreadlineNicknames.js');
+  const threadlineNicknames = new ThreadlineNicknames({ stateDir: config.stateDir });
+  const threadlineObservability = new ThreadlineObservability({
+    stateDir: config.stateDir,
+    nicknames: threadlineNicknames,
+  });
+  // Constructed later, once sharedIntelligence (Haiku-tier) is available.
+  let threadlineNicknameSuggester:
+    | import('../threadline/ThreadlineNicknameSuggester.js').ThreadlineNicknameSuggester
+    | null = null;
 
   // NotificationBatcher: consolidate all Telegram notifications into tiered delivery.
   // IMMEDIATE = user needs to act NOW (quota exhausted, critical stall)
@@ -2315,6 +2324,40 @@ export async function startServer(options: StartOptions): Promise<void> {
       }
       if (sharedIntelligence) {
         scheduler.setIntelligence(sharedIntelligence);
+      }
+
+      // Wire ThreadlineNicknameSuggester — uses sharedIntelligence (Haiku tier)
+      // to propose 1–2 word display names for threadline agents that show up
+      // only as 8-char fingerprints. Runs on demand from the dashboard, plus a
+      // periodic sweep so the conversation list stays human-readable.
+      if (sharedIntelligence) {
+        const { ThreadlineNicknameSuggester } = await import('../threadline/ThreadlineNicknameSuggester.js');
+        threadlineNicknameSuggester = new ThreadlineNicknameSuggester({
+          observability: threadlineObservability,
+          nicknames: threadlineNicknames,
+          intelligence: sharedIntelligence,
+          logger: (line: string) => console.log(pc.gray(line)),
+        });
+
+        const sweepIntervalMs = 15 * 60 * 1000; // 15 min
+        const initialDelayMs = 60 * 1000; // give the server a minute to settle
+        let inFlight = false;
+        const runSweep = async () => {
+          if (inFlight) return;
+          inFlight = true;
+          try {
+            const result = await threadlineNicknameSuggester!.run();
+            if (result.applied.length > 0) {
+              console.log(pc.cyan(`  Threadline nickname sweep: named ${result.applied.length} agent(s)`));
+            }
+          } catch (err) {
+            console.error(pc.yellow(`  Threadline nickname sweep failed: ${err instanceof Error ? err.message : String(err)}`));
+          } finally {
+            inFlight = false;
+          }
+        };
+        setTimeout(() => { void runSweep(); }, initialDelayMs).unref?.();
+        setInterval(() => { void runSweep(); }, sweepIntervalMs).unref?.();
       }
 
       // Wire IntegrationGate — enforces learning consolidation after job completion
@@ -6152,7 +6195,7 @@ export async function startServer(options: StartOptions): Promise<void> {
     const { InitiativeTracker } = await import('../core/InitiativeTracker.js');
     const initiativeTracker = new InitiativeTracker(config.stateDir);
 
-    const server = new AgentServer({ config, sessionManager, state, scheduler, telegram, relationships, feedback, feedbackAnomalyDetector, dispatches, updateChecker, autoUpdater, autoDispatcher, quotaTracker, quotaManager, publisher, viewer, tunnel, evolution, watchdog, topicMemory, triageNurse, projectMapper, coherenceGate: scopeVerifier, contextHierarchy, canonicalState, operationGate, sentinel, adaptiveTrust, memoryMonitor, orphanReaper, coherenceMonitor, commitmentTracker, semanticMemory, activitySentinel, messageRouter, summarySentinel, spawnManager, systemReviewer, capabilityMapper, selfKnowledgeTree, coverageAuditor, topicResumeMap: _topicResumeMap ?? undefined, autonomyManager, trustElevationTracker, autonomousEvolution, coordinator: coordinator.enabled ? coordinator : undefined, localSigningKeyPem, whatsapp: whatsappAdapter, slack: slackAdapter, imessage: imessageAdapter, whatsappBusinessBackend, messageBridge, hookEventReceiver, worktreeMonitor, subagentTracker, instructionsVerifier, handshakeManager: threadlineHandshake, threadlineRouter, threadlineRelayClient, threadlineReplyWaiters, listenerManager: listenerManager ?? undefined, responseReviewGate, messagingToneGate, outboundDedupGate, telemetryHeartbeat, pasteManager, featureRegistry, discoveryEvaluator, unifiedTrust, liveConfig, sharedStateLedger, ledgerSessionRegistry, worktreeManager, oidcEnrolledRepos: parallelDevConfig?.oidcEnrolledRepos, initiativeTracker, proxyCoordinator, telegramBridgeConfig, telegramBridge: telegramBridge ?? undefined, threadlineObservability, workingMemory });
+    const server = new AgentServer({ config, sessionManager, state, scheduler, telegram, relationships, feedback, feedbackAnomalyDetector, dispatches, updateChecker, autoUpdater, autoDispatcher, quotaTracker, quotaManager, publisher, viewer, tunnel, evolution, watchdog, topicMemory, triageNurse, projectMapper, coherenceGate: scopeVerifier, contextHierarchy, canonicalState, operationGate, sentinel, adaptiveTrust, memoryMonitor, orphanReaper, coherenceMonitor, commitmentTracker, semanticMemory, activitySentinel, messageRouter, summarySentinel, spawnManager, systemReviewer, capabilityMapper, selfKnowledgeTree, coverageAuditor, topicResumeMap: _topicResumeMap ?? undefined, autonomyManager, trustElevationTracker, autonomousEvolution, coordinator: coordinator.enabled ? coordinator : undefined, localSigningKeyPem, whatsapp: whatsappAdapter, slack: slackAdapter, imessage: imessageAdapter, whatsappBusinessBackend, messageBridge, hookEventReceiver, worktreeMonitor, subagentTracker, instructionsVerifier, handshakeManager: threadlineHandshake, threadlineRouter, threadlineRelayClient, threadlineReplyWaiters, listenerManager: listenerManager ?? undefined, responseReviewGate, messagingToneGate, outboundDedupGate, telemetryHeartbeat, pasteManager, featureRegistry, discoveryEvaluator, unifiedTrust, liveConfig, sharedStateLedger, ledgerSessionRegistry, worktreeManager, oidcEnrolledRepos: parallelDevConfig?.oidcEnrolledRepos, initiativeTracker, proxyCoordinator, telegramBridgeConfig, telegramBridge: telegramBridge ?? undefined, threadlineObservability, threadlineNicknames, threadlineNicknameSuggester, workingMemory });
     await server.start();
 
     // Connect DegradationReporter downstream systems now that everything is initialized.

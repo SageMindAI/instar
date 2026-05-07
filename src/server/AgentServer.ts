@@ -164,6 +164,10 @@ export class AgentServer {
     telegramBridge?: import('../threadline/TelegramBridge.js').TelegramBridge;
     /** Threadline observability — read-only views over inbox/outbox/bindings. */
     threadlineObservability?: import('../threadline/ThreadlineObservability.js').ThreadlineObservability;
+    /** Threadline nicknames — user/Haiku-assigned display names by fingerprint. */
+    threadlineNicknames?: import('../threadline/ThreadlineNicknames.js').ThreadlineNicknames;
+    /** Threadline nickname suggester — Haiku-driven naming for unnamed agents. */
+    threadlineNicknameSuggester?: import('../threadline/ThreadlineNicknameSuggester.js').ThreadlineNicknameSuggester | null;
   }) {
     this.config = options.config;
     this.startTime = new Date();
@@ -428,6 +432,8 @@ export class AgentServer {
       telegramBridgeConfig: options.telegramBridgeConfig ?? null,
       telegramBridge: options.telegramBridge ?? null,
       threadlineObservability: options.threadlineObservability ?? null,
+      threadlineNicknames: options.threadlineNicknames ?? null,
+      threadlineNicknameSuggester: options.threadlineNicknameSuggester ?? null,
       startTime: this.startTime,
     };
     this.routeContext = routeCtx;

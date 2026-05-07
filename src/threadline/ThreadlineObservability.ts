@@ -22,6 +22,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import type { TelegramBridgeBinding } from './TelegramBridge.js';
+import type { ThreadlineNicknames } from './ThreadlineNicknames.js';
 
 export interface ThreadlineMessageRow {
   /** "in" or "out" — direction relative to this agent. */
@@ -71,6 +72,8 @@ export interface SearchHit {
 
 export interface ThreadlineObservabilityOptions {
   stateDir: string;
+  /** Optional nickname store — overrides resolved names when set. */
+  nicknames?: ThreadlineNicknames;
 }
 
 interface RawInboxEntry {
@@ -103,11 +106,13 @@ interface ThreadResumeFile {
 
 export class ThreadlineObservability {
   private readonly stateDir: string;
+  private readonly nicknames: ThreadlineNicknames | null;
   private nameCache: Map<string, string> | null = null; // fingerprint → display name
   private nameCacheReadAt = 0;
 
   constructor(opts: ThreadlineObservabilityOptions) {
     this.stateDir = opts.stateDir;
+    this.nicknames = opts.nicknames ?? null;
   }
 
   // ── Public API ─────────────────────────────────────────────────
@@ -150,13 +155,15 @@ export class ThreadlineObservability {
         slot.in[0]?.from
         ?? slot.out[0]?.to
         ?? '(unknown)';
-      // Prefer the senderName/recipientName the message itself carried;
-      // fall back to known-agents.json lookup when the message-side name
-      // is missing.
+      // User-set nickname wins over the message's inline senderName/recipientName.
+      // Otherwise prefer the inline name; fall back to known-agents lookup.
+      const userNick = this.nicknames?.get(counterpartyId)?.nickname;
       const inlineName = slot.in[0]?.senderName || slot.out[0]?.recipientName;
-      const counterpartyName = inlineName && inlineName.length > 0
-        ? inlineName
-        : this.resolveAgentName(counterpartyId);
+      const counterpartyName = userNick && userNick.length > 0
+        ? userNick
+        : (inlineName && inlineName.length > 0
+          ? inlineName
+          : this.resolveAgentName(counterpartyId));
 
       const binding = bindings.get(threadId) ?? null;
       const hasSpawnedSession = !!resume[threadId];
@@ -319,8 +326,10 @@ export class ThreadlineObservability {
 
   private resolveAgentName(idOrName: string): string {
     if (!idOrName) return '(unknown)';
-    // Cheap cache: re-read only when stale (mtime changed). For simplicity
-    // re-read every minute in the absence of an mtime-watch.
+    // 1) User-set / Haiku-suggested nickname always wins
+    const nickEntry = this.nicknames?.get(idOrName);
+    if (nickEntry) return nickEntry.nickname;
+    // 2) Known-agents.json (declared agent name from registry)
     const STALE_MS = 60_000;
     if (!this.nameCache || Date.now() - this.nameCacheReadAt > STALE_MS) {
       this.nameCache = this.loadKnownAgentsCache();
@@ -332,9 +341,25 @@ export class ThreadlineObservability {
     for (const [k, v] of this.nameCache) {
       if (k.startsWith(idOrName) || idOrName.startsWith(k)) return v;
     }
-    // Fingerprint-looking → first 8 chars; else the value itself
+    // 3) Fingerprint-looking → first 8 chars; else the value itself
     if (/^[a-f0-9]{16,}$/i.test(idOrName)) return idOrName.slice(0, 8);
     return idOrName;
+  }
+
+  /** Whether this id has a fingerprint-only display name (no friendly label yet). */
+  hasNoFriendlyName(id: string): boolean {
+    if (!id) return false;
+    if (this.nicknames?.get(id)) return false;
+    const STALE_MS = 60_000;
+    if (!this.nameCache || Date.now() - this.nameCacheReadAt > STALE_MS) {
+      this.nameCache = this.loadKnownAgentsCache();
+      this.nameCacheReadAt = Date.now();
+    }
+    if (this.nameCache.get(id)) return false;
+    for (const [k] of this.nameCache) {
+      if (k.startsWith(id) || id.startsWith(k)) return false;
+    }
+    return true;
   }
 
   private loadKnownAgentsCache(): Map<string, string> {
@@ -353,26 +378,29 @@ export class ThreadlineObservability {
   }
 
   private mapInbound(e: RawInboxEntry): ThreadlineMessageRow {
+    const nick = this.nicknames?.get(e.from)?.nickname;
     return {
       direction: 'in',
       id: e.id,
       timestamp: e.timestamp,
       threadId: e.threadId,
       remoteAgent: e.from,
-      remoteAgentName: e.senderName || this.resolveAgentName(e.from),
+      remoteAgentName: nick || e.senderName || this.resolveAgentName(e.from),
       text: e.text,
       trustLevel: e.trustLevel,
     };
   }
 
   private mapOutbound(e: RawInboxEntry): ThreadlineMessageRow {
+    const to = e.to ?? '(unknown)';
+    const nick = this.nicknames?.get(to)?.nickname;
     return {
       direction: 'out',
       id: e.id,
       timestamp: e.timestamp,
       threadId: e.threadId,
-      remoteAgent: e.to ?? '(unknown)',
-      remoteAgentName: e.recipientName || this.resolveAgentName(e.to ?? ''),
+      remoteAgent: to,
+      remoteAgentName: nick || e.recipientName || this.resolveAgentName(to),
       text: e.text,
       trustLevel: 'self',
       outcome: e.outcome,
