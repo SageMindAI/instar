@@ -58,7 +58,38 @@ The suggester becomes a no-op: the existing UI continues to work, the
 ✨ button returns a 503 ("no intelligence provider configured"), and
 nicknames remain user-only.
 
+## Initiatives tab — two-zone rebuild
+
+The Initiatives tab is no longer a flat list of equally-weighted cards.
+It now opens with a clear answer to "what should I do right now?":
+
+- **Top zone — "Needs you".** Each digest signal renders as a callout
+  card with the question/detail front and center, plus action buttons
+  wired to real endpoints:
+  - `ready-to-advance` → **Start [next phase]** (POST phase to
+    `in-progress`)
+  - `needs-user`        → **Acknowledge** (PATCH `needsUser=false`)
+  - `next-check-due` / `stale` → **Mark touched**
+  - PR / topic / spec links from the initiative are rendered inline
+    so you can jump straight to the relevant external surface.
+- **Bottom zone — "In flight".** Calm cards: title, relative
+  last-touched time, one-line summary (first sentence of the
+  description, truncated), and a thin progress bar showing
+  `done/total phases · current phase`. Blockers show as a small red dot
+  with count.
+- **Click to expand.** Phase pills, full description, links, and
+  inline phase actions (`▶ Start`, `✓ Mark done`, `⏸ Block`,
+  `▶ Resume`) appear on expand — they don't clutter the calm view.
+- **Filter chips** replace the dropdown. Active / All / Completed /
+  Archived / Abandoned switchable in one click.
+- **Smart sort.** When viewing Active, items with `needs-user` signals
+  float to the top; everything else is by recency.
+
+No new endpoints; the rebuild uses existing
+`PATCH /initiatives/:id` and `POST /initiatives/:id/phase/:phaseId`.
+
 ## Migration
 
 No migration. The nicknames file is created on first write. Existing
-threadline state, registry, and bindings are unchanged.
+threadline state, registry, and bindings are unchanged. The Initiatives
+rebuild is purely client-side and uses existing tracker routes.

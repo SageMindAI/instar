@@ -3376,32 +3376,39 @@
       <div id="prPipelineList" style="display:flex;flex-direction:column;gap:12px"></div>
     </div>
 
-    <!-- Initiatives Tab — multi-phase long-running work -->
-    <div id="initiativesPanel" style="display:none;flex-direction:column;padding:20px;gap:16px;overflow-y:auto">
-      <div style="display:flex;justify-content:space-between;align-items:center">
+    <!-- Initiatives Tab — two-zone layout: "Needs you" + "In flight" -->
+    <div id="initiativesPanel" style="display:none;flex-direction:column;padding:20px;gap:20px;overflow-y:auto">
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap">
         <h2 style="margin:0">Initiatives</h2>
-        <div style="display:flex;gap:8px;align-items:center">
-          <select id="initiativesFilter" style="padding:6px 10px;background:var(--bg);color:var(--text);border:1px solid var(--border);border-radius:4px" onchange="loadInitiatives()">
-            <option value="active">Active</option>
-            <option value="">All</option>
-            <option value="completed">Completed</option>
-            <option value="archived">Archived</option>
-            <option value="abandoned">Abandoned</option>
-          </select>
-          <button onclick="loadInitiatives()" style="padding:6px 12px">Refresh</button>
+        <div style="display:flex;gap:6px;align-items:center" id="initiativesFilterChips"></div>
+      </div>
+
+      <!-- Zone 1: Needs you (actionable signals) -->
+      <section id="initiativesNeedsYouZone" style="display:none">
+        <div style="display:flex;align-items:baseline;gap:8px;margin-bottom:10px">
+          <h3 style="margin:0;font-size:14px;letter-spacing:0.5px;text-transform:uppercase;color:var(--text-dim)">Needs you</h3>
+          <span id="initiativesNeedsYouCount" style="font-size:12px;color:var(--text-dim)"></span>
         </div>
+        <div id="initiativesNeedsYouList" style="display:flex;flex-direction:column;gap:10px"></div>
+      </section>
+
+      <!-- Zone 1b: All clear (only when no signals AND in-flight items exist) -->
+      <div id="initiativesAllClear" style="display:none;padding:14px 16px;border:1px solid var(--border);border-radius:8px;color:var(--text-dim);font-size:13px;background:var(--bg-dim)">
+        ✓ All clear — nothing waiting on you right now.
       </div>
-      <div style="font-size:12px;color:var(--text-dim);line-height:1.4">
-        Multi-phase long-running work. Signals: <span style="color:#e27d3b">needs-user</span>,
-        <span style="color:#d65f5f">next-check-due</span>,
-        <span style="color:#4a9a4a">ready-to-advance</span>,
-        <span style="color:#888">stale (&gt;7d)</span>.
-      </div>
-      <div id="initiativesDigest" style="display:none;padding:12px;border:1px solid var(--border);border-radius:6px;background:var(--bg-dim)"></div>
+
+      <!-- Zone 2: In flight (calm progress cards) -->
+      <section id="initiativesInFlightZone" style="display:none">
+        <div style="display:flex;align-items:baseline;gap:8px;margin-bottom:10px">
+          <h3 style="margin:0;font-size:14px;letter-spacing:0.5px;text-transform:uppercase;color:var(--text-dim)" id="initiativesInFlightHeading">In flight</h3>
+          <span id="initiativesInFlightCount" style="font-size:12px;color:var(--text-dim)"></span>
+        </div>
+        <div id="initiativesList" style="display:flex;flex-direction:column;gap:10px"></div>
+      </section>
+
       <div id="initiativesEmpty" style="padding:40px;text-align:center;color:var(--text-dim);display:none">
-        No initiatives to display. Create one via <code>POST /initiatives</code>.
+        No initiatives to display.
       </div>
-      <div id="initiativesList" style="display:flex;flex-direction:column;gap:12px"></div>
     </div>
 
     <!-- Commitments Tab (Open Promises) -->
@@ -7269,35 +7276,133 @@
       }
     }
 
-    // ── Initiatives Tab (INITIATIVE-TRACKER-SPEC v1) ─────────────
+    // ── Initiatives Tab (two-zone layout) ─────────────────────────
     //
-    // Fetches /initiatives and /initiatives/digest on panel activation.
-    // Read-only: no buttons here mutate the tracker. All content goes
-    // through textContent; no innerHTML. Matches the PR Pipeline tab's
-    // XSS-safe pattern.
+    // Top zone: "Needs you" — actionable signal cards from /initiatives/digest.
+    // Bottom zone: "In flight" — calm initiative cards with progress bars.
+    // Filter chips on the title row let you switch status without a dropdown.
+    // Buttons mutate via PATCH /initiatives/:id and POST /initiatives/:id/phase/:phaseId.
+
+    let initiativesState = {
+      filter: 'active',           // 'active' | '' | 'completed' | 'archived' | 'abandoned'
+      items: [],
+      digest: [],
+      itemsById: {},
+      expandedIds: new Set(),
+    };
+
+    function initiativeFilters() {
+      return [
+        { value: 'active',     label: 'Active' },
+        { value: '',           label: 'All' },
+        { value: 'completed',  label: 'Completed' },
+        { value: 'archived',   label: 'Archived' },
+        { value: 'abandoned',  label: 'Abandoned' },
+      ];
+    }
+
+    function renderInitiativeFilterChips() {
+      const host = document.getElementById('initiativesFilterChips');
+      if (!host) return;
+      while (host.firstChild) host.removeChild(host.firstChild);
+      for (const f of initiativeFilters()) {
+        const chip = document.createElement('button');
+        const active = (f.value === initiativesState.filter);
+        chip.textContent = f.label;
+        chip.style.padding = '4px 10px';
+        chip.style.fontSize = '12px';
+        chip.style.borderRadius = '999px';
+        chip.style.cursor = 'pointer';
+        chip.style.border = active ? '1px solid var(--accent)' : '1px solid var(--border)';
+        chip.style.background = active ? 'var(--accent)' : 'transparent';
+        chip.style.color = active ? '#fff' : 'var(--text-dim)';
+        chip.onclick = () => {
+          initiativesState.filter = f.value;
+          loadInitiatives();
+        };
+        host.appendChild(chip);
+      }
+      const refresh = document.createElement('button');
+      refresh.textContent = '↻';
+      refresh.title = 'Refresh';
+      refresh.style.padding = '4px 10px';
+      refresh.style.fontSize = '12px';
+      refresh.style.borderRadius = '999px';
+      refresh.style.border = '1px solid var(--border)';
+      refresh.style.background = 'transparent';
+      refresh.style.color = 'var(--text-dim)';
+      refresh.style.cursor = 'pointer';
+      refresh.style.marginLeft = '4px';
+      refresh.onclick = () => loadInitiatives();
+      host.appendChild(refresh);
+    }
+
+    function relativeTimeShort(iso) {
+      if (!iso) return '';
+      const t = Date.parse(iso);
+      if (!Number.isFinite(t)) return '';
+      const diffSec = Math.floor((Date.now() - t) / 1000);
+      if (diffSec < 60) return 'just now';
+      if (diffSec < 3600) return `${Math.floor(diffSec / 60)}m ago`;
+      if (diffSec < 86400) return `${Math.floor(diffSec / 3600)}h ago`;
+      const diffDay = Math.floor(diffSec / 86400);
+      if (diffDay < 7) return `${diffDay}d ago`;
+      if (diffDay < 30) return `${Math.floor(diffDay / 7)}w ago`;
+      return new Date(t).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+    }
+
+    function firstSentence(text, maxLen) {
+      if (!text) return '';
+      const s = String(text).trim();
+      const dot = s.search(/[.!?](?:\s|$)/);
+      const take = dot > 0 ? s.slice(0, dot + 1) : s;
+      return take.length > maxLen ? take.slice(0, maxLen - 1).trim() + '…' : take;
+    }
+
+    function nextPendingPhase(ini) {
+      if (!Array.isArray(ini.phases)) return null;
+      return ini.phases.find(p => p.status === 'pending') || null;
+    }
+
+    function activePhase(ini) {
+      if (!Array.isArray(ini.phases)) return null;
+      return ini.phases.find(p => p.status === 'in-progress')
+          || ini.phases.find(p => p.status === 'blocked')
+          || nextPendingPhase(ini);
+    }
+
     async function loadInitiatives() {
       const list = document.getElementById('initiativesList');
       const empty = document.getElementById('initiativesEmpty');
-      const digestBox = document.getElementById('initiativesDigest');
-      const filter = document.getElementById('initiativesFilter');
+      const needsList = document.getElementById('initiativesNeedsYouList');
+      const needsZone = document.getElementById('initiativesNeedsYouZone');
+      const needsCount = document.getElementById('initiativesNeedsYouCount');
+      const inFlightZone = document.getElementById('initiativesInFlightZone');
+      const inFlightCount = document.getElementById('initiativesInFlightCount');
+      const inFlightHeading = document.getElementById('initiativesInFlightHeading');
+      const allClear = document.getElementById('initiativesAllClear');
       const countBadge = document.getElementById('tabInitiativeCount');
 
+      renderInitiativeFilterChips();
+
       while (list.firstChild) list.removeChild(list.firstChild);
-      while (digestBox.firstChild) digestBox.removeChild(digestBox.firstChild);
-      digestBox.style.display = 'none';
+      while (needsList.firstChild) needsList.removeChild(needsList.firstChild);
       empty.style.display = 'none';
+      needsZone.style.display = 'none';
+      inFlightZone.style.display = 'none';
+      allClear.style.display = 'none';
 
       let itemsRes = null;
       let digestRes = null;
       try {
-        const statusQ = filter && filter.value ? `?status=${encodeURIComponent(filter.value)}` : '';
+        const statusQ = initiativesState.filter ? `?status=${encodeURIComponent(initiativesState.filter)}` : '';
         const [a, b] = await Promise.all([
           apiFetch('/initiatives' + statusQ).catch(() => null),
           apiFetch('/initiatives/digest').catch(() => null),
         ]);
         itemsRes = a;
         digestRes = b;
-      } catch { /* handled by null check below */ }
+      } catch { /* handled below */ }
 
       if (!itemsRes) {
         empty.style.display = 'block';
@@ -7307,136 +7412,409 @@
       }
 
       const items = Array.isArray(itemsRes.items) ? itemsRes.items : [];
+      const digest = (digestRes && Array.isArray(digestRes.items)) ? digestRes.items : [];
+      initiativesState.items = items;
+      initiativesState.digest = digest;
+      initiativesState.itemsById = Object.fromEntries(items.map(i => [i.id, i]));
       if (countBadge) countBadge.textContent = String(items.length);
 
-      // Digest summary (actionable signals)
-      if (digestRes && Array.isArray(digestRes.items) && digestRes.items.length > 0) {
-        const title = document.createElement('div');
-        title.style.fontWeight = '600';
-        title.style.marginBottom = '6px';
-        title.textContent = `${digestRes.items.length} signal${digestRes.items.length === 1 ? '' : 's'}`;
-        digestBox.appendChild(title);
-        for (const d of digestRes.items) {
-          const row = document.createElement('div');
-          row.style.fontSize = '13px';
-          row.style.padding = '3px 0';
-          const colorMap = {
-            'needs-user': '#e27d3b',
-            'next-check-due': '#d65f5f',
-            'ready-to-advance': '#4a9a4a',
-            'stale': '#888',
-          };
-          const tag = document.createElement('span');
-          tag.style.color = colorMap[d.reason] || 'var(--text-dim)';
-          tag.style.marginRight = '6px';
-          tag.textContent = `[${d.reason}]`;
-          const label = document.createElement('span');
-          label.textContent = `${d.title} — ${d.detail}`;
-          row.appendChild(tag);
-          row.appendChild(label);
-          digestBox.appendChild(row);
+      // ── Zone 1: Needs you (only signals on items currently in our list) ──
+      const liveSignals = digest.filter(d => initiativesState.itemsById[d.initiativeId]);
+      if (liveSignals.length > 0) {
+        needsZone.style.display = 'block';
+        needsCount.textContent = `${liveSignals.length} item${liveSignals.length === 1 ? '' : 's'}`;
+        for (const sig of liveSignals) {
+          needsList.appendChild(renderSignalCard(sig));
         }
-        digestBox.style.display = 'block';
+      } else if (items.length > 0 && initiativesState.filter === 'active') {
+        allClear.style.display = 'block';
       }
 
+      // ── Zone 2: In flight (calm cards) ──
       if (items.length === 0) {
         empty.style.display = 'block';
-        empty.textContent = 'No initiatives to display. Create one via POST /initiatives.';
+        empty.textContent = initiativesState.filter
+          ? `No ${initiativesState.filter} initiatives.`
+          : 'No initiatives yet.';
         return;
       }
 
-      for (const ini of items) {
-        const card = document.createElement('div');
-        card.style.background = 'var(--panel)';
-        card.style.padding = '12px';
-        card.style.borderRadius = '6px';
-        card.style.border = '1px solid var(--border)';
+      inFlightZone.style.display = 'block';
+      inFlightHeading.textContent = initiativesState.filter === 'active' ? 'In flight'
+        : initiativesState.filter === 'completed' ? 'Completed'
+        : initiativesState.filter === 'archived' ? 'Archived'
+        : initiativesState.filter === 'abandoned' ? 'Abandoned'
+        : 'All initiatives';
+      inFlightCount.textContent = `${items.length} item${items.length === 1 ? '' : 's'}`;
 
-        const header = document.createElement('div');
-        header.style.display = 'flex';
-        header.style.justifyContent = 'space-between';
-        header.style.alignItems = 'center';
-        header.style.marginBottom = '6px';
+      // Sort: needs-user first, then by lastTouchedAt desc
+      const needsUserIds = new Set(digest.filter(d => d.reason === 'needs-user').map(d => d.initiativeId));
+      const sorted = items.slice().sort((a, b) => {
+        const aN = needsUserIds.has(a.id) ? 0 : 1;
+        const bN = needsUserIds.has(b.id) ? 0 : 1;
+        if (aN !== bN) return aN - bN;
+        return Date.parse(b.lastTouchedAt || 0) - Date.parse(a.lastTouchedAt || 0);
+      });
 
-        const titleEl = document.createElement('div');
-        titleEl.style.fontWeight = '600';
-        titleEl.textContent = ini.title || ini.id || '(untitled)';
-        header.appendChild(titleEl);
+      for (const ini of sorted) {
+        list.appendChild(renderInitiativeCard(ini));
+      }
+    }
 
-        const status = document.createElement('span');
-        status.style.fontSize = '11px';
-        status.style.padding = '2px 8px';
-        status.style.borderRadius = '999px';
-        const statusColors = {
-          active: 'var(--accent)',
-          completed: '#4a9a4a',
-          archived: 'var(--text-dim)',
-          abandoned: '#d65f5f',
-        };
-        status.style.background = statusColors[ini.status] || 'var(--text-dim)';
-        status.style.color = '#fff';
-        status.textContent = ini.status || 'unknown';
-        header.appendChild(status);
-        card.appendChild(header);
+    function renderSignalCard(sig) {
+      const ini = initiativesState.itemsById[sig.initiativeId] || {};
+      const reasonMeta = {
+        'needs-user':       { label: 'Needs your call', color: '#e27d3b', bg: 'rgba(226,125,59,0.10)', border: 'rgba(226,125,59,0.45)' },
+        'ready-to-advance': { label: 'Ready to advance', color: '#4a9a4a', bg: 'rgba(74,154,74,0.10)',  border: 'rgba(74,154,74,0.45)' },
+        'next-check-due':   { label: 'Check-in due',     color: '#d65f5f', bg: 'rgba(214,95,95,0.10)',   border: 'rgba(214,95,95,0.45)' },
+        'stale':            { label: 'Going stale',      color: '#888',    bg: 'var(--bg-dim)',          border: 'var(--border)' },
+      };
+      const meta = reasonMeta[sig.reason] || reasonMeta['stale'];
 
-        if (ini.description) {
-          const desc = document.createElement('div');
-          desc.style.fontSize = '13px';
-          desc.style.color = 'var(--text-dim)';
-          desc.style.marginBottom = '8px';
-          desc.textContent = ini.description;
-          card.appendChild(desc);
+      const card = document.createElement('div');
+      card.style.padding = '14px 16px';
+      card.style.borderRadius = '8px';
+      card.style.border = `1px solid ${meta.border}`;
+      card.style.background = meta.bg;
+      card.style.display = 'flex';
+      card.style.flexDirection = 'column';
+      card.style.gap = '10px';
+
+      // Top row: badge + initiative title (link)
+      const top = document.createElement('div');
+      top.style.display = 'flex';
+      top.style.justifyContent = 'space-between';
+      top.style.alignItems = 'center';
+      top.style.gap = '10px';
+      top.style.flexWrap = 'wrap';
+
+      const badge = document.createElement('span');
+      badge.style.fontSize = '11px';
+      badge.style.fontWeight = '600';
+      badge.style.letterSpacing = '0.4px';
+      badge.style.textTransform = 'uppercase';
+      badge.style.color = meta.color;
+      badge.textContent = meta.label;
+      top.appendChild(badge);
+
+      const titleLink = document.createElement('button');
+      titleLink.textContent = sig.title;
+      titleLink.style.background = 'transparent';
+      titleLink.style.border = 'none';
+      titleLink.style.color = 'var(--text-dim)';
+      titleLink.style.fontSize = '12px';
+      titleLink.style.cursor = 'pointer';
+      titleLink.style.padding = '0';
+      titleLink.style.textAlign = 'right';
+      titleLink.style.maxWidth = '60%';
+      titleLink.style.overflow = 'hidden';
+      titleLink.style.textOverflow = 'ellipsis';
+      titleLink.style.whiteSpace = 'nowrap';
+      titleLink.title = 'Scroll to initiative';
+      titleLink.onclick = () => {
+        initiativesState.expandedIds.add(sig.initiativeId);
+        loadInitiatives().then(() => {
+          const target = document.getElementById('iniCard-' + sig.initiativeId);
+          if (target) target.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        });
+      };
+      top.appendChild(titleLink);
+
+      card.appendChild(top);
+
+      // The question / detail (the headline of the card)
+      const detail = document.createElement('div');
+      detail.style.fontSize = '15px';
+      detail.style.lineHeight = '1.4';
+      detail.style.color = 'var(--text)';
+      detail.textContent = sig.detail || '(no detail)';
+      card.appendChild(detail);
+
+      // Action row
+      const actions = document.createElement('div');
+      actions.style.display = 'flex';
+      actions.style.gap = '8px';
+      actions.style.flexWrap = 'wrap';
+      actions.style.alignItems = 'center';
+
+      if (sig.reason === 'ready-to-advance') {
+        const next = nextPendingPhase(ini);
+        if (next) {
+          const startBtn = primaryButton(`Start: ${next.name}`, async () => {
+            await initiativeAction(`/initiatives/${ini.id}/phase/${next.id}`, 'POST', { status: 'in-progress' }, `Started ${next.name}`);
+          });
+          actions.appendChild(startBtn);
+        }
+      } else if (sig.reason === 'needs-user') {
+        const ack = primaryButton('Acknowledge', async () => {
+          await initiativeAction(`/initiatives/${ini.id}`, 'PATCH', { needsUser: false, needsUserReason: null }, 'Acknowledged');
+        });
+        actions.appendChild(ack);
+      } else if (sig.reason === 'next-check-due' || sig.reason === 'stale') {
+        const touch = secondaryButton('Mark touched', async () => {
+          await initiativeAction(`/initiatives/${ini.id}`, 'PATCH', { needsUser: ini.needsUser ?? false }, 'Updated');
+        });
+        actions.appendChild(touch);
+      }
+
+      // Link buttons (PR / topic / spec) from initiative
+      if (Array.isArray(ini.links)) {
+        for (const link of ini.links) {
+          if (link.url && /^https?:\/\//.test(link.url)) {
+            const linkBtn = secondaryButton(link.label || link.type || 'Open', () => {
+              window.open(link.url, '_blank', 'noopener');
+            });
+            actions.appendChild(linkBtn);
+          }
+        }
+      }
+
+      card.appendChild(actions);
+      return card;
+    }
+
+    function primaryButton(label, onClick) {
+      const b = document.createElement('button');
+      b.textContent = label;
+      b.style.padding = '6px 14px';
+      b.style.fontSize = '13px';
+      b.style.fontWeight = '500';
+      b.style.borderRadius = '6px';
+      b.style.background = 'var(--accent)';
+      b.style.color = '#fff';
+      b.style.border = '1px solid var(--accent)';
+      b.style.cursor = 'pointer';
+      b.onclick = async () => {
+        b.disabled = true;
+        b.style.opacity = '0.6';
+        try { await onClick(); } finally { /* reload handles repaint */ }
+      };
+      return b;
+    }
+
+    function secondaryButton(label, onClick) {
+      const b = document.createElement('button');
+      b.textContent = label;
+      b.style.padding = '6px 12px';
+      b.style.fontSize = '12px';
+      b.style.borderRadius = '6px';
+      b.style.background = 'transparent';
+      b.style.color = 'var(--text-dim)';
+      b.style.border = '1px solid var(--border)';
+      b.style.cursor = 'pointer';
+      b.onclick = async () => { try { await onClick(); } catch {} };
+      return b;
+    }
+
+    async function initiativeAction(path, method, body, successMsg) {
+      try {
+        const res = await apiFetch(path, {
+          method,
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body || {}),
+        });
+        if (typeof showToast === 'function') showToast(successMsg);
+        await loadInitiatives();
+        return res;
+      } catch (err) {
+        const msg = err && err.message ? err.message : 'Action failed';
+        if (typeof showToast === 'function') showToast(msg, 'error');
+        else alert(msg);
+      }
+    }
+
+    function renderInitiativeCard(ini) {
+      const card = document.createElement('div');
+      card.id = 'iniCard-' + ini.id;
+      card.style.padding = '14px 16px';
+      card.style.borderRadius = '8px';
+      card.style.border = '1px solid var(--border)';
+      card.style.background = 'var(--panel)';
+      card.style.display = 'flex';
+      card.style.flexDirection = 'column';
+      card.style.gap = '10px';
+      card.style.cursor = 'pointer';
+      card.title = 'Click to expand';
+
+      const expanded = initiativesState.expandedIds.has(ini.id);
+
+      // Title row
+      const titleRow = document.createElement('div');
+      titleRow.style.display = 'flex';
+      titleRow.style.justifyContent = 'space-between';
+      titleRow.style.alignItems = 'baseline';
+      titleRow.style.gap = '12px';
+
+      const titleEl = document.createElement('div');
+      titleEl.style.fontWeight = '600';
+      titleEl.style.fontSize = '14px';
+      titleEl.style.flex = '1';
+      titleEl.textContent = ini.title || ini.id || '(untitled)';
+      titleRow.appendChild(titleEl);
+
+      const touched = document.createElement('div');
+      touched.style.fontSize = '11px';
+      touched.style.color = 'var(--text-dim)';
+      touched.style.whiteSpace = 'nowrap';
+      touched.textContent = relativeTimeShort(ini.lastTouchedAt);
+      titleRow.appendChild(touched);
+      card.appendChild(titleRow);
+
+      // One-line summary (collapsed) or full description (expanded)
+      if (ini.description) {
+        const desc = document.createElement('div');
+        desc.style.fontSize = '13px';
+        desc.style.color = 'var(--text-dim)';
+        desc.style.lineHeight = '1.45';
+        desc.textContent = expanded ? ini.description : firstSentence(ini.description, 110);
+        card.appendChild(desc);
+      }
+
+      // Progress bar + phase summary
+      if (Array.isArray(ini.phases) && ini.phases.length > 0) {
+        const total = ini.phases.length;
+        const done = ini.phases.filter(p => p.status === 'done').length;
+        const blocked = ini.phases.some(p => p.status === 'blocked');
+        const pct = Math.round((done / total) * 100);
+        const cur = activePhase(ini);
+
+        const progRow = document.createElement('div');
+        progRow.style.display = 'flex';
+        progRow.style.alignItems = 'center';
+        progRow.style.gap = '10px';
+
+        const barOuter = document.createElement('div');
+        barOuter.style.flex = '1';
+        barOuter.style.height = '6px';
+        barOuter.style.borderRadius = '999px';
+        barOuter.style.background = 'var(--bg-dim)';
+        barOuter.style.overflow = 'hidden';
+        const barInner = document.createElement('div');
+        barInner.style.height = '100%';
+        barInner.style.width = pct + '%';
+        barInner.style.background = blocked ? '#d65f5f' : 'var(--accent)';
+        barInner.style.transition = 'width 0.3s';
+        barOuter.appendChild(barInner);
+        progRow.appendChild(barOuter);
+
+        const progLabel = document.createElement('div');
+        progLabel.style.fontSize = '11px';
+        progLabel.style.color = 'var(--text-dim)';
+        progLabel.style.whiteSpace = 'nowrap';
+        const curName = cur && cur.status !== 'done' ? ` · ${cur.name.replace(/^Phase\s*[-—]?\s*/, '').replace(/\s—.*$/, '')}` : '';
+        progLabel.textContent = `${done}/${total} phases${curName}`;
+        progRow.appendChild(progLabel);
+
+        if (Array.isArray(ini.blockers) && ini.blockers.length > 0) {
+          const blockerDot = document.createElement('span');
+          blockerDot.style.fontSize = '11px';
+          blockerDot.style.color = '#d65f5f';
+          blockerDot.style.whiteSpace = 'nowrap';
+          blockerDot.textContent = `● ${ini.blockers.length} blocker${ini.blockers.length === 1 ? '' : 's'}`;
+          progRow.appendChild(blockerDot);
         }
 
+        card.appendChild(progRow);
+      }
+
+      // Expanded detail
+      if (expanded) {
         // Phase pills
         if (Array.isArray(ini.phases) && ini.phases.length > 0) {
           const phaseRow = document.createElement('div');
           phaseRow.style.display = 'flex';
           phaseRow.style.gap = '6px';
           phaseRow.style.flexWrap = 'wrap';
-          phaseRow.style.marginBottom = '8px';
+          phaseRow.style.marginTop = '4px';
           const phaseColors = {
-            pending: 'var(--text-dim)',
-            'in-progress': 'var(--accent)',
-            done: '#4a9a4a',
-            blocked: '#d65f5f',
+            pending:       { fg: 'var(--text-dim)', bg: 'transparent' },
+            'in-progress': { fg: '#fff',             bg: 'var(--accent)' },
+            done:          { fg: '#4a9a4a',         bg: 'rgba(74,154,74,0.12)' },
+            blocked:       { fg: '#d65f5f',         bg: 'rgba(214,95,95,0.12)' },
           };
           for (const p of ini.phases) {
+            const c = phaseColors[p.status] || phaseColors.pending;
             const pill = document.createElement('span');
             pill.style.fontSize = '11px';
-            pill.style.padding = '2px 8px';
+            pill.style.padding = '3px 8px';
             pill.style.borderRadius = '4px';
-            pill.style.border = `1px solid ${phaseColors[p.status] || 'var(--border)'}`;
-            pill.style.color = phaseColors[p.status] || 'var(--text)';
-            pill.textContent = `${p.name} · ${p.status}`;
+            pill.style.border = `1px solid ${c.fg === '#fff' ? 'var(--accent)' : c.fg}`;
+            pill.style.color = c.fg;
+            pill.style.background = c.bg;
+            const shortName = p.name.replace(/^Phase\s*[-—]?\s*/, 'P');
+            pill.textContent = `${shortName} · ${p.status}`;
             phaseRow.appendChild(pill);
           }
           card.appendChild(phaseRow);
         }
 
-        // Meta row
-        const meta = document.createElement('div');
-        meta.style.fontSize = '11px';
-        meta.style.color = 'var(--text-dim)';
-        const lastTouched = ini.lastTouchedAt ? ini.lastTouchedAt.slice(0, 10) : '';
-        const needsUser = ini.needsUser ? ' · needs you' : '';
-        const blockerCount = Array.isArray(ini.blockers) && ini.blockers.length > 0
-          ? ` · ${ini.blockers.length} blocker${ini.blockers.length === 1 ? '' : 's'}`
-          : '';
-        meta.textContent = `Last touched: ${lastTouched}${needsUser}${blockerCount}`;
-        card.appendChild(meta);
-
-        if (ini.needsUser && ini.needsUserReason) {
-          const reason = document.createElement('div');
-          reason.style.fontSize = '12px';
-          reason.style.marginTop = '4px';
-          reason.style.color = '#e27d3b';
-          reason.textContent = `→ ${ini.needsUserReason}`;
-          card.appendChild(reason);
+        // Links
+        if (Array.isArray(ini.links) && ini.links.length > 0) {
+          const linkRow = document.createElement('div');
+          linkRow.style.display = 'flex';
+          linkRow.style.gap = '6px';
+          linkRow.style.flexWrap = 'wrap';
+          linkRow.style.marginTop = '4px';
+          for (const link of ini.links) {
+            const a = document.createElement('a');
+            a.textContent = link.label || link.type || 'link';
+            if (link.url) {
+              a.href = link.url;
+              a.target = '_blank';
+              a.rel = 'noopener';
+            }
+            a.style.fontSize = '12px';
+            a.style.color = 'var(--accent)';
+            a.style.padding = '3px 8px';
+            a.style.border = '1px solid var(--border)';
+            a.style.borderRadius = '4px';
+            a.style.textDecoration = 'none';
+            a.onclick = (e) => { e.stopPropagation(); };
+            linkRow.appendChild(a);
+          }
+          card.appendChild(linkRow);
         }
 
-        list.appendChild(card);
+        // Inline actions: advance current phase
+        const cur = activePhase(ini);
+        if (cur && cur.status !== 'done') {
+          const actionRow = document.createElement('div');
+          actionRow.style.display = 'flex';
+          actionRow.style.gap = '8px';
+          actionRow.style.marginTop = '4px';
+          actionRow.style.flexWrap = 'wrap';
+          if (cur.status === 'pending') {
+            actionRow.appendChild(secondaryButton(`▶ Start ${cur.name.replace(/^Phase\s*[-—]?\s*/, '')}`, async (e) => {
+              await initiativeAction(`/initiatives/${ini.id}/phase/${cur.id}`, 'POST', { status: 'in-progress' }, `Started`);
+            }));
+          }
+          if (cur.status === 'in-progress') {
+            actionRow.appendChild(secondaryButton(`✓ Mark done`, async () => {
+              await initiativeAction(`/initiatives/${ini.id}/phase/${cur.id}`, 'POST', { status: 'done' }, `Marked done`);
+            }));
+            actionRow.appendChild(secondaryButton(`⏸ Block`, async () => {
+              await initiativeAction(`/initiatives/${ini.id}/phase/${cur.id}`, 'POST', { status: 'blocked' }, `Marked blocked`);
+            }));
+          }
+          if (cur.status === 'blocked') {
+            actionRow.appendChild(secondaryButton(`▶ Resume`, async () => {
+              await initiativeAction(`/initiatives/${ini.id}/phase/${cur.id}`, 'POST', { status: 'in-progress' }, `Resumed`);
+            }));
+          }
+          // Stop propagation so the button click doesn't toggle expand
+          actionRow.addEventListener('click', e => e.stopPropagation());
+          card.appendChild(actionRow);
+        }
       }
+
+      // Click anywhere on card toggles expand
+      card.addEventListener('click', () => {
+        if (initiativesState.expandedIds.has(ini.id)) initiativesState.expandedIds.delete(ini.id);
+        else initiativesState.expandedIds.add(ini.id);
+        loadInitiatives();
+      });
+
+      return card;
     }
 
     // ── Commitments Tab (PROMISE-BEACON-SPEC — Open Promises) ────
