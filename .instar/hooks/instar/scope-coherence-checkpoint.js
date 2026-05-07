@@ -16,14 +16,18 @@ const http = _r('http');
 
 const STATE_FILE = path.join('.instar', 'state', 'scope-coherence.json');
 const DEPTH_THRESHOLD = 20;
-const COOLDOWN_MS = 30 * 60 * 1000;  // 30 minutes
-const MIN_AGE_MS = 5 * 60 * 1000;    // 5 minutes
+const COOLDOWN_MS = 30 * 60 * 1000;  // 30 minutes — global, prevents nagging across sessions
+const MIN_AGE_MS = 5 * 60 * 1000;    // 5 minutes — per-session, lets fresh sessions settle
+
+function getSessionId() {
+  return process.env.INSTAR_SESSION_ID || ('manual-' + process.pid);
+}
 
 function loadState() {
   try {
     if (fs.existsSync(STATE_FILE)) return JSON.parse(fs.readFileSync(STATE_FILE, 'utf-8'));
   } catch {}
-  return { implementationDepth: 0 };
+  return { sessions: {} };
 }
 
 function saveState(state) {
@@ -52,9 +56,18 @@ let data = '';
 process.stdin.on('data', chunk => data += chunk);
 process.stdin.on('end', async () => {
   try {
+    // Never block headless/job sessions — no human to dismiss the block.
+    if (process.env.INSTAR_SESSION_ID && !process.env.TERM_PROGRAM) {
+      process.stdout.write(JSON.stringify({ decision: 'approve' }));
+      process.exit(0);
+      return;
+    }
+
     const state = loadState();
+    const sid = getSessionId();
+    const sess = state.sessions[sid];
     const now = Date.now();
-    const depth = state.implementationDepth || 0;
+    const depth = (sess && sess.implementationDepth) || 0;
 
     if (depth < DEPTH_THRESHOLD) {
       process.stdout.write(JSON.stringify({ decision: 'approve' }));
@@ -62,7 +75,7 @@ process.stdin.on('end', async () => {
       return;
     }
 
-    // Check cooldown
+    // Check cooldown (global — prevents nagging across sessions)
     if (state.lastCheckpointPrompt) {
       const elapsed = now - new Date(state.lastCheckpointPrompt).getTime();
       if (elapsed < COOLDOWN_MS) {
@@ -72,9 +85,9 @@ process.stdin.on('end', async () => {
       }
     }
 
-    // Check minimum session age
-    if (state.sessionStart) {
-      const age = now - new Date(state.sessionStart).getTime();
+    // Check minimum session age (per-session)
+    if (sess && sess.sessionStart) {
+      const age = now - new Date(sess.sessionStart).getTime();
       if (age < MIN_AGE_MS) {
         process.stdout.write(JSON.stringify({ decision: 'approve' }));
         process.exit(0);
@@ -85,7 +98,7 @@ process.stdin.on('end', async () => {
     // Fetch active job context from server
     const jobData = await fetchActiveJob();
     const dismissed = state.checkpointsDismissed || 0;
-    const docsRead = state.sessionDocsRead || [];
+    const docsRead = (sess && sess.docsRead) || [];
 
     let jobContext = '';
     if (jobData && jobData.active && jobData.job) {
